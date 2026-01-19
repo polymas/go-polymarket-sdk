@@ -584,6 +584,55 @@ type Series struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// UnmarshalJSON 实现Series的自定义JSON反序列化，处理id可能是字符串或数字的情况
+func (s *Series) UnmarshalJSON(data []byte) error {
+	// 使用临时结构体来解析JSON
+	var temp struct {
+		ID          interface{} `json:"id"` // 可能是字符串或数字
+		Slug        string       `json:"slug"`
+		Title       string       `json:"title"`
+		Description string       `json:"description"`
+		Recurrence  string       `json:"recurrence"`
+		Closed      bool         `json:"closed"`
+		CreatedAt   time.Time    `json:"created_at"`
+		UpdatedAt   time.Time    `json:"updated_at"`
+	}
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// 复制字段
+	s.Slug = temp.Slug
+	s.Title = temp.Title
+	s.Description = temp.Description
+	s.Recurrence = temp.Recurrence
+	s.Closed = temp.Closed
+	s.CreatedAt = temp.CreatedAt
+	s.UpdatedAt = temp.UpdatedAt
+
+	// 处理id（可能是字符串或数字）
+	switch v := temp.ID.(type) {
+	case float64:
+		s.SeriesID = int(v)
+	case int:
+		s.SeriesID = v
+	case int64:
+		s.SeriesID = int(v)
+	case string:
+		// 尝试解析为整数
+		if parsed, err := strconv.Atoi(v); err == nil {
+			s.SeriesID = parsed
+		} else {
+			return fmt.Errorf("failed to parse series id as int: %w", err)
+		}
+	default:
+		return fmt.Errorf("unexpected series id type: %T", v)
+	}
+
+	return nil
+}
+
 // Team 表示体育团队
 type Team struct {
 	TeamID       int       `json:"id"`

@@ -69,6 +69,45 @@ type Price struct {
 	Price float64 `json:"price"`
 }
 
+// UnmarshalJSON 实现Price的自定义JSON反序列化，处理price可能是字符串或数字的情况
+func (p *Price) UnmarshalJSON(data []byte) error {
+	// 使用临时结构体来解析JSON
+	var temp struct {
+		TokenID string      `json:"token_id"`
+		Side    string      `json:"side"`
+		Price   interface{} `json:"price"` // 可能是数字或字符串
+	}
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// 复制字段
+	p.TokenID = temp.TokenID
+	p.Side = temp.Side
+
+	// 处理price（可能是数字或字符串）
+	switch v := temp.Price.(type) {
+	case float64:
+		p.Price = v
+	case int:
+		p.Price = float64(v)
+	case int64:
+		p.Price = float64(v)
+	case string:
+		// 尝试解析为浮点数
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			p.Price = parsed
+		} else {
+			return fmt.Errorf("failed to parse price as float: %w", err)
+		}
+	default:
+		return fmt.Errorf("unexpected price type: %T", v)
+	}
+
+	return nil
+}
+
 // BidAsk 表示买卖价格
 type BidAsk struct {
 	BUY  *float64 `json:"BUY,omitempty"`

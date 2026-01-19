@@ -161,6 +161,68 @@ type Trade struct {
 	TakerOnly   bool       `json:"taker_only"`
 }
 
+// UnmarshalJSON 实现Trade的自定义JSON反序列化，处理timestamp可能是数字或字符串的情况
+func (t *Trade) UnmarshalJSON(data []byte) error {
+	// 使用临时结构体来解析JSON
+	var temp struct {
+		TradeID     string     `json:"id"`
+		ConditionID Keccak256  `json:"market"`
+		TokenID     string     `json:"asset_id"`
+		Side        OrderSide  `json:"side"`
+		Price       float64    `json:"price"`
+		Size        float64    `json:"size"`
+		CashAmount  float64    `json:"cash_amount"`
+		TokenAmount float64    `json:"token_amount"`
+		Timestamp   interface{} `json:"timestamp"` // 可能是数字或字符串
+		User        EthAddress `json:"user"`
+		TakerOnly   bool       `json:"taker_only"`
+	}
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// 复制字段
+	t.TradeID = temp.TradeID
+	t.ConditionID = temp.ConditionID
+	t.TokenID = temp.TokenID
+	t.Side = temp.Side
+	t.Price = temp.Price
+	t.Size = temp.Size
+	t.CashAmount = temp.CashAmount
+	t.TokenAmount = temp.TokenAmount
+	t.User = temp.User
+	t.TakerOnly = temp.TakerOnly
+
+	// 处理timestamp（可能是数字或字符串）
+	switch v := temp.Timestamp.(type) {
+	case float64:
+		// Unix时间戳（秒）
+		t.Timestamp = time.Unix(int64(v), 0)
+	case int64:
+		t.Timestamp = time.Unix(v, 0)
+	case int:
+		t.Timestamp = time.Unix(int64(v), 0)
+	case string:
+		// 尝试解析为RFC3339格式
+		if parsed, err := time.Parse(time.RFC3339, v); err == nil {
+			t.Timestamp = parsed
+		} else {
+			// 尝试解析为Unix时间戳字符串
+			if ts, err := json.Number(v).Int64(); err == nil {
+				t.Timestamp = time.Unix(ts, 0)
+			} else {
+				// 如果都失败，使用当前时间
+				t.Timestamp = time.Now()
+			}
+		}
+	default:
+		t.Timestamp = time.Now()
+	}
+
+	return nil
+}
+
 // Activity 表示用户活动
 type Activity struct {
 	ActivityID  string     `json:"id"`
@@ -172,6 +234,64 @@ type Activity struct {
 	Cash        float64    `json:"cash"`
 	Timestamp   time.Time  `json:"timestamp"`
 	User        EthAddress `json:"user"`
+}
+
+// UnmarshalJSON 实现Activity的自定义JSON反序列化，处理timestamp可能是数字或字符串的情况
+func (a *Activity) UnmarshalJSON(data []byte) error {
+	// 使用临时结构体来解析JSON
+	var temp struct {
+		ActivityID  string     `json:"id"`
+		Type        string     `json:"type"`
+		ConditionID Keccak256  `json:"market"`
+		TokenID     string     `json:"asset_id"`
+		Side        *OrderSide `json:"side,omitempty"`
+		Tokens      float64    `json:"tokens"`
+		Cash        float64    `json:"cash"`
+		Timestamp   interface{} `json:"timestamp"` // 可能是数字或字符串
+		User        EthAddress `json:"user"`
+	}
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	// 复制字段
+	a.ActivityID = temp.ActivityID
+	a.Type = temp.Type
+	a.ConditionID = temp.ConditionID
+	a.TokenID = temp.TokenID
+	a.Side = temp.Side
+	a.Tokens = temp.Tokens
+	a.Cash = temp.Cash
+	a.User = temp.User
+
+	// 处理timestamp（可能是数字或字符串）
+	switch v := temp.Timestamp.(type) {
+	case float64:
+		// Unix时间戳（秒）
+		a.Timestamp = time.Unix(int64(v), 0)
+	case int64:
+		a.Timestamp = time.Unix(v, 0)
+	case int:
+		a.Timestamp = time.Unix(int64(v), 0)
+	case string:
+		// 尝试解析为RFC3339格式
+		if parsed, err := time.Parse(time.RFC3339, v); err == nil {
+			a.Timestamp = parsed
+		} else {
+			// 尝试解析为Unix时间戳字符串
+			if ts, err := json.Number(v).Int64(); err == nil {
+				a.Timestamp = time.Unix(ts, 0)
+			} else {
+				// 如果都失败，使用当前时间
+				a.Timestamp = time.Now()
+			}
+		}
+	default:
+		a.Timestamp = time.Now()
+	}
+
+	return nil
 }
 
 // HolderResponse 表示持有者信息
