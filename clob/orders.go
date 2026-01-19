@@ -15,7 +15,7 @@ import (
 )
 
 // GetOrders 获取活跃订单
-func (c *polymarketClobClient) GetOrders(orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error) {
+func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error) {
 	// Validate API credentials
 	if c.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -54,7 +54,7 @@ func (c *polymarketClobClient) GetOrders(orderID *types.Keccak256, conditionID *
 	for nextCursor != internal.EndCursor {
 		params["next_cursor"] = nextCursor
 
-		response, err := http.Get[types.PaginatedResponse[types.OpenOrder]](c.baseURL, internal.Orders, params, http.WithHeaders(headers))
+		response, err := http.Get[types.PaginatedResponse[types.OpenOrder]](c.baseClient.baseURL, internal.Orders, params, http.WithHeaders(headers))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get orders: %w", err)
 		}
@@ -72,7 +72,7 @@ func (c *polymarketClobClient) GetOrders(orderID *types.Keccak256, conditionID *
 //   - tickSize 默认使用 0.001
 //   - negRisk 默认使用 false，如果出现签名错误则使用 true 重试
 //   - 统一检查所有订单的 price 是否符合条件
-func (c *polymarketClobClient) CreateAndPostOrders(
+func (c *orderClientImpl) CreateAndPostOrders(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 ) ([]types.OrderPostResponse, error) {
@@ -147,7 +147,7 @@ func (c *polymarketClobClient) CreateAndPostOrders(
 //   - negRisk 默认使用 false，如果是重试调用则使用 true
 //
 // isRetry: 是否为重试调用，如果是则使用 negRisk=true，且不再进行重试（避免无限递归）
-func (c *polymarketClobClient) postOrdersBatch(
+func (c *orderClientImpl) postOrdersBatch(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 	isRetry ...bool,
@@ -257,7 +257,7 @@ func (c *polymarketClobClient) postOrdersBatch(
 
 		requestBody = append(requestBody, OrderRequest{
 			Order:     orderedOrder,
-			Owner:     c.deriveCreds.Key,
+			Owner:     c.baseClient.deriveCreds.Key,
 			OrderType: string(orderTypes[i]),
 		})
 	}
@@ -298,13 +298,13 @@ func (c *polymarketClobClient) postOrdersBatch(
 
 	// Create Level 2 headers (HMAC signature)
 	// Pass requestBody directly (struct/slice) to match Python behavior
-	headers, err := internal.CreateLevel2HeadersWithBody(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, requestBody, false)
+	headers, err := internal.CreateLevel2HeadersWithBody(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, requestBody, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
 	// Make POST request using PostRaw to send pre-formatted JSON (with spaces matching Python's json.dumps)
-	responseBody, err := http.PostRaw(c.baseURL, internal.PostOrders, bodyJSON, http.WithHeaders(headers))
+	responseBody, err := http.PostRaw(c.baseClient.baseURL, internal.PostOrders, bodyJSON, http.WithHeaders(headers))
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +395,7 @@ func (c *polymarketClobClient) postOrdersBatch(
 }
 
 // createSignedOrder creates a signed order using go-order-utils
-func (c *polymarketClobClient) createSignedOrder(
+func (c *orderClientImpl) createSignedOrder(
 	orderArgs types.OrderArgs,
 	tickSize types.TickSize,
 	negRisk bool,
@@ -457,7 +457,7 @@ func (c *polymarketClobClient) createSignedOrder(
 
 	// Determine signature type
 	var sigType ordermodel.SignatureType
-	switch c.signatureType {
+	switch c.baseClient.signatureType {
 	case 0:
 		sigType = ordermodel.EOA
 	case 1:
@@ -472,15 +472,15 @@ func (c *polymarketClobClient) createSignedOrder(
 	// IMPORTANT: For proxy wallets (signatureType=1), maker should be proxy address (funder),
 	// while signer should be base address. For EOA (signatureType=0), both are base address.
 	// Python: maker=self.funder (proxy address for proxy wallet), signer=self.signer.address() (base address)
-	baseAddr := string(c.web3Client.GetBaseAddress())
+	baseAddr := string(c.baseClient.web3Client.GetBaseAddress())
 	makerAddr := baseAddr
 	signerAddr := baseAddr
 
 	// For proxy wallet, maker should be proxy address (funder)
-	if c.signatureType == types.ProxySignatureType || c.signatureType == types.SafeSignatureType {
+	if c.baseClient.signatureType == types.ProxySignatureType || c.baseClient.signatureType == types.SafeSignatureType {
 		// Use proxy address as maker (funder) and base address as signer
 		// proxyAddress is already set during initialization
-		makerAddr = string(c.proxyAddress)
+		makerAddr = string(c.baseClient.proxyAddress)
 		signerAddr = baseAddr
 	} else {
 		// For EOA, both are base address
@@ -503,7 +503,7 @@ func (c *polymarketClobClient) createSignedOrder(
 	}
 
 	// Build signed order
-	signedOrder, err := c.orderBuilder.BuildSignedOrder(c.web3Client.GetPrivateKey(), orderData, verifyingContract)
+	signedOrder, err := c.baseClient.orderBuilder.BuildSignedOrder(c.baseClient.web3Client.GetPrivateKey(), orderData, verifyingContract)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build signed order: %w", err)
 	}
@@ -512,7 +512,7 @@ func (c *polymarketClobClient) createSignedOrder(
 }
 
 // PostOrder 提交单个订单
-func (c *polymarketClobClient) PostOrder(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
+func (c *orderClientImpl) PostOrder(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
 	results, err := c.CreateAndPostOrders([]types.OrderArgs{orderArgs}, []types.OrderType{orderType})
 	if err != nil {
 		return nil, err
@@ -525,7 +525,7 @@ func (c *polymarketClobClient) PostOrder(orderArgs types.OrderArgs, orderType ty
 
 // CancelOrders cancels multiple orders
 // According to Polymarket API docs: DELETE /orders with body as string[] (orderID array)
-func (c *polymarketClobClient) CancelOrders(orderIDs []types.Keccak256) (*types.OrderCancelResponse, error) {
+func (c *orderClientImpl) CancelOrders(orderIDs []types.Keccak256) (*types.OrderCancelResponse, error) {
 	if len(orderIDs) == 0 {
 		return &types.OrderCancelResponse{
 			Canceled:    []types.Keccak256{},
@@ -566,42 +566,42 @@ func (c *polymarketClobClient) CancelOrders(orderIDs []types.Keccak256) (*types.
 
 	// 使用 CreateLevel2Headers，传入格式化后的 JSON 字符串 body
 	// 这样与 CancelAll 的处理方式一致，都使用 CreateLevel2Headers
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
 	// 执行请求，使用格式化后的 JSON body
-	return http.DeleteRaw[types.OrderCancelResponse](c.baseURL, internal.CancelOrders, bodyJSON, http.WithHeaders(headers))
+	return http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelOrders, bodyJSON, http.WithHeaders(headers))
 }
 
 // CancelOrder 取消单个订单
-func (c *polymarketClobClient) CancelOrder(orderID types.Keccak256) (*types.OrderCancelResponse, error) {
+func (c *orderClientImpl) CancelOrder(orderID types.Keccak256) (*types.OrderCancelResponse, error) {
 	return c.CancelOrders([]types.Keccak256{orderID})
 }
 
 // CancelAll cancels all orders
-func (c *polymarketClobClient) CancelAll() (*types.OrderCancelResponse, error) {
+func (c *orderClientImpl) CancelAll() (*types.OrderCancelResponse, error) {
 	requestArgs := &types.RequestArgs{
 		Method:      "DELETE",
 		RequestPath: internal.CancelAll,
 	}
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
-	return http.Delete[types.OrderCancelResponse](c.baseURL, internal.CancelAll, nil, http.WithHeaders(headers))
+	return http.Delete[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelAll, nil, http.WithHeaders(headers))
 }
 
 // CancelMarketOrders 取消指定市场的所有订单
-func (c *polymarketClobClient) CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error) {
+func (c *orderClientImpl) CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error) {
 	// Validate API credentials
-	if c.deriveCreds == nil {
+	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
 	}
-	if c.deriveCreds.Key == "" || c.deriveCreds.Secret == "" || c.deriveCreds.Passphrase == "" {
+	if c.baseClient.deriveCreds.Key == "" || c.baseClient.deriveCreds.Secret == "" || c.baseClient.deriveCreds.Passphrase == "" {
 		return nil, fmt.Errorf("API credentials incomplete: key=%v, secret=%v, passphrase=%v",
-			c.deriveCreds.Key != "", c.deriveCreds.Secret != "", c.deriveCreds.Passphrase != "")
+			c.baseClient.deriveCreds.Key != "", c.baseClient.deriveCreds.Secret != "", c.baseClient.deriveCreds.Passphrase != "")
 	}
 
 	// Build request body with condition_id
@@ -634,11 +634,11 @@ func (c *polymarketClobClient) CancelMarketOrders(conditionID types.Keccak256) (
 	requestArgs.Body = &requestBodyForSigning
 
 	// Create Level 2 headers
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
 	// Execute DELETE request with body
-	return http.DeleteRaw[types.OrderCancelResponse](c.baseURL, internal.CancelMarketOrders, bodyJSON, http.WithHeaders(headers))
+	return http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelMarketOrders, bodyJSON, http.WithHeaders(headers))
 }

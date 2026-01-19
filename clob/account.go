@@ -12,19 +12,19 @@ import (
 )
 
 // GetUSDCBalance gets USDC balance
-func (c *polymarketClobClient) GetUSDCBalance() (float64, error) {
-	return c.web3Client.GetUSDCBalance(c.proxyAddress)
+func (c *accountClientImpl) GetUSDCBalance() (float64, error) {
+	return c.baseClient.web3Client.GetUSDCBalance(c.baseClient.proxyAddress)
 }
 
 // GetBalanceAllowance 获取余额授权信息
-func (c *polymarketClobClient) GetBalanceAllowance() (*types.BalanceAllowance, error) {
+func (c *accountClientImpl) GetBalanceAllowance() (*types.BalanceAllowance, error) {
 	// Validate API credentials
-	if c.deriveCreds == nil {
+	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
 	}
-	if c.deriveCreds.Key == "" || c.deriveCreds.Secret == "" || c.deriveCreds.Passphrase == "" {
+	if c.baseClient.deriveCreds.Key == "" || c.baseClient.deriveCreds.Secret == "" || c.baseClient.deriveCreds.Passphrase == "" {
 		return nil, fmt.Errorf("API credentials incomplete: key=%v, secret=%v, passphrase=%v",
-			c.deriveCreds.Key != "", c.deriveCreds.Secret != "", c.deriveCreds.Passphrase != "")
+			c.baseClient.deriveCreds.Key != "", c.baseClient.deriveCreds.Secret != "", c.baseClient.deriveCreds.Passphrase != "")
 	}
 
 	// Set up authentication headers
@@ -34,23 +34,23 @@ func (c *polymarketClobClient) GetBalanceAllowance() (*types.BalanceAllowance, e
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	return http.Get[types.BalanceAllowance](c.baseURL, internal.GetBalanceAllowance, nil, http.WithHeaders(headers))
+	return http.Get[types.BalanceAllowance](c.baseClient.baseURL, internal.GetBalanceAllowance, nil, http.WithHeaders(headers))
 }
 
 // UpdateBalanceAllowance 更新余额授权
-func (c *polymarketClobClient) UpdateBalanceAllowance(amount float64) (*types.BalanceAllowance, error) {
+func (c *accountClientImpl) UpdateBalanceAllowance(amount float64) (*types.BalanceAllowance, error) {
 	// Validate API credentials
-	if c.deriveCreds == nil {
+	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
 	}
-	if c.deriveCreds.Key == "" || c.deriveCreds.Secret == "" || c.deriveCreds.Passphrase == "" {
+	if c.baseClient.deriveCreds.Key == "" || c.baseClient.deriveCreds.Secret == "" || c.baseClient.deriveCreds.Passphrase == "" {
 		return nil, fmt.Errorf("API credentials incomplete: key=%v, secret=%v, passphrase=%v",
-			c.deriveCreds.Key != "", c.deriveCreds.Secret != "", c.deriveCreds.Passphrase != "")
+			c.baseClient.deriveCreds.Key != "", c.baseClient.deriveCreds.Secret != "", c.baseClient.deriveCreds.Passphrase != "")
 	}
 
 	// Build request body
@@ -80,24 +80,24 @@ func (c *polymarketClobClient) UpdateBalanceAllowance(amount float64) (*types.Ba
 	}
 
 	// Create Level 2 headers
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
 	// Execute POST request
-	return http.Post[types.BalanceAllowance](c.baseURL, internal.UpdateBalanceAllowance, requestBody, http.WithHeaders(headers))
+	return http.Post[types.BalanceAllowance](c.baseClient.baseURL, internal.UpdateBalanceAllowance, requestBody, http.WithHeaders(headers))
 }
 
 // GetNotifications 获取通知列表
-func (c *polymarketClobClient) GetNotifications(limit int, offset int) ([]types.Notification, error) {
+func (c *accountClientImpl) GetNotifications(limit int, offset int) ([]types.Notification, error) {
 	// Validate API credentials
-	if c.deriveCreds == nil {
+	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
 	}
-	if c.deriveCreds.Key == "" || c.deriveCreds.Secret == "" || c.deriveCreds.Passphrase == "" {
+	if c.baseClient.deriveCreds.Key == "" || c.baseClient.deriveCreds.Secret == "" || c.baseClient.deriveCreds.Passphrase == "" {
 		return nil, fmt.Errorf("API credentials incomplete: key=%v, secret=%v, passphrase=%v",
-			c.deriveCreds.Key != "", c.deriveCreds.Secret != "", c.deriveCreds.Passphrase != "")
+			c.baseClient.deriveCreds.Key != "", c.baseClient.deriveCreds.Secret != "", c.baseClient.deriveCreds.Passphrase != "")
 	}
 
 	params := map[string]string{
@@ -112,12 +112,12 @@ func (c *polymarketClobClient) GetNotifications(limit int, offset int) ([]types.
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	result, err := http.Get[[]types.Notification](c.baseURL, internal.GetNotifications, params, http.WithHeaders(headers))
+	result, err := http.Get[[]types.Notification](c.baseClient.baseURL, internal.GetNotifications, params, http.WithHeaders(headers))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get notifications: %w", err)
 	}
@@ -130,14 +130,14 @@ func (c *polymarketClobClient) GetNotifications(limit int, offset int) ([]types.
 }
 
 // DropNotifications 删除通知
-func (c *polymarketClobClient) DropNotifications(notificationIDs []string) error {
+func (c *accountClientImpl) DropNotifications(notificationIDs []string) error {
 	// Validate API credentials
-	if c.deriveCreds == nil {
+	if c.baseClient.deriveCreds == nil {
 		return fmt.Errorf("API credentials not set")
 	}
-	if c.deriveCreds.Key == "" || c.deriveCreds.Secret == "" || c.deriveCreds.Passphrase == "" {
+	if c.baseClient.deriveCreds.Key == "" || c.baseClient.deriveCreds.Secret == "" || c.baseClient.deriveCreds.Passphrase == "" {
 		return fmt.Errorf("API credentials incomplete: key=%v, secret=%v, passphrase=%v",
-			c.deriveCreds.Key != "", c.deriveCreds.Secret != "", c.deriveCreds.Passphrase != "")
+			c.baseClient.deriveCreds.Key != "", c.baseClient.deriveCreds.Secret != "", c.baseClient.deriveCreds.Passphrase != "")
 	}
 
 	if len(notificationIDs) == 0 {
@@ -171,12 +171,12 @@ func (c *polymarketClobClient) DropNotifications(notificationIDs []string) error
 	}
 
 	// Create Level 2 headers
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
 	if err != nil {
 		return fmt.Errorf("failed to create headers: %w", err)
 	}
 
 	// Execute DELETE request
-	_, err = http.DeleteRaw[map[string]interface{}](c.baseURL, internal.DropNotifications, bodyJSON, http.WithHeaders(headers))
+	_, err = http.DeleteRaw[map[string]interface{}](c.baseClient.baseURL, internal.DropNotifications, bodyJSON, http.WithHeaders(headers))
 	return err
 }

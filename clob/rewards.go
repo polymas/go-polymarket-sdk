@@ -9,7 +9,7 @@ import (
 )
 
 // IsOrderScoring 检查订单是否计分
-func (c *polymarketClobClient) IsOrderScoring(orderID types.Keccak256) (bool, error) {
+func (c *rewardClientImpl) IsOrderScoring(orderID types.Keccak256) (bool, error) {
 	params := map[string]string{"order_id": string(orderID)}
 
 	var result struct {
@@ -18,7 +18,7 @@ func (c *polymarketClobClient) IsOrderScoring(orderID types.Keccak256) (bool, er
 
 	resp, err := http.Get[struct {
 		Scoring bool `json:"scoring"`
-	}](c.baseURL, internal.IsOrderScoring, params)
+	}](c.baseClient.baseURL, internal.IsOrderScoring, params)
 	if err != nil {
 		return false, fmt.Errorf("failed to check order scoring: %w", err)
 	}
@@ -28,7 +28,7 @@ func (c *polymarketClobClient) IsOrderScoring(orderID types.Keccak256) (bool, er
 }
 
 // AreOrdersScoring 批量检查订单是否计分
-func (c *polymarketClobClient) AreOrdersScoring(orderIDs []types.Keccak256) (map[types.Keccak256]bool, error) {
+func (c *rewardClientImpl) AreOrdersScoring(orderIDs []types.Keccak256) (map[types.Keccak256]bool, error) {
 	if len(orderIDs) == 0 {
 		return make(map[types.Keccak256]bool), nil
 	}
@@ -45,7 +45,7 @@ func (c *polymarketClobClient) AreOrdersScoring(orderIDs []types.Keccak256) (map
 
 	// Make POST request
 	var result map[string]bool
-	resp, err := http.Post[map[string]bool](c.baseURL, internal.AreOrdersScoring, requestBody)
+	resp, err := http.Post[map[string]bool](c.baseClient.baseURL, internal.AreOrdersScoring, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check orders scoring: %w", err)
 	}

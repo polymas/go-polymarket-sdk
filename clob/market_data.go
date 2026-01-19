@@ -11,8 +11,8 @@ import (
 )
 
 // GetTickSize 获取代币的tick大小
-func (c *polymarketClobClient) GetTickSize(tokenID string) (types.TickSize, error) {
-	if tickSize, ok := c.tickSizes[tokenID]; ok {
+func (c *marketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
+	if tickSize, ok := c.baseClient.tickSizes[tokenID]; ok {
 		return tickSize, nil
 	}
 
@@ -20,7 +20,7 @@ func (c *polymarketClobClient) GetTickSize(tokenID string) (types.TickSize, erro
 
 	// API may return minimum_tick_size as number or string, so we need to handle both
 	var rawResponse map[string]interface{}
-	resp, err := http.Get[map[string]interface{}](c.baseURL, internal.GetTickSize, params)
+	resp, err := http.Get[map[string]interface{}](c.baseClient.baseURL, internal.GetTickSize, params)
 	if err != nil {
 		return "", fmt.Errorf("failed to get tick size: %w", err)
 	}
@@ -48,7 +48,7 @@ func (c *polymarketClobClient) GetTickSize(tokenID string) (types.TickSize, erro
 	}
 
 	tickSize := types.TickSize(tickSizeStr)
-	c.tickSizes[tokenID] = tickSize
+	c.baseClient.tickSizes[tokenID] = tickSize
 	return tickSize, nil
 }
 
@@ -62,7 +62,7 @@ func (c *polymarketClobClient) GetTickSize(tokenID string) (types.TickSize, erro
 //   - 否则使用 userTickSize
 //
 // 3. 如果没有提供 userTickSize，使用从 API 获取的最小 tick size
-func (c *polymarketClobClient) ResolveTickSize(tokenID string, userTickSize *types.TickSize) (types.TickSize, error) {
+func (c *marketDataClientImpl) ResolveTickSize(tokenID string, userTickSize *types.TickSize) (types.TickSize, error) {
 	// 获取该 token 的最小 tick size
 	minTickSize, err := c.GetTickSize(tokenID)
 	if err != nil {
@@ -84,8 +84,8 @@ func (c *polymarketClobClient) ResolveTickSize(tokenID string, userTickSize *typ
 }
 
 // GetNegRisk 获取代币的负风险状态
-func (c *polymarketClobClient) GetNegRisk(tokenID string) (bool, error) {
-	if negRisk, ok := c.negRisk[tokenID]; ok {
+func (c *marketDataClientImpl) GetNegRisk(tokenID string) (bool, error) {
+	if negRisk, ok := c.baseClient.negRisk[tokenID]; ok {
 		return negRisk, nil
 	}
 
@@ -96,20 +96,20 @@ func (c *polymarketClobClient) GetNegRisk(tokenID string) (bool, error) {
 
 	resp, err := http.Get[struct {
 		NegRisk bool `json:"neg_risk"`
-	}](c.baseURL, internal.GetNegRisk, params)
+	}](c.baseClient.baseURL, internal.GetNegRisk, params)
 	if err != nil {
 		return false, fmt.Errorf("failed to get neg risk: %w", err)
 	}
 	result = *resp
 
-	c.negRisk[tokenID] = result.NegRisk
+	c.baseClient.negRisk[tokenID] = result.NegRisk
 	return result.NegRisk, nil
 }
 
 // GetOrderBook 获取代币的订单簿
-func (c *polymarketClobClient) GetOrderBook(tokenID string) (*types.OrderBookSummary, error) {
+func (c *marketDataClientImpl) GetOrderBook(tokenID string) (*types.OrderBookSummary, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.OrderBookSummary](c.baseURL, internal.GetOrderBook, params)
+	return http.Get[types.OrderBookSummary](c.baseClient.baseURL, internal.GetOrderBook, params)
 }
 
 // GetMultipleOrderBooks 批量获取多个订单簿摘要
@@ -117,7 +117,7 @@ func (c *polymarketClobClient) GetOrderBook(tokenID string) (*types.OrderBookSum
 // requests: 请求数组，每个元素包含 token_id（必需）和可选的 side（BUY/SELL）
 // 最大数组长度: 500
 // 返回: 订单簿摘要数组
-func (c *polymarketClobClient) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error) {
+func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error) {
 	// 验证请求数量
 	if len(requests) == 0 {
 		return nil, fmt.Errorf("请求数组不能为空")
@@ -139,7 +139,7 @@ func (c *polymarketClobClient) GetMultipleOrderBooks(requests []types.BookParams
 	}
 
 	// 发送 POST 请求
-	result, err := http.Post[[]types.OrderBookSummaryResponse](c.baseURL, internal.GetOrderBooks, requestBody)
+	result, err := http.Post[[]types.OrderBookSummaryResponse](c.baseClient.baseURL, internal.GetOrderBooks, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取订单簿失败: %w", err)
 	}
@@ -148,13 +148,13 @@ func (c *polymarketClobClient) GetMultipleOrderBooks(requests []types.BookParams
 }
 
 // GetMidpoint 获取单个代币的中间价
-func (c *polymarketClobClient) GetMidpoint(tokenID string) (*types.Midpoint, error) {
+func (c *marketDataClientImpl) GetMidpoint(tokenID string) (*types.Midpoint, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.Midpoint](c.baseURL, internal.MidPoint, params)
+	return http.Get[types.Midpoint](c.baseClient.baseURL, internal.MidPoint, params)
 }
 
 // GetMidpoints 批量获取多个代币的中间价
-func (c *polymarketClobClient) GetMidpoints(tokenIDs []string) ([]types.Midpoint, error) {
+func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint, error) {
 	if len(tokenIDs) == 0 {
 		return []types.Midpoint{}, nil
 	}
@@ -170,7 +170,7 @@ func (c *polymarketClobClient) GetMidpoints(tokenIDs []string) ([]types.Midpoint
 		}
 	}
 
-	result, err := http.Post[[]types.Midpoint](c.baseURL, internal.MidPoints, requestBody)
+	result, err := http.Post[[]types.Midpoint](c.baseClient.baseURL, internal.MidPoints, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取中间价失败: %w", err)
 	}
@@ -179,16 +179,16 @@ func (c *polymarketClobClient) GetMidpoints(tokenIDs []string) ([]types.Midpoint
 }
 
 // GetPrice 获取指定方向的价格
-func (c *polymarketClobClient) GetPrice(tokenID string, side types.OrderSide) (*types.Price, error) {
+func (c *marketDataClientImpl) GetPrice(tokenID string, side types.OrderSide) (*types.Price, error) {
 	params := map[string]string{
 		"token_id": tokenID,
 		"side":     string(side),
 	}
-	return http.Get[types.Price](c.baseURL, internal.Price, params)
+	return http.Get[types.Price](c.baseClient.baseURL, internal.Price, params)
 }
 
 // GetPrices 批量获取多个代币的价格
-func (c *polymarketClobClient) GetPrices(requests []types.BookParams) ([]types.Price, error) {
+func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.Price, error) {
 	if len(requests) == 0 {
 		return []types.Price{}, nil
 	}
@@ -207,7 +207,7 @@ func (c *polymarketClobClient) GetPrices(requests []types.BookParams) ([]types.P
 		}
 	}
 
-	result, err := http.Post[[]types.Price](c.baseURL, internal.GetPrices, requestBody)
+	result, err := http.Post[[]types.Price](c.baseClient.baseURL, internal.GetPrices, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败: %w", err)
 	}
@@ -216,13 +216,13 @@ func (c *polymarketClobClient) GetPrices(requests []types.BookParams) ([]types.P
 }
 
 // GetSpread 获取单个代币的价差
-func (c *polymarketClobClient) GetSpread(tokenID string) (*types.Spread, error) {
+func (c *marketDataClientImpl) GetSpread(tokenID string) (*types.Spread, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.Spread](c.baseURL, internal.GetSpread, params)
+	return http.Get[types.Spread](c.baseClient.baseURL, internal.GetSpread, params)
 }
 
 // GetSpreads 批量获取多个代币的价差
-func (c *polymarketClobClient) GetSpreads(tokenIDs []string) ([]types.Spread, error) {
+func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, error) {
 	if len(tokenIDs) == 0 {
 		return []types.Spread{}, nil
 	}
@@ -238,7 +238,7 @@ func (c *polymarketClobClient) GetSpreads(tokenIDs []string) ([]types.Spread, er
 		}
 	}
 
-	result, err := http.Post[[]types.Spread](c.baseURL, internal.GetSpreads, requestBody)
+	result, err := http.Post[[]types.Spread](c.baseClient.baseURL, internal.GetSpreads, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价差失败: %w", err)
 	}
@@ -247,13 +247,13 @@ func (c *polymarketClobClient) GetSpreads(tokenIDs []string) ([]types.Spread, er
 }
 
 // GetLastTradePrice 获取单个代币的最后成交价
-func (c *polymarketClobClient) GetLastTradePrice(tokenID string) (*types.LastTradePrice, error) {
+func (c *marketDataClientImpl) GetLastTradePrice(tokenID string) (*types.LastTradePrice, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.LastTradePrice](c.baseURL, internal.GetLastTradePrice, params)
+	return http.Get[types.LastTradePrice](c.baseClient.baseURL, internal.GetLastTradePrice, params)
 }
 
 // GetLastTradesPrices 批量获取多个代币的最后成交价
-func (c *polymarketClobClient) GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error) {
+func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error) {
 	if len(tokenIDs) == 0 {
 		return []types.LastTradePrice{}, nil
 	}
@@ -269,7 +269,7 @@ func (c *polymarketClobClient) GetLastTradesPrices(tokenIDs []string) ([]types.L
 		}
 	}
 
-	result, err := http.Post[[]types.LastTradePrice](c.baseURL, internal.GetLastTradesPrices, requestBody)
+	result, err := http.Post[[]types.LastTradePrice](c.baseClient.baseURL, internal.GetLastTradesPrices, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取最后成交价失败: %w", err)
 	}
@@ -278,9 +278,9 @@ func (c *polymarketClobClient) GetLastTradesPrices(tokenIDs []string) ([]types.L
 }
 
 // GetFeeRate 获取代币的手续费率（以 bps 为单位，1 bps = 0.01%）
-func (c *polymarketClobClient) GetFeeRate(tokenID string) (int, error) {
+func (c *marketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
 	// 检查缓存
-	if feeRate, ok := c.feeRates[tokenID]; ok {
+	if feeRate, ok := c.baseClient.feeRates[tokenID]; ok {
 		return feeRate, nil
 	}
 
@@ -288,7 +288,7 @@ func (c *polymarketClobClient) GetFeeRate(tokenID string) (int, error) {
 
 	// API 可能返回数字或字符串格式的 fee_rate
 	var rawResponse map[string]interface{}
-	resp, err := http.Get[map[string]interface{}](c.baseURL, internal.GetFeeRate, params)
+	resp, err := http.Get[map[string]interface{}](c.baseClient.baseURL, internal.GetFeeRate, params)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get fee rate: %w", err)
 	}
@@ -318,19 +318,19 @@ func (c *polymarketClobClient) GetFeeRate(tokenID string) (int, error) {
 	}
 
 	// 缓存结果
-	c.feeRates[tokenID] = feeRate
+	c.baseClient.feeRates[tokenID] = feeRate
 	return feeRate, nil
 }
 
 // GetTime 获取服务器时间
-func (c *polymarketClobClient) GetTime() (time.Time, error) {
+func (c *marketDataClientImpl) GetTime() (time.Time, error) {
 	var timeResponse struct {
 		Time string `json:"time"`
 	}
 
 	resp, err := http.Get[struct {
 		Time string `json:"time"`
-	}](c.baseURL, internal.Time, nil)
+	}](c.baseClient.baseURL, internal.Time, nil)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get server time: %w", err)
 	}

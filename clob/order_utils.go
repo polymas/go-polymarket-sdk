@@ -22,7 +22,7 @@ func isTickSizeSmaller(a types.TickSize, b types.TickSize) bool {
 }
 
 // calculateOrderAmounts calculates maker and taker amounts based on side, size, price, and tick size
-func (c *polymarketClobClient) calculateOrderAmounts(
+func (c *orderClientImpl) calculateOrderAmounts(
 	side types.OrderSide,
 	size float64,
 	price float64,
@@ -84,7 +84,7 @@ func (c *polymarketClobClient) calculateOrderAmounts(
 
 // roundNormal rounds a price to tick size using ROUND_HALF_UP (matching Python's round_normal)
 // Python: round_normal(x, sig_digits) uses Decimal.quantize(exp=Decimal(1).scaleb(-sig_digits), rounding=ROUND_HALF_UP)
-func (c *polymarketClobClient) roundNormal(price float64, tickSize float64) float64 {
+func (c *orderClientImpl) roundNormal(price float64, tickSize float64) float64 {
 	if tickSize <= 0 {
 		return price
 	}
@@ -103,7 +103,7 @@ func (c *polymarketClobClient) roundNormal(price float64, tickSize float64) floa
 
 // getDecimalPlacesFromTickSize calculates decimal places from tick size
 // tick_size 0.1 -> 1 decimal, 0.01 -> 2 decimals, 0.001 -> 3 decimals, 0.0001 -> 4 decimals
-func (c *polymarketClobClient) getDecimalPlacesFromTickSize(tickSize float64) int {
+func (c *orderClientImpl) getDecimalPlacesFromTickSize(tickSize float64) int {
 	if tickSize >= 0.1 {
 		return 1
 	} else if tickSize >= 0.01 {
@@ -116,7 +116,7 @@ func (c *polymarketClobClient) getDecimalPlacesFromTickSize(tickSize float64) in
 }
 
 // roundDown rounds down to specified decimal places
-func (c *polymarketClobClient) roundDown(val float64, decimals int) float64 {
+func (c *orderClientImpl) roundDown(val float64, decimals int) float64 {
 	multiplier := 1.0
 	for i := 0; i < decimals; i++ {
 		multiplier *= 10
@@ -128,7 +128,7 @@ func (c *polymarketClobClient) roundDown(val float64, decimals int) float64 {
 // 1. Get round_config.amount based on tick size (6 for 0.0001, 5 for 0.001, etc.)
 // 2. If decimal places > amount, try round_up to (amount + 4)
 // 3. If still > amount, round_down to amount
-func (c *polymarketClobClient) roundMakerAmount(amount float64, tickSize float64) float64 {
+func (c *orderClientImpl) roundMakerAmount(amount float64, tickSize float64) float64 {
 	// Determine round_config.amount from tick size (matching Python ROUNDING_CONFIG)
 	var amountDecimals int
 	if tickSize >= 0.1 {
@@ -162,7 +162,7 @@ func (c *polymarketClobClient) roundMakerAmount(amount float64, tickSize float64
 }
 
 // countDecimalPlaces counts the number of decimal places in a float
-func (c *polymarketClobClient) countDecimalPlaces(val float64) int {
+func (c *orderClientImpl) countDecimalPlaces(val float64) int {
 	// Convert to string to count decimal places
 	str := fmt.Sprintf("%.10f", val)
 	str = strings.TrimRight(str, "0")
@@ -178,7 +178,7 @@ func (c *polymarketClobClient) countDecimalPlaces(val float64) int {
 }
 
 // roundUp rounds up to specified decimal places
-func (c *polymarketClobClient) roundUp(val float64, decimals int) float64 {
+func (c *orderClientImpl) roundUp(val float64, decimals int) float64 {
 	multiplier := 1.0
 	for i := 0; i < decimals; i++ {
 		multiplier *= 10
