@@ -34,6 +34,70 @@ func TestRequestQuote(t *testing.T) {
 		}
 		t.Logf("RequestQuote returned: %+v", response)
 	})
+
+	// 测试无效tokenID
+	t.Run("InvalidTokenID", func(t *testing.T) {
+		request := types.RFQRequest{
+			TokenID: "invalid-token-id",
+			Side:    types.OrderSideBUY,
+			Size:    10.0,
+		}
+
+		_, err := client.RequestQuote(request)
+		if err != nil {
+			t.Logf("RequestQuote with invalid tokenID returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for invalid tokenID")
+		}
+	})
+
+	// 测试负数size
+	t.Run("NegativeSize", func(t *testing.T) {
+		request := types.RFQRequest{
+			TokenID: config.TestTokenID,
+			Side:    types.OrderSideBUY,
+			Size:    -10.0,
+		}
+
+		_, err := client.RequestQuote(request)
+		if err != nil {
+			t.Logf("RequestQuote with negative size returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for negative size")
+		}
+	})
+
+	// 测试0 size
+	t.Run("ZeroSize", func(t *testing.T) {
+		request := types.RFQRequest{
+			TokenID: config.TestTokenID,
+			Side:    types.OrderSideBUY,
+			Size:    0.0,
+		}
+
+		_, err := client.RequestQuote(request)
+		if err != nil {
+			t.Logf("RequestQuote with zero size returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for zero size")
+		}
+	})
+
+	// 测试极大size
+	t.Run("LargeSize", func(t *testing.T) {
+		request := types.RFQRequest{
+			TokenID: config.TestTokenID,
+			Side:    types.OrderSideBUY,
+			Size:    1e15,
+		}
+
+		response, err := client.RequestQuote(request)
+		if err != nil {
+			t.Logf("RequestQuote with large size returned error (may be expected): %v", err)
+		} else if response != nil {
+			t.Logf("RequestQuote with large size succeeded")
+		}
+	})
 }
 
 func TestGetQuotes(t *testing.T) {
@@ -72,6 +136,31 @@ func TestGetQuotes(t *testing.T) {
 			t.Fatal("GetQuotes returned nil")
 		}
 		t.Logf("GetQuotes returned %d quotes", len(quotes))
+	})
+
+	// 测试无效requestID
+	t.Run("InvalidRequestID", func(t *testing.T) {
+		_, err := client.GetQuotes("invalid-request-id")
+		if err != nil {
+			t.Logf("GetQuotes with invalid requestID returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for invalid requestID")
+		}
+	})
+
+	// 测试不存在的requestID
+	t.Run("NonExistentRequestID", func(t *testing.T) {
+		nonExistentID := "00000000-0000-0000-0000-000000000000"
+		quotes, err := client.GetQuotes(nonExistentID)
+		if err != nil {
+			t.Logf("GetQuotes with non-existent requestID returned error: %v", err)
+		} else if quotes != nil {
+			if len(quotes) == 0 {
+				t.Logf("GetQuotes with non-existent requestID returned empty array (expected)")
+			} else {
+				t.Logf("GetQuotes with non-existent requestID returned %d quotes", len(quotes))
+			}
+		}
 	})
 }
 
@@ -156,5 +245,51 @@ func TestCancelRequest(t *testing.T) {
 			t.Fatalf("CancelRequest failed: %v", err)
 		}
 		t.Logf("CancelRequest succeeded")
+	})
+
+	// 测试无效requestID
+	t.Run("InvalidRequestID", func(t *testing.T) {
+		err := client.CancelRequest("invalid-request-id")
+		if err != nil {
+			t.Logf("CancelRequest with invalid requestID returned error (expected): %v", err)
+		} else {
+			t.Logf("CancelRequest with invalid requestID succeeded (may be acceptable)")
+		}
+	})
+
+	// 测试已取消的请求
+	t.Run("AlreadyCanceled", func(t *testing.T) {
+		if config.TestTokenID == "" {
+			t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set")
+		}
+
+		request := types.RFQRequest{
+			TokenID: config.TestTokenID,
+			Side:    types.OrderSideBUY,
+			Size:    10.0,
+		}
+
+		requestResponse, err := client.RequestQuote(request)
+		if err != nil {
+			t.Fatalf("RequestQuote failed: %v", err)
+		}
+		if requestResponse == nil || requestResponse.RequestID == "" {
+			t.Skip("Skipping test: No request ID returned")
+		}
+
+		// 第一次取消
+		err = client.CancelRequest(requestResponse.RequestID)
+		if err != nil {
+			t.Logf("First cancel failed: %v", err)
+			return
+		}
+
+		// 再次尝试取消同一个请求
+		err = client.CancelRequest(requestResponse.RequestID)
+		if err != nil {
+			t.Logf("CancelRequest with already canceled request returned error (expected): %v", err)
+		} else {
+			t.Logf("CancelRequest with already canceled request succeeded (may be acceptable)")
+		}
 	})
 }
