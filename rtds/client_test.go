@@ -23,6 +23,13 @@ func TestSetOnPriceUpdate(t *testing.T) {
 			t.Logf("SetOnPriceUpdate succeeded (callback will be called on message)")
 		}
 	})
+
+	// 测试nil回调
+	t.Run("NilCallback", func(t *testing.T) {
+		client.SetOnPriceUpdate(nil)
+		// 设置nil回调不应该panic
+		t.Logf("SetOnPriceUpdate with nil callback succeeded")
+	})
 }
 
 func TestSetOnCommentUpdate(t *testing.T) {
@@ -38,6 +45,13 @@ func TestSetOnCommentUpdate(t *testing.T) {
 		if !called {
 			t.Logf("SetOnCommentUpdate succeeded (callback will be called on message)")
 		}
+	})
+
+	// 测试nil回调
+	t.Run("NilCallback", func(t *testing.T) {
+		client.SetOnCommentUpdate(nil)
+		// 设置nil回调不应该panic
+		t.Logf("SetOnCommentUpdate with nil callback succeeded")
 	})
 }
 
@@ -107,6 +121,25 @@ func TestStart(t *testing.T) {
 
 		if !hasPriceUpdate && !hasCommentUpdate {
 			t.Logf("No updates received (may be expected if no activity)")
+		}
+	})
+
+	// 测试重复启动
+	t.Run("DuplicateStart", func(t *testing.T) {
+		err := client.Start()
+		if err != nil {
+			t.Fatalf("First Start failed: %v", err)
+		}
+		defer client.Stop()
+
+		time.Sleep(1 * time.Second)
+
+		// 尝试再次启动
+		err = client.Start()
+		if err != nil {
+			t.Logf("Duplicate Start returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for duplicate Start")
 		}
 	})
 }
@@ -194,6 +227,75 @@ func TestSubscribePrices(t *testing.T) {
 
 		client.Stop()
 		time.Sleep(1 * time.Second)
+	})
+
+	// 测试未启动时调用
+	t.Run("BeforeStart", func(t *testing.T) {
+		tokenIDs := []string{config.TestTokenID}
+		err := client.SubscribePrices(tokenIDs)
+		if err != nil {
+			t.Logf("SubscribePrices before Start returned error (expected): %v", err)
+		} else {
+			t.Logf("SubscribePrices before Start succeeded (may queue subscription)")
+		}
+	})
+
+	// 测试空tokenIDs
+	t.Run("EmptyTokenIDs", func(t *testing.T) {
+		err := client.Start()
+		if err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+		defer client.Stop()
+
+		time.Sleep(2 * time.Second)
+
+		err = client.SubscribePrices([]string{})
+		if err != nil {
+			t.Logf("SubscribePrices with empty tokenIDs returned error (expected): %v", err)
+		} else {
+			t.Logf("SubscribePrices with empty tokenIDs succeeded")
+		}
+	})
+
+	// 测试大量tokenIDs
+	t.Run("LargeTokenIDs", func(t *testing.T) {
+		err := client.Start()
+		if err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+		defer client.Stop()
+
+		time.Sleep(2 * time.Second)
+
+		tokenIDs := make([]string, 100)
+		for i := 0; i < 100; i++ {
+			tokenIDs[i] = config.TestTokenID
+		}
+		err = client.SubscribePrices(tokenIDs)
+		if err != nil {
+			t.Logf("SubscribePrices with large tokenIDs returned error: %v", err)
+		} else {
+			t.Logf("SubscribePrices with large tokenIDs succeeded")
+		}
+	})
+
+	// 测试无效tokenID
+	t.Run("InvalidTokenID", func(t *testing.T) {
+		err := client.Start()
+		if err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+		defer client.Stop()
+
+		time.Sleep(2 * time.Second)
+
+		err = client.SubscribePrices([]string{"invalid-token-id"})
+		if err != nil {
+			t.Logf("SubscribePrices with invalid tokenID returned error: %v", err)
+		} else {
+			t.Logf("SubscribePrices with invalid tokenID succeeded (may accept but return no data)")
+		}
 	})
 }
 
