@@ -92,45 +92,9 @@ func main() {
 }
 ```
 
-### 使用新架构（推荐）
+### 更多示例
 
-```go
-package main
-
-import (
-    "github.com/polymas/go-polymarket-sdk/config"
-    "github.com/polymas/go-polymarket-sdk/container"
-    "github.com/polymas/go-polymarket-sdk/types"
-    "github.com/polymas/go-polymarket-sdk/web3"
-)
-
-func main() {
-    // 1. 创建配置
-    cfg := config.NewConfig(
-        config.WithChainID(types.Polygon),
-        config.WithSignatureType(types.ProxySignatureType),
-        config.WithHTTPTimeout(30 * time.Second),
-        config.WithMaxRetries(3),
-        config.WithCacheEnabled(true),
-    )
-
-    // 2. 创建依赖注入容器
-    container := container.NewContainer(cfg)
-    defer container.Close()
-
-    // 3. 初始化 Web3 客户端
-    web3Client, _ := web3.NewClient(
-        privateKey,
-        cfg.Web3.SignatureType,
-        cfg.Web3.ChainID,
-    )
-    container.SetWeb3Client(web3Client)
-
-    // 4. 使用容器中的依赖
-    cache := container.GetCache()
-    cache.Set("key", "value", 5 * time.Minute)
-}
-```
+查看 `examples/` 目录获取更多使用示例。
 
 ## 📚 主要模块
 
@@ -144,11 +108,9 @@ func main() {
 | **RTDS**       | `rtds`       | 实时价格和评论更新                     |
 | **Subgraph**   | `subgraph`   | GraphQL 查询，市场数据、用户数据       |
 | **RFQ**        | `rfq`        | 请求报价（Request for Quote）功能      |
-| **Config**     | `config`     | 统一配置管理                           |
-| **Container**  | `container`  | 依赖注入容器                           |
-| **Cache**      | `cache`      | 统一缓存管理                           |
-| **Middleware** | `middleware` | HTTP 中间件系统                        |
-| **Errors**     | `errors`     | 统一错误处理                           |
+| **Cache**      | `cache`      | 统一缓存管理（可选）                   |
+| **Middleware** | `middleware` | HTTP 中间件系统（可选）                |
+| **Errors**     | `errors`     | 统一错误处理（可选）                   |
 
 ## 📖 API 接口文档
 
