@@ -35,7 +35,7 @@ func (c *orderClientImpl) calculateOrderAmounts(
 	}
 
 	// Round price to tick size using round_normal (ROUND_HALF_UP) matching Python
-	roundedPrice := c.roundNormal(price, tickSizeFloat)
+	roundedPrice := roundNormal(price, tickSizeFloat)
 
 	// Convert to token decimals (1e6) - matching Python's to_token_decimals
 	// Python: to_token_decimals(x) = int(Decimal(str(x)) * Decimal(10**6).quantize(exp=Decimal(1), rounding=ROUND_HALF_UP))
@@ -55,7 +55,7 @@ func (c *orderClientImpl) calculateOrderAmounts(
 	}
 
 	// Round down size to 2 decimal places (matching Python's round_config.size = 2)
-	roundedSize := c.roundDown(size, 2)
+	roundedSize := roundDown(size, 2)
 
 	if side == types.OrderSideBUY {
 		// BUY: taker_amount = size, maker_amount = size * price
@@ -65,7 +65,7 @@ func (c *orderClientImpl) calculateOrderAmounts(
 		// Round maker amount following Python logic:
 		// 1. If decimal places > round_config.amount (6), try round_up to (amount + 4) = 10
 		// 2. If still > amount, round_down to amount = 6
-		makerAmount = c.roundMakerAmount(makerAmount, tickSizeFloat)
+		makerAmount = roundMakerAmount(makerAmount, tickSizeFloat)
 
 		return toTokenDecimals(makerAmount), toTokenDecimals(takerAmount), nil
 	} else {
@@ -76,7 +76,7 @@ func (c *orderClientImpl) calculateOrderAmounts(
 		// Round taker amount following Python logic:
 		// 1. If decimal places > round_config.amount (6), try round_up to (amount + 4) = 10
 		// 2. If still > amount, round_down to amount = 6
-		takerAmount = c.roundMakerAmount(takerAmount, tickSizeFloat)
+		takerAmount = roundMakerAmount(takerAmount, tickSizeFloat)
 
 		return toTokenDecimals(makerAmount), toTokenDecimals(takerAmount), nil
 	}
@@ -84,13 +84,13 @@ func (c *orderClientImpl) calculateOrderAmounts(
 
 // roundNormal rounds a price to tick size using ROUND_HALF_UP (matching Python's round_normal)
 // Python: round_normal(x, sig_digits) uses Decimal.quantize(exp=Decimal(1).scaleb(-sig_digits), rounding=ROUND_HALF_UP)
-func (c *orderClientImpl) roundNormal(price float64, tickSize float64) float64 {
+func roundNormal(price float64, tickSize float64) float64 {
 	if tickSize <= 0 {
 		return price
 	}
 	// Calculate number of decimal places from tick size
 	// For tick size 0.0001, we need 4 decimal places
-	decimals := c.getDecimalPlacesFromTickSize(tickSize)
+	decimals := getDecimalPlacesFromTickSize(tickSize)
 
 	// Round using ROUND_HALF_UP (standard math.Round)
 	multiplier := 1.0
@@ -103,7 +103,7 @@ func (c *orderClientImpl) roundNormal(price float64, tickSize float64) float64 {
 
 // getDecimalPlacesFromTickSize calculates decimal places from tick size
 // tick_size 0.1 -> 1 decimal, 0.01 -> 2 decimals, 0.001 -> 3 decimals, 0.0001 -> 4 decimals
-func (c *orderClientImpl) getDecimalPlacesFromTickSize(tickSize float64) int {
+func getDecimalPlacesFromTickSize(tickSize float64) int {
 	if tickSize >= 0.1 {
 		return 1
 	} else if tickSize >= 0.01 {
@@ -116,7 +116,7 @@ func (c *orderClientImpl) getDecimalPlacesFromTickSize(tickSize float64) int {
 }
 
 // roundDown rounds down to specified decimal places
-func (c *orderClientImpl) roundDown(val float64, decimals int) float64 {
+func roundDown(val float64, decimals int) float64 {
 	multiplier := 1.0
 	for i := 0; i < decimals; i++ {
 		multiplier *= 10
@@ -128,7 +128,7 @@ func (c *orderClientImpl) roundDown(val float64, decimals int) float64 {
 // 1. Get round_config.amount based on tick size (6 for 0.0001, 5 for 0.001, etc.)
 // 2. If decimal places > amount, try round_up to (amount + 4)
 // 3. If still > amount, round_down to amount
-func (c *orderClientImpl) roundMakerAmount(amount float64, tickSize float64) float64 {
+func roundMakerAmount(amount float64, tickSize float64) float64 {
 	// Determine round_config.amount from tick size (matching Python ROUNDING_CONFIG)
 	var amountDecimals int
 	if tickSize >= 0.1 {
@@ -142,7 +142,7 @@ func (c *orderClientImpl) roundMakerAmount(amount float64, tickSize float64) flo
 	}
 
 	// Count decimal places
-	decimalPlaces := c.countDecimalPlaces(amount)
+	decimalPlaces := countDecimalPlaces(amount)
 
 	// If decimal places <= amount, no rounding needed
 	if decimalPlaces <= amountDecimals {
@@ -150,19 +150,19 @@ func (c *orderClientImpl) roundMakerAmount(amount float64, tickSize float64) flo
 	}
 
 	// Try round_up to (amount + 4) first
-	roundedUp := c.roundUp(amount, amountDecimals+4)
-	decimalPlacesAfterRoundUp := c.countDecimalPlaces(roundedUp)
+	roundedUp := roundUp(amount, amountDecimals+4)
+	decimalPlacesAfterRoundUp := countDecimalPlaces(roundedUp)
 
 	// If still > amount, round_down to amount
 	if decimalPlacesAfterRoundUp > amountDecimals {
-		return c.roundDown(amount, amountDecimals)
+		return roundDown(amount, amountDecimals)
 	}
 
 	return roundedUp
 }
 
 // countDecimalPlaces counts the number of decimal places in a float
-func (c *orderClientImpl) countDecimalPlaces(val float64) int {
+func countDecimalPlaces(val float64) int {
 	// Convert to string to count decimal places
 	str := fmt.Sprintf("%.10f", val)
 	str = strings.TrimRight(str, "0")
@@ -178,7 +178,7 @@ func (c *orderClientImpl) countDecimalPlaces(val float64) int {
 }
 
 // roundUp rounds up to specified decimal places
-func (c *orderClientImpl) roundUp(val float64, decimals int) float64 {
+func roundUp(val float64, decimals int) float64 {
 	multiplier := 1.0
 	for i := 0; i < decimals; i++ {
 		multiplier *= 10

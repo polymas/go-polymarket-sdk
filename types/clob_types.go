@@ -15,13 +15,16 @@ type ApiCreds struct {
 	Passphrase string `json:"passphrase"`
 }
 
-// Clear 清理敏感信息（API凭证）
-// 安全建议：在不再需要 ApiCreds 时调用此方法清理内存中的敏感信息
+// ClearApiCreds 清理敏感信息（API凭证）
+// 安全建议：在不再需要 ApiCreds 时调用此函数清理内存中的敏感信息
 // 注意：清理后 ApiCreds 将无法再使用，请确保在清理前不再需要API凭证
-func (c *ApiCreds) Clear() {
-	c.Key = ""
-	c.Secret = ""
-	c.Passphrase = ""
+func ClearApiCreds(creds *ApiCreds) {
+	if creds == nil {
+		return
+	}
+	creds.Key = ""
+	creds.Secret = ""
+	creds.Passphrase = ""
 	// 注意：Go的垃圾回收器会处理字符串的内存清理
 	// 但显式清零可以更快地释放内存引用
 }

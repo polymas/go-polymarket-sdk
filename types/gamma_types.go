@@ -463,7 +463,11 @@ func (m *GammaMarket) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(processedData, aux)
 }
 
-func (m *GammaMarket) GetOutcomePrices() map[string]float64 {
+// GetOutcomePrices 获取结果价格映射
+func GetOutcomePrices(m *GammaMarket) map[string]float64 {
+	if m == nil {
+		return make(map[string]float64)
+	}
 	outcomePrices := make(map[string]float64)
 	for i, tokenId := range m.TokenIDs {
 		outcomePrices[tokenId] = m.OutcomePrices[i]
@@ -471,7 +475,11 @@ func (m *GammaMarket) GetOutcomePrices() map[string]float64 {
 	return outcomePrices
 }
 
-func (m *GammaMarket) GetOutcomeNames() map[string]string {
+// GetOutcomeNames 获取结果名称映射
+func GetOutcomeNames(m *GammaMarket) map[string]string {
+	if m == nil {
+		return make(map[string]string)
+	}
 	outcomeNames := make(map[string]string)
 	for i, tokenId := range m.TokenIDs {
 		outcomeNames[tokenId] = m.Outcomes[i]
@@ -598,22 +606,22 @@ type Sport struct {
 
 // SportsEvent 表示体育事件
 type SportsEvent struct {
-	EventID     int       `json:"event_id"`
-	SportID     int       `json:"sport_id"`
-	League      string    `json:"league"`
-	HomeTeam    string    `json:"home_team"`
-	AwayTeam    string    `json:"away_team"`
-	StartTime   time.Time `json:"start_time"`
-	Status      string    `json:"status"`
-	Score       string    `json:"score,omitempty"`
-	Markets     []string  `json:"markets,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	EventID   int       `json:"event_id"`
+	SportID   int       `json:"sport_id"`
+	League    string    `json:"league"`
+	HomeTeam  string    `json:"home_team"`
+	AwayTeam  string    `json:"away_team"`
+	StartTime time.Time `json:"start_time"`
+	Status    string    `json:"status"`
+	Score     string    `json:"score,omitempty"`
+	Markets   []string  `json:"markets,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // EncryptedPriceUpdate 表示加密的价格更新
 type EncryptedPriceUpdate struct {
 	TokenID   string    `json:"token_id"`
-	Price     string    `json:"price"`     // Encrypted price data
+	Price     string    `json:"price"` // Encrypted price data
 	Timestamp time.Time `json:"timestamp"`
 	Data      string    `json:"data,omitempty"` // Additional encrypted data
 }
@@ -654,19 +662,20 @@ type SimplifiedMarket struct {
 
 // MarketTradesEvent 表示市场交易事件
 type MarketTradesEvent struct {
-	EventID     string    `json:"event_id"`
-	Type        string    `json:"type"` // TRADE, ORDER_PLACED, ORDER_CANCELLED, etc.
-	MarketID    string    `json:"market_id"`
-	TokenID     string    `json:"token_id,omitempty"`
-	Price       *float64  `json:"price,omitempty"`
-	Size        *float64  `json:"size,omitempty"`
-	Side        *string   `json:"side,omitempty"` // BUY or SELL
-	Timestamp   time.Time `json:"timestamp"`
+	EventID     string      `json:"event_id"`
+	Type        string      `json:"type"` // TRADE, ORDER_PLACED, ORDER_CANCELLED, etc.
+	MarketID    string      `json:"market_id"`
+	TokenID     string      `json:"token_id,omitempty"`
+	Price       *float64    `json:"price,omitempty"`
+	Size        *float64    `json:"size,omitempty"`
+	Side        *string     `json:"side,omitempty"` // BUY or SELL
+	Timestamp   time.Time   `json:"timestamp"`
 	UserAddress *EthAddress `json:"user_address,omitempty"`
 }
 
 // HasDispute 检查市场是否有dispute状态
-func (m *GammaMarket) HasDispute() bool {
+// HasDispute 检查市场是否有争议
+func HasDispute(m *GammaMarket) bool {
 	if m == nil {
 		return false
 	}

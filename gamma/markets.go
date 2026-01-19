@@ -135,7 +135,7 @@ func (c *polymarketGammaClient) GetDisputeMarkets() ([]types.GammaMarket, error)
 	// 过滤出有 dispute 状态的市场
 	disputeMarkets := make([]types.GammaMarket, 0)
 	for i := range certaintyMarkets {
-		if certaintyMarkets[i].HasDispute() {
+		if types.HasDispute(&certaintyMarkets[i]) {
 			disputeMarkets = append(disputeMarkets, certaintyMarkets[i])
 		}
 	}
