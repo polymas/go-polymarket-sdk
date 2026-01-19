@@ -596,6 +596,28 @@ type Sport struct {
 	Leagues []string `json:"leagues"`
 }
 
+// SportsEvent 表示体育事件
+type SportsEvent struct {
+	EventID     int       `json:"event_id"`
+	SportID     int       `json:"sport_id"`
+	League      string    `json:"league"`
+	HomeTeam    string    `json:"home_team"`
+	AwayTeam    string    `json:"away_team"`
+	StartTime   time.Time `json:"start_time"`
+	Status      string    `json:"status"`
+	Score       string    `json:"score,omitempty"`
+	Markets     []string  `json:"markets,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// EncryptedPriceUpdate 表示加密的价格更新
+type EncryptedPriceUpdate struct {
+	TokenID   string    `json:"token_id"`
+	Price     string    `json:"price"`     // Encrypted price data
+	Timestamp time.Time `json:"timestamp"`
+	Data      string    `json:"data,omitempty"` // Additional encrypted data
+}
+
 // Comment 表示评论
 type Comment struct {
 	CommentID        string     `json:"id"`
@@ -605,6 +627,42 @@ type Comment struct {
 	Content          string     `json:"content"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+// Profile 表示用户资料
+type Profile struct {
+	Address   EthAddress `json:"address"`
+	Username  string     `json:"username,omitempty"`
+	Bio       string     `json:"bio,omitempty"`
+	Avatar    string     `json:"avatar,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// SimplifiedMarket 表示简化市场（只包含基本字段）
+type SimplifiedMarket struct {
+	MarketID    string    `json:"id"`
+	Slug        string    `json:"slug"`
+	Question    string    `json:"question"`
+	Image       string    `json:"image"`
+	Active      bool      `json:"active"`
+	Closed      bool      `json:"closed"`
+	ConditionID Keccak256 `json:"conditionId"`
+	TokenIDs    []string  `json:"clobTokenIds"`
+	Outcomes    []string  `json:"outcomes,omitempty"`
+}
+
+// MarketTradesEvent 表示市场交易事件
+type MarketTradesEvent struct {
+	EventID     string    `json:"event_id"`
+	Type        string    `json:"type"` // TRADE, ORDER_PLACED, ORDER_CANCELLED, etc.
+	MarketID    string    `json:"market_id"`
+	TokenID     string    `json:"token_id,omitempty"`
+	Price       *float64  `json:"price,omitempty"`
+	Size        *float64  `json:"size,omitempty"`
+	Side        *string   `json:"side,omitempty"` // BUY or SELL
+	Timestamp   time.Time `json:"timestamp"`
+	UserAddress *EthAddress `json:"user_address,omitempty"`
 }
 
 // HasDispute 检查市场是否有dispute状态

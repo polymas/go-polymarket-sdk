@@ -227,3 +227,47 @@ type GQLPosition struct {
 	} `json:"asset"`
 	Balance string `json:"balance"` // BigInt as string
 }
+
+// GraphQLResponse 表示 GraphQL 响应
+type GraphQLResponse struct {
+	Data   interface{}            `json:"data"`
+	Errors []GraphQLError         `json:"errors,omitempty"`
+}
+
+// GraphQLError 表示 GraphQL 错误
+type GraphQLError struct {
+	Message   string                 `json:"message"`
+	Locations []GraphQLErrorLocation `json:"locations,omitempty"`
+	Path      []interface{}          `json:"path,omitempty"`
+}
+
+// GraphQLErrorLocation 表示 GraphQL 错误位置
+type GraphQLErrorLocation struct {
+	Line   int `json:"line"`
+	Column int `json:"column"`
+}
+
+// MarketVolume 表示市场交易量
+type MarketVolume struct {
+	MarketID  string  `json:"marketId"`
+	Volume    float64 `json:"volume"`
+	TradeCount int    `json:"tradeCount"`
+	StartTime int64   `json:"startTime"`
+	EndTime   int64   `json:"endTime"`
+}
+
+// MarketOpenInterest 表示市场未平仓量
+type MarketOpenInterest struct {
+	MarketID        string    `json:"marketId"`
+	TotalOpenInterest float64 `json:"totalOpenInterest"`
+	Timestamp       time.Time `json:"timestamp"`
+}
+
+// UserPNL 表示用户盈亏
+type UserPNL struct {
+	User          EthAddress `json:"user"`
+	TotalPNL      float64   `json:"totalPNL"`
+	RealizedPNL   float64   `json:"realizedPNL"`
+	UnrealizedPNL float64   `json:"unrealizedPNL"`
+	Timestamp     time.Time `json:"timestamp"`
+}

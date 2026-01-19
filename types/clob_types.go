@@ -420,3 +420,65 @@ type PolygonTrade struct {
 	MakerAddress EthAddress `json:"maker_address"`
 	TakerAddress EthAddress `json:"taker_address"`
 }
+
+// LastTradePrice 表示最后成交价
+type LastTradePrice TokenValue
+
+// BalanceAllowance 表示余额授权信息
+type BalanceAllowance struct {
+	Allowance float64 `json:"allowance"`
+	Balance   float64 `json:"balance"`
+}
+
+// APIKey 表示 API 密钥信息
+type APIKey struct {
+	ID        string    `json:"id"`
+	Key       string    `json:"key"`
+	CreatedAt time.Time `json:"created_at"`
+	Readonly  bool      `json:"readonly,omitempty"`
+}
+
+// Notification 表示通知信息
+type Notification struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Message   string    `json:"message"`
+	Read      bool      `json:"read"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// RFQRequest 表示 RFQ 请求
+type RFQRequest struct {
+	TokenID string    `json:"token_id"`
+	Side    OrderSide `json:"side"` // BUY or SELL
+	Size    float64   `json:"size"`
+	Price   *float64  `json:"price,omitempty"` // Optional: desired price
+}
+
+// RFQResponse 表示 RFQ 请求响应
+type RFQResponse struct {
+	RequestID string    `json:"request_id"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// RFQQuote 表示 RFQ 报价
+type RFQQuote struct {
+	QuoteID   string    `json:"quote_id"`
+	RequestID string    `json:"request_id"`
+	TokenID   string    `json:"token_id"`
+	Side      OrderSide `json:"side"`
+	Price     float64   `json:"price"`
+	Size      float64   `json:"size"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// RFQAcceptResponse 表示接受报价的响应
+type RFQAcceptResponse struct {
+	QuoteID  string    `json:"quote_id"`
+	OrderID  Keccak256 `json:"order_id,omitempty"`
+	Status   string    `json:"status"`
+	AcceptedAt time.Time `json:"accepted_at"`
+}

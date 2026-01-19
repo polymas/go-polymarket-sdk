@@ -99,6 +99,31 @@ const (
 	GetMarketTradesEvents        = "/live-activity/events/"
 )
 
+// Tags endpoints
+const (
+	GetTags    = "/tags"
+	GetTag     = "/tags/"
+	GetTagBySlug = "/tags/slug/"
+)
+
+// Series endpoints
+const (
+	GetSeries      = "/series"
+	GetSeriesBySlug = "/series/slug/"
+)
+
+// Comments endpoints
+const (
+	GetComments = "/comments"
+	GetComment  = "/comments/"
+)
+
+// Profiles endpoints
+const (
+	GetProfile         = "/profiles/"
+	GetProfileByUsername = "/profiles/username/"
+)
+
 // Market Data endpoints
 const (
 	GetTickSize = "/tick-size"
