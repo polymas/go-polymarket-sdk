@@ -12,7 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/polymas/go-polymarket-sdk/internal"
-	"github.com/polymas/go-polymarket-sdk/internal/signing"
+	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 

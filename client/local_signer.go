@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
-	"github.com/polymas/go-polymarket-sdk/internal/signing"
+	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
