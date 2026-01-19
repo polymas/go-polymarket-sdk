@@ -96,6 +96,7 @@ func getOrCreateClient(baseURL string) *httpClient {
 			MinVersion: tls.VersionTLS12, // 最低TLS 1.2版本
 			// 不跳过证书验证，使用系统默认的证书验证
 		},
+		Proxy: http.ProxyFromEnvironment, // 支持从环境变量读取代理配置
 	}
 
 	client := &httpClient{
