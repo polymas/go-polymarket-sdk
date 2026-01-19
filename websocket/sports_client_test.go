@@ -23,6 +23,13 @@ func TestSportsSetOnSportsUpdate(t *testing.T) {
 			t.Logf("SetOnSportsUpdate succeeded (callback will be called on message)")
 		}
 	})
+
+	// 测试nil回调
+	t.Run("NilCallback", func(t *testing.T) {
+		client.SetOnSportsUpdate(nil)
+		// 设置nil回调不应该panic
+		t.Logf("SetOnSportsUpdate with nil callback succeeded")
+	})
 }
 
 func TestSportsSetAuth(t *testing.T) {
@@ -86,6 +93,25 @@ func TestSportsStart(t *testing.T) {
 
 		if !hasUpdate {
 			t.Logf("No updates received (may be expected if no sports events)")
+		}
+	})
+
+	// 测试重复启动
+	t.Run("DuplicateStart", func(t *testing.T) {
+		err := client.Start()
+		if err != nil {
+			t.Fatalf("First Start failed: %v", err)
+		}
+		defer client.Stop()
+
+		time.Sleep(1 * time.Second)
+
+		// 尝试再次启动
+		err = client.Start()
+		if err != nil {
+			t.Logf("Duplicate Start returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for duplicate Start")
 		}
 	})
 }
