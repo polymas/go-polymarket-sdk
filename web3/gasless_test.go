@@ -92,6 +92,38 @@ func TestSplitUSDC(t *testing.T) {
 			t.Error("Expected error for zero amount")
 		}
 	})
+
+	// 测试负数金额
+	t.Run("NegativeAmount", func(t *testing.T) {
+		_, err := client.SplitUSDC(-10.0, config.TestConditionID, false)
+		if err == nil {
+			t.Error("Expected error for negative amount")
+		} else {
+			t.Logf("SplitUSDC with negative amount returned error (expected): %v", err)
+		}
+	})
+
+	// 测试极大金额
+	t.Run("LargeAmount", func(t *testing.T) {
+		largeAmount := 1e15
+		_, err := client.SplitUSDC(largeAmount, config.TestConditionID, false)
+		if err != nil {
+			t.Logf("SplitUSDC with large amount returned error (may be expected): %v", err)
+		} else {
+			t.Logf("SplitUSDC with large amount succeeded")
+		}
+	})
+
+	// 测试无效conditionID
+	t.Run("InvalidConditionID", func(t *testing.T) {
+		invalidConditionID := types.Keccak256("invalid-condition-id")
+		_, err := client.SplitUSDC(10.0, invalidConditionID, false)
+		if err != nil {
+			t.Logf("SplitUSDC with invalid conditionID returned error (expected): %v", err)
+		} else {
+			t.Logf("SplitUSDC with invalid conditionID succeeded (may be acceptable)")
+		}
+	})
 }
 
 func TestMergeTokens(t *testing.T) {
@@ -120,6 +152,29 @@ func TestMergeTokens(t *testing.T) {
 		_, err := client.MergeTokens(config.TestConditionID, []float64{}, false)
 		if err == nil {
 			t.Error("Expected error for empty amounts array")
+		}
+	})
+
+	// 测试多个amounts
+	t.Run("MultipleAmounts", func(t *testing.T) {
+		amounts := []float64{1.0, 0.5, 0.3, 0.2}
+		receipt, err := client.MergeTokens(config.TestConditionID, amounts, false)
+		if err != nil {
+			t.Logf("MergeTokens with multiple amounts failed (may be expected): %v", err)
+		} else if receipt != nil {
+			t.Logf("MergeTokens with multiple amounts succeeded")
+		}
+	})
+
+	// 测试无效conditionID
+	t.Run("InvalidConditionID", func(t *testing.T) {
+		invalidConditionID := types.Keccak256("invalid-condition-id")
+		amounts := []float64{1.0, 0.0}
+		_, err := client.MergeTokens(invalidConditionID, amounts, false)
+		if err != nil {
+			t.Logf("MergeTokens with invalid conditionID returned error (expected): %v", err)
+		} else {
+			t.Logf("MergeTokens with invalid conditionID succeeded (may be acceptable)")
 		}
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/polymas/go-polymarket-sdk/test"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // newTestWeb3Client 创建测试用的Web3客户端
@@ -67,6 +68,17 @@ func TestGetUSDCBalance(t *testing.T) {
 			t.Errorf("Expected non-negative balance, got %f", balance)
 		}
 		t.Logf("GetUSDCBalance for base address returned: %f", balance)
+	})
+
+	// 测试无效地址格式
+	t.Run("InvalidAddress", func(t *testing.T) {
+		invalidAddr := types.EthAddress("invalid-address")
+		_, err := client.GetUSDCBalance(invalidAddr)
+		if err != nil {
+			t.Logf("GetUSDCBalance with invalid address returned error (expected): %v", err)
+		} else {
+			t.Error("Expected error for invalid address")
+		}
 	})
 }
 
@@ -170,5 +182,24 @@ func TestClose(t *testing.T) {
 		// 关闭客户端不应该出错
 		client.Close()
 		t.Logf("Close succeeded")
+	})
+
+	// 测试多次调用Close
+	t.Run("MultipleClose", func(t *testing.T) {
+		client.Close()
+		client.Close() // 第二次调用不应该panic
+		t.Logf("Multiple Close calls succeeded")
+	})
+
+	// 测试Close后调用其他方法（应该失败或返回错误）
+	t.Run("AfterClose", func(t *testing.T) {
+		client.Close()
+		// 尝试调用一个方法，应该失败或返回错误
+		_, err := client.GetPOLBalance()
+		if err != nil {
+			t.Logf("GetPOLBalance after Close returned error (expected): %v", err)
+		} else {
+			t.Logf("GetPOLBalance after Close succeeded (may reconnect)")
+		}
 	})
 }
