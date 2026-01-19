@@ -63,13 +63,20 @@ type RewardClient interface {
 	AreOrdersScoring(orderIDs []types.Keccak256) (map[types.Keccak256]bool, error)
 }
 
-// Client 定义CLOB客户端的接口，通过组合各个功能接口实现
-type Client interface {
-	OrderClient
+// ReadonlyClient 只读客户端接口，不需要私钥和API凭证
+// 包含所有公开的市场数据和奖励查询接口
+type ReadonlyClient interface {
 	MarketDataClient
+	RewardClient
+}
+
+// Client 定义CLOB客户端的完整接口，通过组合各个功能接口实现
+// 需要私钥和API凭证，包含所有功能
+type Client interface {
+	ReadonlyClient // 继承只读接口
+	OrderClient
 	AccountClient
 	APIKeyClient
-	RewardClient
 }
 
 // baseClient 基础客户端结构，包含所有共享的字段和方法
@@ -83,7 +90,15 @@ type baseClient struct {
 	negRisk       map[string]bool
 	feeRates      map[string]int
 	orderBuilder  *builder.ExchangeOrderBuilderImpl
-	web3Client    web3.Client // 保存 Web3Client 引用
+	web3Client    web3.Client // 保存 Web3Client 引用（可能为nil，用于只读客户端）
+}
+
+// readonlyBaseClient 只读客户端的基础结构，不包含认证相关字段
+type readonlyBaseClient struct {
+	baseURL   string
+	tickSizes map[string]types.TickSize
+	negRisk   map[string]bool
+	feeRates  map[string]int
 }
 
 // orderClientImpl 订单功能模块实现
@@ -111,6 +126,24 @@ type rewardClientImpl struct {
 	*baseClient
 }
 
+// readonlyMarketDataClientImpl 只读市场数据功能模块实现
+type readonlyMarketDataClientImpl struct {
+	*readonlyBaseClient
+}
+
+// readonlyRewardClientImpl 只读奖励功能模块实现
+type readonlyRewardClientImpl struct {
+	*readonlyBaseClient
+}
+
+// readonlyClobClient 只读CLOB客户端实现
+// 不需要私钥和API凭证，只能使用公开接口
+type readonlyClobClient struct {
+	*readonlyBaseClient
+	*readonlyMarketDataClientImpl
+	*readonlyRewardClientImpl
+}
+
 // polymarketClobClient 处理CLOB（中央限价订单簿）操作
 // 通过组合各个功能模块实现完整的 Client 接口
 // 不允许直接导出，只能通过 NewClient 创建
@@ -123,9 +156,34 @@ type polymarketClobClient struct {
 	*rewardClientImpl
 }
 
-// NewClient 创建新的CLOB客户端
+// NewReadonlyClient 创建只读CLOB客户端
+// 不需要私钥和API凭证，只能使用公开的市场数据和奖励查询接口
+// 返回 ReadonlyClient 接口
+func NewReadonlyClient() ReadonlyClient {
+	// 创建只读基础客户端
+	readonlyBase := &readonlyBaseClient{
+		baseURL:   internal.ClobAPIDomain,
+		tickSizes: make(map[string]types.TickSize),
+		negRisk:   make(map[string]bool),
+		feeRates:  make(map[string]int),
+	}
+
+	// 创建功能模块
+	marketDataClient := &readonlyMarketDataClientImpl{readonlyBaseClient: readonlyBase}
+	rewardClient := &readonlyRewardClientImpl{readonlyBaseClient: readonlyBase}
+
+	// 组合只读功能模块
+	return &readonlyClobClient{
+		readonlyBaseClient:           readonlyBase,
+		readonlyMarketDataClientImpl: marketDataClient,
+		readonlyRewardClientImpl:     rewardClient,
+	}
+}
+
+// NewClient 创建新的完整CLOB客户端
+// 需要私钥和API凭证，可以使用所有功能接口
 // 在初始化时自动调用 createOrDeriveAPICreds 获取 API 凭证
-// 返回 ClobClient 接口，不允许直接访问实现类型
+// 返回 Client 接口，不允许直接访问实现类型
 func NewClient(web3Client web3.Client) (Client, error) {
 	// 从 web3.Client 获取所需信息
 	signatureType := web3Client.GetSignatureType()
