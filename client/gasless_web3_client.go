@@ -21,8 +21,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/polymarket/go-polymarket-sdk/internal"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // SignatureParams 表示中继交易的签名参数

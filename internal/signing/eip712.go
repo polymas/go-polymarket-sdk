@@ -5,7 +5,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 const (

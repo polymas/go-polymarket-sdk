@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/polymarket/go-polymarket-sdk/internal"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // GammaClient 定义Gamma客户端的接口，供外部包使用

@@ -11,9 +11,9 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/polymarket/go-polymarket-sdk/internal"
-	"github.com/polymarket/go-polymarket-sdk/internal/signing"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/internal/signing"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // Web3Client 定义Web3客户端的接口，供外部包使用

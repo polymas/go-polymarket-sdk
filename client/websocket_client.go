@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/polymarket/go-polymarket-sdk/internal"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 const (

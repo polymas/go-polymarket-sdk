@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/polymarket/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/internal"
 )
 
 // httpClient HTTP客户端实现（不可导出）

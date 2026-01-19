@@ -1,4 +1,4 @@
-module github.com/polymarket/go-polymarket-sdk
+module github.com/polymas/go-polymarket-sdk
 
 go 1.24.0
 

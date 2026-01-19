@@ -11,8 +11,8 @@ import (
 
 	"github.com/polymarket/go-order-utils/pkg/builder"
 	ordermodel "github.com/polymarket/go-order-utils/pkg/model"
-	"github.com/polymarket/go-polymarket-sdk/internal"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // ClobClient 定义CLOB客户端的接口，供外部包使用

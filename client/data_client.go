@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/polymarket/go-polymarket-sdk/internal"
-	"github.com/polymarket/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // DataClient 定义数据客户端的接口，供外部包使用
