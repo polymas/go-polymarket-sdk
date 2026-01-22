@@ -67,6 +67,29 @@ func (c *GaslessClient) executeGaslessBatch(
 		return nil, fmt.Errorf("failed to format body: %w", err)
 	}
 
+	// 记录 relayer 调用次数（在格式化 body 之后，用于日志）
+	callCount := atomic.AddInt64(&c.relayerCallCount, 1)
+
+	// Debug: log request body (truncated for security)
+	if len(bodyJSON) > 500 {
+		log.Printf("[DEBUG] [Relayer调用 #%d] 请求体 (前500字符): %s...", callCount, string(bodyJSON[:500]))
+	} else {
+		log.Printf("[DEBUG] [Relayer调用 #%d] 请求体: %s", callCount, string(bodyJSON))
+	}
+	
+	// Debug: log encoded proxy data length and first bytes
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(bodyJSON, &bodyMap); err == nil {
+		if encodedTxnHex, ok := bodyMap["data"].(string); ok {
+			previewLen := 100
+			if len(encodedTxnHex) < previewLen {
+				previewLen = len(encodedTxnHex)
+			}
+			log.Printf("[DEBUG] [Relayer调用 #%d] Proxy data length: %d bytes, first %d chars: %s", 
+				callCount, len(encodedTxnHex), previewLen, encodedTxnHex[:previewLen])
+		}
+	}
+
 	// Sign request using LocalSigner
 	requestHeaders, err := c.localSigner.SignRequest("POST", "/submit", body)
 	if err != nil {
@@ -85,8 +108,6 @@ func (c *GaslessClient) executeGaslessBatch(
 		req.Header.Set(k, v)
 	}
 
-	// 记录 relayer 调用次数
-	callCount := atomic.AddInt64(&c.relayerCallCount, 1)
 	log.Printf("[Relayer调用 #%d] 批量提交交易到 relayer (类型: %d, 交易数: %d)", callCount, int(c.signatureType), len(proxyTxns))
 
 	resp, err := c.httpClient.Do(req)
@@ -112,9 +133,86 @@ func (c *GaslessClient) executeGaslessBatch(
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	// 检查交易状态
+	if state, ok := gaslessResp["state"].(string); ok {
+		if state == "STATE_FAILED" || state == "FAILED" || state == "failed" {
+			// 尝试提取错误信息 - 检查多个可能的字段
+			errorMsg := "交易提交失败"
+			errorDetails := []string{}
+			
+			// 检查各种可能的错误字段
+			if errMsg, ok := gaslessResp["error"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errMsg, ok := gaslessResp["message"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errMsg, ok := gaslessResp["errorMessage"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errMsg, ok := gaslessResp["reason"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errData, ok := gaslessResp["error"].(map[string]interface{}); ok {
+				// 错误可能是嵌套对象
+				if msg, ok := errData["message"].(string); ok {
+					errorMsg = msg
+				}
+				if code, ok := errData["code"].(string); ok {
+					errorDetails = append(errorDetails, fmt.Sprintf("code: %s", code))
+				}
+			}
+			
+			// 检查是否有嵌套的错误信息
+			if details, ok := gaslessResp["details"].(map[string]interface{}); ok {
+				for k, v := range details {
+					errorDetails = append(errorDetails, fmt.Sprintf("%s: %v", k, v))
+				}
+			}
+
+			transactionID := ""
+			if txID, ok := gaslessResp["transactionID"].(string); ok {
+				transactionID = txID
+			}
+
+			fullErrorMsg := errorMsg
+			if len(errorDetails) > 0 {
+				fullErrorMsg = fmt.Sprintf("%s (%s)", errorMsg, strings.Join(errorDetails, ", "))
+			}
+
+			log.Printf("[ERROR] [Relayer调用 #%d] 交易提交失败 (state: %s, transactionID: %s): %s",
+				callCount, state, transactionID, fullErrorMsg)
+			log.Printf("[ERROR] [Relayer调用 #%d] 完整响应 (JSON): %s", callCount, formatMapAsJSON(gaslessResp))
+			return nil, fmt.Errorf("交易提交失败 (state: %s, transactionID: %s): %s", state, transactionID, fullErrorMsg)
+		}
+	}
+
 	txHashStr, ok := gaslessResp["transactionHash"].(string)
 	if !ok {
-		return nil, fmt.Errorf("no transaction hash in response: %v", gaslessResp)
+		// 尝试其他可能的字段名
+		if txHash, ok2 := gaslessResp["txHash"].(string); ok2 {
+			txHashStr = txHash
+		} else if txHash, ok2 := gaslessResp["hash"].(string); ok2 {
+			txHashStr = txHash
+		} else {
+			// 如果状态不是失败但没有交易哈希，可能是还在处理中
+			if state, ok := gaslessResp["state"].(string); ok && state != "STATE_FAILED" {
+				log.Printf("[WARN] [Relayer调用 #%d] 响应中没有找到交易哈希，但状态为: %s，响应内容: %+v", callCount, state, gaslessResp)
+				return nil, fmt.Errorf("交易可能还在处理中，未返回交易哈希 (state: %s): %v", state, gaslessResp)
+			}
+			log.Printf("[ERROR] [Relayer调用 #%d] 响应中没有找到交易哈希，响应内容: %+v", callCount, gaslessResp)
+			return nil, fmt.Errorf("no transaction hash in response: %v", gaslessResp)
+		}
+	}
+
+	if txHashStr == "" {
+		// 检查状态，如果失败则返回错误
+		if state, ok := gaslessResp["state"].(string); ok && (state == "STATE_FAILED" || state == "FAILED" || state == "failed") {
+			errorMsg := "交易提交失败"
+			if errMsg, ok := gaslessResp["error"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			}
+			log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空且状态为失败，响应内容: %+v", callCount, gaslessResp)
+			return nil, fmt.Errorf("交易提交失败 (state: %s): %s", state, errorMsg)
+		}
+		log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空，响应内容: %+v", callCount, gaslessResp)
+		return nil, fmt.Errorf("transaction hash is empty in response: %v", gaslessResp)
 	}
 
 	log.Printf("[OK] [Relayer调用 #%d] 批量提交成功，交易哈希: %s", callCount, txHashStr)
@@ -126,7 +224,17 @@ func (c *GaslessClient) executeGaslessBatch(
 		return nil, fmt.Errorf("failed to wait for receipt: %w", err)
 	}
 
+	log.Printf("[OK] [Relayer调用 #%d] 交易已确认，区块号: %d", callCount, receipt.BlockNumber)
 	return receipt, nil
+}
+
+// formatMapAsJSON formats a map as JSON string for logging
+func formatMapAsJSON(m map[string]interface{}) string {
+	jsonBytes, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%+v", m)
+	}
+	return string(jsonBytes)
 }
 
 // formatJSONWithSpaces formats JSON with spaces to match Python's json.dumps format
@@ -405,40 +513,91 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 }
 
 // encodeProxy encodes a proxy transaction (supports single or multiple transactions)
+// Manual encoding to match Rust implementation
+// Function selector: proxy((uint8,address,uint256,bytes)[])
+// Rust uses hardcoded selector: 0x415565b0
 func (c *GaslessClient) encodeProxy(proxyTxns []map[string]interface{}) ([]byte, error) {
-	// proxy((uint8 typeCode, address to, uint256 value, bytes data)[] transactions)
-	// Pack transactions as array
-	transactions := make([]struct {
-		TypeCode uint8
-		To       common.Address
-		Value    *big.Int
-		Data     []byte
-	}, len(proxyTxns))
+	// Function selector: proxy((uint8,address,uint256,bytes)[])
+	// Rust hardcodes: 0x415565b0 (matching Rust implementation)
+	selector, err := hex.DecodeString("415565b0")
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode selector: %w", err)
+	}
 
+	var data []byte
+	data = append(data, selector...)
+
+	// Encode array offset (32 bytes) = 0x20
+	arrayOffset := big.NewInt(0x20)
+	offsetBytes := make([]byte, 32)
+	arrayOffset.FillBytes(offsetBytes)
+	data = append(data, offsetBytes...)
+
+	// Encode array length (32 bytes)
+	arrayLen := big.NewInt(int64(len(proxyTxns)))
+	lenBytes := make([]byte, 32)
+	arrayLen.FillBytes(lenBytes)
+	data = append(data, lenBytes...)
+
+	// Encode each transaction
+	// Matching Rust: encode tuple offset first, then tuple data in same loop
 	for i, proxyTxn := range proxyTxns {
+		// Calculate tuple offset: 0x20 * (len + 1) + current data length
+		// Rust: 0x20 * (proxy_txns.len() + 1) as u64 + data.len() as u64
+		tupleOffsetValue := int64(0x20*(len(proxyTxns)+1) + len(data))
+		tupleOffset := big.NewInt(tupleOffsetValue)
+		tupleOffsetBytes := make([]byte, 32)
+		tupleOffset.FillBytes(tupleOffsetBytes)
+		data = append(data, tupleOffsetBytes...)
+		
+		log.Printf("[DEBUG] encodeProxy: Transaction %d, tuple offset: 0x%x (calculated from: 0x%x * %d + %d)", 
+			i, tupleOffsetValue, 0x20, len(proxyTxns)+1, len(data)-32) // -32 because we just added the offset
+		
 		typeCode := uint8(proxyTxn["typeCode"].(int))
 		to := common.HexToAddress(proxyTxn["to"].(string))
 		value := big.NewInt(int64(proxyTxn["value"].(int)))
 		dataHex := proxyTxn["data"].(string)
-		data, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
+		txnData, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode data for transaction %d: %w", i, err)
+			return nil, fmt.Errorf("failed to decode data: %w", err)
 		}
+		
+		// Debug: log transaction details
+		log.Printf("[DEBUG] encodeProxy: Transaction %d details - typeCode: %d, to: %s, value: %d, dataLen: %d", 
+			i, typeCode, to.Hex(), value.Int64(), len(txnData))
 
-		transactions[i] = struct {
-			TypeCode uint8
-			To       common.Address
-			Value    *big.Int
-			Data     []byte
-		}{
-			TypeCode: typeCode,
-			To:       to,
-			Value:    value,
-			Data:     data,
-		}
+		// Encode typeCode (uint8, padded to 32 bytes)
+		typeCodeBytes := make([]byte, 32)
+		typeCodeBytes[31] = typeCode
+		data = append(data, typeCodeBytes...)
+
+		// Encode to (address, padded to 32 bytes)
+		toBytes := make([]byte, 32)
+		copy(toBytes[12:], to.Bytes())
+		data = append(data, toBytes...)
+
+		// Encode value (uint256, 32 bytes)
+		valueBytes := make([]byte, 32)
+		value.FillBytes(valueBytes)
+		data = append(data, valueBytes...)
+
+		// Encode data offset (32 bytes) = 0x60 (relative to tuple start)
+		dataOffset := big.NewInt(0x60)
+		dataOffsetBytes := make([]byte, 32)
+		dataOffset.FillBytes(dataOffsetBytes)
+		data = append(data, dataOffsetBytes...)
+
+		// Encode data length (32 bytes)
+		dataLen := big.NewInt(int64(len(txnData)))
+		dataLenBytes := make([]byte, 32)
+		dataLen.FillBytes(dataLenBytes)
+		data = append(data, dataLenBytes...)
+
+		// Encode data (variable length, no padding in Rust implementation)
+		data = append(data, txnData...)
 	}
 
-	return c.proxyFactoryABI.Pack("proxy", transactions)
+	return data, nil
 }
 
 // createProxyStructBytes creates raw proxy struct bytes (not hashed)
@@ -601,7 +760,11 @@ func (c *GaslessClient) waitForTransactionReceipt(txHash common.Hash) (*types.Tr
 	ctx, cancel := context.WithTimeout(context.Background(), internal.TransactionWaitTimeout)
 	defer cancel()
 
+	startTime := time.Now()
+	attemptCount := 0
+
 	for {
+		attemptCount++
 		receipt, err := c.client.TransactionReceipt(ctx, txHash)
 		if err == nil {
 			// Check if transaction failed
@@ -626,14 +789,20 @@ func (c *GaslessClient) waitForTransactionReceipt(txHash common.Hash) (*types.Tr
 
 		if err == ethereum.NotFound {
 			// Wait and retry
+			elapsed := time.Since(startTime)
+			if attemptCount%10 == 0 { // 每10次尝试打印一次日志
+				log.Printf("[INFO] 等待交易确认中... (尝试 #%d, 已等待: %v, 交易哈希: %s)", attemptCount, elapsed, txHash.Hex())
+			}
 			select {
 			case <-ctx.Done():
+				log.Printf("[ERROR] 等待交易确认超时 (已等待: %v, 交易哈希: %s)", elapsed, txHash.Hex())
 				return nil, ctx.Err()
 			case <-time.After(internal.TransactionDelay):
 				continue
 			}
 		}
 
+		log.Printf("[ERROR] 获取交易收据失败: %v (交易哈希: %s)", err, txHash.Hex())
 		return nil, err
 	}
 }

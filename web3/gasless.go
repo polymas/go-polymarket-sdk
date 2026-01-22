@@ -70,7 +70,7 @@ func NewGaslessClient(
 
 	client := &GaslessClient{
 		baseClient: baseClientImpl,
-		web3Client:     baseClientInterface, // 保存接口引用
+		web3Client: baseClientInterface, // 保存接口引用
 		httpClient: &http.Client{
 			Timeout: internal.HTTPClientLongTimeout,
 			// Use default transport (automatically handles proxy, TLS, etc.)
@@ -109,9 +109,8 @@ func getConditionalTokensABI() (*abi.ABI, error) {
 				{"internalType": "address", "name": "collateralToken", "type": "address"},
 				{"internalType": "bytes32", "name": "parentCollectionId", "type": "bytes32"},
 				{"internalType": "bytes32", "name": "conditionId", "type": "bytes32"},
-				{"internalType": "uint256", "name": "partition", "type": "uint256"},
-				{"internalType": "uint256", "name": "amount", "type": "uint256"},
-				{"internalType": "uint256[]", "name": "indexSets", "type": "uint256[]"}
+				{"internalType": "uint256[]", "name": "partition", "type": "uint256[]"},
+				{"internalType": "uint256", "name": "amount", "type": "uint256"}
 			],
 			"name": "splitPosition",
 			"outputs": [],
@@ -123,9 +122,8 @@ func getConditionalTokensABI() (*abi.ABI, error) {
 				{"internalType": "address", "name": "collateralToken", "type": "address"},
 				{"internalType": "bytes32", "name": "parentCollectionId", "type": "bytes32"},
 				{"internalType": "bytes32", "name": "conditionId", "type": "bytes32"},
-				{"internalType": "uint256", "name": "partition", "type": "uint256"},
-				{"internalType": "uint256[]", "name": "indexSets", "type": "uint256[]"},
-				{"internalType": "uint256[]", "name": "amounts", "type": "uint256[]"}
+				{"internalType": "uint256[]", "name": "partition", "type": "uint256[]"},
+				{"internalType": "uint256", "name": "amount", "type": "uint256"}
 			],
 			"name": "mergePositions",
 			"outputs": [],

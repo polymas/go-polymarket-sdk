@@ -136,8 +136,8 @@ func TestMergeTokens(t *testing.T) {
 
 	// 注意：这个测试会实际合并代币，需要谨慎
 	t.Run("Basic", func(t *testing.T) {
-		amounts := []float64{1.0, 0.0}
-		receipt, err := client.MergeTokens(config.TestConditionID, amounts, false)
+		amount := 1.0
+		receipt, err := client.MergeTokens(config.TestConditionID, amount, false)
 		if err != nil {
 			t.Fatalf("MergeTokens failed: %v", err)
 		}
@@ -147,30 +147,35 @@ func TestMergeTokens(t *testing.T) {
 		t.Logf("MergeTokens returned receipt: %+v", receipt)
 	})
 
-	// 边界条件测试 - 空数组
-	t.Run("EmptyArray", func(t *testing.T) {
-		_, err := client.MergeTokens(config.TestConditionID, []float64{}, false)
+	// 边界条件测试 - 零或负数
+	t.Run("ZeroOrNegative", func(t *testing.T) {
+		_, err := client.MergeTokens(config.TestConditionID, 0.0, false)
 		if err == nil {
-			t.Error("Expected error for empty amounts array")
+			t.Error("Expected error for zero amount")
+		}
+		_, err = client.MergeTokens(config.TestConditionID, -1.0, false)
+		if err == nil {
+			t.Error("Expected error for negative amount")
 		}
 	})
 
-	// 测试多个amounts
-	t.Run("MultipleAmounts", func(t *testing.T) {
-		amounts := []float64{1.0, 0.5, 0.3, 0.2}
-		receipt, err := client.MergeTokens(config.TestConditionID, amounts, false)
-		if err != nil {
-			t.Logf("MergeTokens with multiple amounts failed (may be expected): %v", err)
-		} else if receipt != nil {
-			t.Logf("MergeTokens with multiple amounts succeeded")
+	// 测试不同金额
+	t.Run("DifferentAmounts", func(t *testing.T) {
+		amounts := []float64{0.5, 1.0, 2.0}
+		for _, amount := range amounts {
+			receipt, err := client.MergeTokens(config.TestConditionID, amount, false)
+			if err != nil {
+				t.Logf("MergeTokens with amount %f failed (may be expected): %v", amount, err)
+			} else if receipt != nil {
+				t.Logf("MergeTokens with amount %f succeeded", amount)
+			}
 		}
 	})
 
 	// 测试无效conditionID
 	t.Run("InvalidConditionID", func(t *testing.T) {
 		invalidConditionID := types.Keccak256("invalid-condition-id")
-		amounts := []float64{1.0, 0.0}
-		_, err := client.MergeTokens(invalidConditionID, amounts, false)
+		_, err := client.MergeTokens(invalidConditionID, 1.0, false)
 		if err != nil {
 			t.Logf("MergeTokens with invalid conditionID returned error (expected): %v", err)
 		} else {

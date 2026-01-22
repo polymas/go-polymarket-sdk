@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
@@ -166,20 +167,23 @@ func (c *GaslessClient) SplitUSDC(amount float64, conditionID types.Keccak256, n
 		return nil, fmt.Errorf("amount must be positive, got: %f", amount)
 	}
 
-	var to common.Address
-	var data []byte
-	var err error
+	// Determine contract addresses
+	var ctfContract common.Address
 
 	if negRisk {
-		// Use neg risk adapter for split
-		to = common.HexToAddress(internal.PolygonNegRiskAdapter)
-		data, err = c.encodeSplitNegRisk(conditionID, intAmount)
+		ctfContract = common.HexToAddress(internal.PolygonNegRiskAdapter)
 	} else {
-		// Use conditional tokens
-		to = common.HexToAddress(internal.PolygonConditionalTokens)
-		data, err = c.encodeSplit(conditionID, intAmount)
+		ctfContract = common.HexToAddress(internal.PolygonConditionalTokens)
 	}
 
+	// Execute split
+	var splitData []byte
+	var err error
+	if negRisk {
+		splitData, err = c.encodeSplitNegRisk(conditionID, intAmount)
+	} else {
+		splitData, err = c.encodeSplit(conditionID, intAmount)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode split: %w", err)
 	}
@@ -187,9 +191,9 @@ func (c *GaslessClient) SplitUSDC(amount float64, conditionID types.Keccak256, n
 	proxyTxns := []map[string]interface{}{
 		{
 			"typeCode": 1,
-			"to":       to.Hex(),
+			"to":       ctfContract.Hex(),
 			"value":    0,
-			"data":     "0x" + hex.EncodeToString(data),
+			"data":     "0x" + hex.EncodeToString(splitData),
 		},
 	}
 
@@ -197,22 +201,19 @@ func (c *GaslessClient) SplitUSDC(amount float64, conditionID types.Keccak256, n
 }
 
 // MergeTokens merges outcome tokens back into USDC
-func (c *GaslessClient) MergeTokens(conditionID types.Keccak256, amounts []float64, negRisk bool) (*types.TransactionReceipt, error) {
-	if len(amounts) == 0 {
-		return nil, fmt.Errorf("amounts array cannot be empty")
+func (c *GaslessClient) MergeTokens(conditionID types.Keccak256, amount float64, negRisk bool) (*types.TransactionReceipt, error) {
+	if amount <= 0 {
+		return nil, fmt.Errorf("amount must be positive, got: %f", amount)
 	}
 
-	// Convert amounts to int (multiply by 1e6)
-	intAmounts := make([]*big.Int, len(amounts))
-	for i, amount := range amounts {
-		if amount < 0 {
-			return nil, fmt.Errorf("amounts[%d] cannot be negative: %f", i, amount)
-		}
-		amountFloat := big.NewFloat(amount)
-		multiplier := big.NewFloat(1e6)
-		result := new(big.Float).Mul(amountFloat, multiplier)
-		intAmount, _ := result.Int(nil)
-		intAmounts[i] = intAmount
+	// Convert amount to int (multiply by 1e6)
+	amountFloat := big.NewFloat(amount)
+	multiplier := big.NewFloat(1e6)
+	result := new(big.Float).Mul(amountFloat, multiplier)
+	intAmount, _ := result.Int(nil)
+
+	if intAmount.Sign() <= 0 {
+		return nil, fmt.Errorf("amount must be positive, got: %f", amount)
 	}
 
 	var to common.Address
@@ -222,11 +223,11 @@ func (c *GaslessClient) MergeTokens(conditionID types.Keccak256, amounts []float
 	if negRisk {
 		// Use neg risk adapter for merge
 		to = common.HexToAddress(internal.PolygonNegRiskAdapter)
-		data, err = c.encodeMergeNegRisk(conditionID, intAmounts)
+		data, err = c.encodeMergeNegRisk(conditionID, intAmount)
 	} else {
 		// Use conditional tokens
 		to = common.HexToAddress(internal.PolygonConditionalTokens)
-		data, err = c.encodeMerge(conditionID, intAmounts)
+		data, err = c.encodeMerge(conditionID, intAmount)
 	}
 
 	if err != nil {
@@ -246,14 +247,71 @@ func (c *GaslessClient) MergeTokens(conditionID types.Keccak256, amounts []float
 }
 
 // encodeSplit encodes split USDC transaction for regular markets
+// Manual encoding to match Rust implementation order:
+// 1. selector
+// 2. collateralToken (address, 32 bytes padded)
+// 3. parentCollectionId (bytes32)
+// 4. conditionId (bytes32)
+// 5. partition offset (uint256) = 0xa0
+// 6. amount (uint256) - comes after partition offset (non-standard ABI order)
+// 7. partition length (uint256)
+// 8. partition[0] (uint256)
+// 9. partition[1] (uint256)
 func (c *GaslessClient) encodeSplit(conditionID types.Keccak256, amount *big.Int) ([]byte, error) {
 	usdcAddr := common.HexToAddress(internal.PolygonCollateral)
 	hashZero := common.HexToHash(internal.HashZero)
-	partition := big.NewInt(1) // Partition 1 for binary markets
-	indexSets := []*big.Int{big.NewInt(1), big.NewInt(2)}
+	partition := []*big.Int{big.NewInt(1), big.NewInt(2)} // Partition [1, 2] for binary markets (YES|NO)
 
-	// splitPosition(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256 partition, uint256 amount, uint256[] indexSets)
-	return c.conditionalABI.Pack("splitPosition", usdcAddr, hashZero, common.HexToHash(string(conditionID)), partition, amount, indexSets)
+	// Function selector: splitPosition(address,bytes32,bytes32,uint256[],uint256)
+	// Calculate selector using keccak256 hash of function signature
+	// Matching Rust: keccak256(b"splitPosition(address,bytes32,bytes32,uint256[],uint256)")[0:4]
+	funcSig := []byte("splitPosition(address,bytes32,bytes32,uint256[],uint256)")
+	hash := crypto.Keccak256(funcSig)
+	selector := hash[:4]
+
+	var data []byte
+	data = append(data, selector...)
+
+	// Encode collateralToken (address, 32 bytes padded)
+	collateralBytes := make([]byte, 32)
+	copy(collateralBytes[12:], usdcAddr.Bytes())
+	data = append(data, collateralBytes...)
+
+	// Encode parentCollectionId (bytes32)
+	hashZeroBytes := hashZero.Bytes()
+	data = append(data, hashZeroBytes...)
+
+	// Encode conditionId (bytes32)
+	conditionHash := common.HexToHash(string(conditionID))
+	conditionBytes := conditionHash.Bytes()
+	data = append(data, conditionBytes...)
+
+	// Encode partition array offset (32 bytes) = 0xa0
+	// 0x04 (selector) + 0x20*5 (5 params before array) = 0xa0
+	arrayOffset := big.NewInt(0xa0)
+	offsetBytes := make([]byte, 32)
+	arrayOffset.FillBytes(offsetBytes)
+	data = append(data, offsetBytes...)
+
+	// Encode amount (uint256, 32 bytes) - comes after partition offset (matching Rust)
+	amountBytes := make([]byte, 32)
+	amount.FillBytes(amountBytes)
+	data = append(data, amountBytes...)
+
+	// Encode partition array length (32 bytes)
+	arrayLen := big.NewInt(int64(len(partition)))
+	lenBytes := make([]byte, 32)
+	arrayLen.FillBytes(lenBytes)
+	data = append(data, lenBytes...)
+
+	// Encode partition array elements (each 32 bytes)
+	for _, elem := range partition {
+		elemBytes := make([]byte, 32)
+		elem.FillBytes(elemBytes)
+		data = append(data, elemBytes...)
+	}
+
+	return data, nil
 }
 
 // encodeSplitNegRisk encodes split USDC transaction for neg risk markets
@@ -278,19 +336,77 @@ func (c *GaslessClient) encodeSplitNegRisk(conditionID types.Keccak256, amount *
 }
 
 // encodeMerge encodes merge tokens transaction for regular markets
-func (c *GaslessClient) encodeMerge(conditionID types.Keccak256, amounts []*big.Int) ([]byte, error) {
+// Manual encoding to match Rust implementation order (same as split):
+// 1. selector
+// 2. collateralToken (address, 32 bytes padded)
+// 3. parentCollectionId (bytes32)
+// 4. conditionId (bytes32)
+// 5. partition offset (uint256) = 0xa0
+// 6. amount (uint256) - comes after partition offset (non-standard ABI order)
+// 7. partition length (uint256)
+// 8. partition[0] (uint256)
+// 9. partition[1] (uint256)
+func (c *GaslessClient) encodeMerge(conditionID types.Keccak256, amount *big.Int) ([]byte, error) {
 	usdcAddr := common.HexToAddress(internal.PolygonCollateral)
 	hashZero := common.HexToHash(internal.HashZero)
-	partition := big.NewInt(1) // Partition 1 for binary markets
-	indexSets := []*big.Int{big.NewInt(1), big.NewInt(2)}
+	partition := []*big.Int{big.NewInt(1), big.NewInt(2)} // Partition [1, 2] for binary markets (YES|NO)
 
-	// mergePositions(address collateralToken, bytes32 parentCollectionId, bytes32 conditionId, uint256 partition, uint256[] indexSets, uint256[] amounts)
-	return c.conditionalABI.Pack("mergePositions", usdcAddr, hashZero, common.HexToHash(string(conditionID)), partition, indexSets, amounts)
+	// Function selector: mergePositions(address,bytes32,bytes32,uint256[],uint256)
+	// Calculate selector using keccak256 hash of function signature
+	// Matching Rust: keccak256(b"mergePositions(address,bytes32,bytes32,uint256[],uint256)")[0:4]
+	funcSig := []byte("mergePositions(address,bytes32,bytes32,uint256[],uint256)")
+	hash := crypto.Keccak256(funcSig)
+	selector := hash[:4]
+
+	var data []byte
+	data = append(data, selector...)
+
+	// Encode collateralToken (address, 32 bytes padded)
+	collateralBytes := make([]byte, 32)
+	copy(collateralBytes[12:], usdcAddr.Bytes())
+	data = append(data, collateralBytes...)
+
+	// Encode parentCollectionId (bytes32)
+	hashZeroBytes := hashZero.Bytes()
+	data = append(data, hashZeroBytes...)
+
+	// Encode conditionId (bytes32)
+	conditionHash := common.HexToHash(string(conditionID))
+	conditionBytes := conditionHash.Bytes()
+	data = append(data, conditionBytes...)
+
+	// Encode partition array offset (32 bytes) = 0xa0
+	arrayOffset := big.NewInt(0xa0)
+	offsetBytes := make([]byte, 32)
+	arrayOffset.FillBytes(offsetBytes)
+	data = append(data, offsetBytes...)
+
+	// Encode amount (uint256, 32 bytes) - comes after partition offset (matching Rust)
+	amountBytes := make([]byte, 32)
+	amount.FillBytes(amountBytes)
+	data = append(data, amountBytes...)
+
+	// Encode partition array length (32 bytes)
+	arrayLen := big.NewInt(int64(len(partition)))
+	lenBytes := make([]byte, 32)
+	arrayLen.FillBytes(lenBytes)
+	data = append(data, lenBytes...)
+
+	// Encode partition array elements (each 32 bytes)
+	for _, elem := range partition {
+		elemBytes := make([]byte, 32)
+		elem.FillBytes(elemBytes)
+		data = append(data, elemBytes...)
+	}
+
+	return data, nil
 }
 
 // encodeMergeNegRisk encodes merge tokens transaction for neg risk markets
-func (c *GaslessClient) encodeMergeNegRisk(conditionID types.Keccak256, amounts []*big.Int) ([]byte, error) {
-	// Similar to encodeRedeemNegRisk but for merge
+// Function signature: mergePositions(bytes32 _conditionId, uint256 _amount)
+func (c *GaslessClient) encodeMergeNegRisk(conditionID types.Keccak256, amount *big.Int) ([]byte, error) {
+	// Function selector: mergePositions(bytes32,uint256)
+	// keccak256("mergePositions(bytes32,uint256)")[0:4]
 	selector, err := hex.DecodeString("c5b2b0c4") // mergePositions selector for neg risk adapter
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode selector: %w", err)
@@ -299,25 +415,11 @@ func (c *GaslessClient) encodeMergeNegRisk(conditionID types.Keccak256, amounts 
 	conditionHash := common.HexToHash(string(conditionID))
 	conditionBytes := conditionHash.Bytes()
 
-	offset := big.NewInt(0x40)
-	offsetBytes := make([]byte, 32)
-	offset.FillBytes(offsetBytes)
-
-	arrayLen := big.NewInt(int64(len(amounts)))
-	arrayLenBytes := make([]byte, 32)
-	arrayLen.FillBytes(arrayLenBytes)
-
-	amountsBytes := make([]byte, 0, len(amounts)*32)
-	for _, amount := range amounts {
-		amountBytes := make([]byte, 32)
-		amount.FillBytes(amountBytes)
-		amountsBytes = append(amountsBytes, amountBytes...)
-	}
+	amountBytes := make([]byte, 32)
+	amount.FillBytes(amountBytes)
 
 	data := append(selector, conditionBytes...)
-	data = append(data, offsetBytes...)
-	data = append(data, arrayLenBytes...)
-	data = append(data, amountsBytes...)
+	data = append(data, amountBytes...)
 
 	return data, nil
 }

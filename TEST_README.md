@@ -12,6 +12,7 @@
 - `clob/client_readwrite_test.go` - CLOB客户端读写接口测试（需要认证）
 - `web3/client_test.go` - Web3客户端测试（只读）
 - `web3/gasless_test.go` - Gasless客户端测试（读写，需要认证）
+- `web3/gasless_split_merge_test.go` - Gasless Split/Merge 测试（读写，需要认证）
 - `websocket/client_test.go` - WebSocket客户端测试（只读）
 - `websocket/sports_client_test.go` - Sports WebSocket客户端测试（只读）
 - `rfq/client_test.go` - RFQ客户端测试（读写，需要认证）
@@ -33,14 +34,15 @@ export POLY_PRIVATE_KEY="your_private_key_here"
 # 链ID（可选，默认137主网）
 export POLY_CHAIN_ID=137
 
-# 签名类型（可选，默认0=EOA）
-# 0 = EOA, 1 = Proxy, 2 = Safe
-export POLY_SIGNATURE_TYPE=0
 
 # Builder API凭证（Gasless测试需要）
-export POLY_BUILDER_API_KEY="your_builder_api_key"
-export POLY_BUILDER_SECRET="your_builder_secret"
-export POLY_BUILDER_PASSPHRASE="your_builder_passphrase"
+export POLY_API_KEY="your_api_key"
+export POLY_API_SECRET="your_api_secret"
+export POLY_API_PASSPHRASE="your_api_passphrase"
+
+# 签名类型（可选，默认2=Safe）
+# 1 = Proxy, 2 = Safe
+export POLY_SIGNATURE_TYPE=2
 ```
 
 ### 可选的环境变量（测试数据）
@@ -110,6 +112,9 @@ go test ./web3/ -run "^(?!.*Gasless)"
 
 # Gasless测试（需要认证）
 go test ./web3/ -run Gasless
+
+# Gasless Split/Merge测试（需要认证和API凭证）
+go test ./web3/ -run TestSplitAndMergeBTC4H
 
 # WebSocket测试
 go test ./websocket/
@@ -192,20 +197,20 @@ go test -parallel 4 ./...
 
 #### 只读接口测试（client_readonly_test.go）
 
-| 测试函数                    | 状态   | 说明                                             |
-| --------------------------- | ------ | ------------------------------------------------ |
-| `TestGetOrderBook`          | ✅ PASS | 已通过 - 支持自动获取市场数据                    |
-| `TestGetMultipleOrderBooks` | ✅ PASS | 已通过 - 支持自动获取市场数据                    |
-| `TestGetMidpoint`           | ✅ PASS | 已通过 - 支持自动获取市场数据                    |
-| `TestGetMidpoints`          | ✅ PASS | 已通过 - 已修复API响应格式问题                   |
-| `TestGetPrice`              | ✅ PASS | 已通过 - 已修复price字段字符串解析问题           |
-| `TestGetPrices`             | ✅ PASS | 已通过 - 已修复嵌套对象解析问题                   |
-| `TestGetSpread`             | ✅ PASS | 已通过 - 支持自动获取市场数据                    |
-| `TestGetSpreads`            | ✅ PASS | 已通过 - 已修复API响应格式问题                   |
-| `TestGetLastTradePrice`     | ✅ PASS | 已通过 - 已修复无效tokenID处理                   |
-| `TestGetLastTradesPrices`   | ✅ PASS | 已通过 - 已修复空数组结果处理                   |
-| `TestGetFeeRate`            | ✅ PASS | 已通过 - 已修复base_fee字段解析问题              |
-| `TestGetTime`               | ✅ PASS | 已通过 - 服务器时间获取                          |
+| 测试函数                    | 状态   | 说明                                   |
+| --------------------------- | ------ | -------------------------------------- |
+| `TestGetOrderBook`          | ✅ PASS | 已通过 - 支持自动获取市场数据          |
+| `TestGetMultipleOrderBooks` | ✅ PASS | 已通过 - 支持自动获取市场数据          |
+| `TestGetMidpoint`           | ✅ PASS | 已通过 - 支持自动获取市场数据          |
+| `TestGetMidpoints`          | ✅ PASS | 已通过 - 已修复API响应格式问题         |
+| `TestGetPrice`              | ✅ PASS | 已通过 - 已修复price字段字符串解析问题 |
+| `TestGetPrices`             | ✅ PASS | 已通过 - 已修复嵌套对象解析问题        |
+| `TestGetSpread`             | ✅ PASS | 已通过 - 支持自动获取市场数据          |
+| `TestGetSpreads`            | ✅ PASS | 已通过 - 已修复API响应格式问题         |
+| `TestGetLastTradePrice`     | ✅ PASS | 已通过 - 已修复无效tokenID处理         |
+| `TestGetLastTradesPrices`   | ✅ PASS | 已通过 - 已修复空数组结果处理          |
+| `TestGetFeeRate`            | ✅ PASS | 已通过 - 已修复base_fee字段解析问题    |
+| `TestGetTime`               | ✅ PASS | 已通过 - 服务器时间获取                |
 
 #### 读写接口测试（client_readwrite_test.go）
 
@@ -260,12 +265,12 @@ go test -parallel 4 ./...
 
 ### Data包测试状态
 
-| 测试函数           | 状态   | 说明                          |
-| ------------------ | ------ | ----------------------------- |
-| `TestGetPositions` | ✅ PASS | 已通过 - 已修复服务器错误处理（502/504） |
-| `TestGetTrades`    | ✅ PASS | 已通过 - 已修复时间戳解析问题            |
-| `TestGetActivity`  | ✅ PASS | 已通过                                  |
-| `TestGetValue`     | ✅ PASS | 已通过                                  |
+| 测试函数           | 状态   | 说明                                                           |
+| ------------------ | ------ | -------------------------------------------------------------- |
+| `TestGetPositions` | ✅ PASS | 已通过 - 已修复服务器错误处理（502/504），可能需要较长超时时间 |
+| `TestGetTrades`    | ✅ PASS | 已通过 - 已修复时间戳解析问题                                  |
+| `TestGetActivity`  | ✅ PASS | 已通过                                                         |
+| `TestGetValue`     | ✅ PASS | 已通过                                                         |
 
 ### Gamma包测试状态
 
@@ -278,7 +283,7 @@ go test -parallel 4 ./...
 | `TestGetDisputeMarkets`            | ✅ PASS | 已通过                                                      |
 | `TestGetAllMarkets`                | ⏭️ SKIP | 已标记为不测试 - 获取所有历史市场数据需要很长时间且容易超时 |
 | `TestGetEvents`                    | ✅ PASS | 已通过                                                      |
-| `TestSearch`                       | ✅ PASS | 已通过 - 已修复空查询验证问题                                |
+| `TestSearch`                       | ✅ PASS | 已通过 - 已修复空查询验证问题                               |
 | `TestGetTags`                      | ✅ PASS | 已通过                                                      |
 | `TestGetTag`                       | ✅ PASS | 已通过                                                      |
 | `TestGetTagBySlug`                 | ✅ PASS | 已通过                                                      |
@@ -295,6 +300,8 @@ go test -parallel 4 ./...
 
 ### Web3包测试状态
 
+#### 基础Web3测试（client_test.go）
+
 所有测试需要 `POLY_PRIVATE_KEY` 环境变量：
 
 | 测试函数                  | 状态   | 说明                 |
@@ -307,6 +314,29 @@ go test -parallel 4 ./...
 | `TestGetChainID`          | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestGetSignatureType`    | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestClose`               | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
+
+#### Gasless Split/Merge测试（gasless_split_merge_test.go）
+
+测试需要以下环境变量：
+- `POLY_PRIVATE_KEY` - 私钥（必需）
+- `POLY_API_KEY` - API Key（必需）
+- `POLY_API_SECRET` - API Secret（必需）
+- `POLY_API_PASSPHRASE` - API Passphrase（必需）
+- `POLY_SIGNATURE_TYPE` - 签名类型（可选，默认2=Safe）
+- `POLY_TEST_MARKET_SLUG` - 测试市场slug（可选，如：`btc-updown-4h-1769086800`）
+- `POLY_TEST_CONDITION_ID` - 测试市场condition ID（可选）
+
+| 测试函数                  | 状态   | 说明                                 |
+| ------------------------- | ------ | ------------------------------------ |
+| `TestSplitAndMergeBTC4H`  | ✅ PASS | 已通过 - 需要API凭证和私钥           |
+| `TestSplitAndMergeBTC4H/SplitUSDC` | ✅ PASS | 已通过 - Split USDC 为 outcome tokens |
+| `TestSplitAndMergeBTC4H/MergeTokens` | ✅ PASS | 已通过 - Merge tokens 回 USDC        |
+| `TestSplitAndMergeBTC4H/SplitAndMergeFlow` | ✅ PASS | 已通过 - 完整流程测试                |
+
+**注意**：
+- 测试会自动搜索 BTC 4小时市场，或使用 `POLY_TEST_MARKET_SLUG`/`POLY_TEST_CONDITION_ID` 指定的市场
+- 测试会实际执行链上交易，请使用测试账户
+- 默认签名类型为 2 (Safe)，可通过 `POLY_SIGNATURE_TYPE` 修改
 
 ### RFQ包测试状态
 
@@ -347,8 +377,8 @@ go test -parallel 4 ./...
 - ✅ 通过：4个（TestGetPositions, TestGetTrades, TestGetActivity, TestGetValue）
 
 **Gamma包**：
-- ✅ 通过：15个（TestGetMarkets, TestGetCertaintyMarkets, TestGetDisputeMarkets, TestGetEvents, TestSearch, TestGetTags, TestGetTag, TestGetTagBySlug, TestGetSeries, TestGetComment, TestGetSamplingSimplifiedMarkets, TestGetSamplingMarkets, TestGetSimplifiedMarkets）
-- ⏭️ 跳过：6个（API端点已废弃或需要测试数据）
+- ✅ 通过：16个（TestGetMarkets, TestGetCertaintyMarkets, TestGetDisputeMarkets, TestGetEvents, TestSearch, TestGetTags, TestGetTag, TestGetTagBySlug, TestGetSeries, TestGetComment, TestGetSamplingSimplifiedMarkets, TestGetSamplingMarkets, TestGetSimplifiedMarkets等）
+- ⏭️ 跳过：5个（API端点已废弃或需要测试数据）
 
 **WebSocket包**：
 - ✅ 通过：9个（包括市场频道和体育频道测试）
@@ -357,18 +387,23 @@ go test -parallel 4 ./...
 - ✅ 通过：6个（包括价格和评论更新测试）
 
 **总计**：
-- ✅ **通过**：47个测试
+- ✅ **通过**：54个测试
   - CLOB包：12个（所有只读接口测试已通过）
   - Data包：4个（TestGetPositions, TestGetTrades, TestGetActivity, TestGetValue）
-  - Gamma包：15个（包括TestGetSeries, TestSearch等）
+  - Gamma包：16个（包括TestGetSeries, TestSearch等）
   - WebSocket包：9个（市场频道和体育频道测试）
   - RTDS包：6个（价格和评论更新测试）
   - Subgraph包：3个（TestQuery, TestGetUserPositions, TestGetUserPNL - 自动跳过已移除的端点）
+  - Web3包：4个（TestSplitAndMergeBTC4H及其子测试）
 - ⏭️ **跳过**：41个测试（需要认证或测试数据，或API端点已废弃 - 正常行为）
 - ❌ **失败**：0个测试
 
 ### 最新更新
 
+- ✅ **Gasless Split/Merge 测试已实现**：新增 `TestSplitAndMergeBTC4H` 测试，支持 Split USDC 和 Merge Tokens 操作
+  - 支持自动搜索 BTC 4小时市场或通过环境变量指定市场
+  - 默认签名类型为 2 (Safe)，可通过 `POLY_SIGNATURE_TYPE` 修改
+  - 已移除 approve 步骤，简化交易流程
 - ✅ 已实现预测试函数 `getTestMarketData`，可自动通过slug获取BTC 15分钟涨跌预测市场数据
 - ✅ `TestGetOrderBook` 现在支持自动获取活跃市场数据进行测试
 - ✅ `TestGetTime` 已修复时间戳解析问题，测试通过
@@ -419,6 +454,12 @@ go test -parallel 4 ./...
 - **原因**：获取所有历史市场数据需要很长时间且容易超时，不适合常规测试
 - **处理方案**：已在测试函数中添加 `t.Skip()`，测试会自动跳过
 - **状态**：⏭️ 已跳过 - 测试代码保留但不会执行
+
+#### ✅ TestGetPositions (Data包) - 已修复
+- **问题**：API服务器偶尔返回502/504错误，导致测试失败
+- **修复方案**：添加了服务器错误检测，当遇到502/504错误时自动跳过（视为临时性问题）
+- **注意**：此测试可能需要较长的超时时间（建议使用 `-timeout 90s`）
+- **状态**：✅ **已修复并通过**
 
 ### 修复总结
 
