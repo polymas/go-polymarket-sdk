@@ -283,7 +283,7 @@ func (c *GaslessClient) buildProxyRelayTransactionBatch(
 		Data: encodedTxn,
 	}
 
-	estimatedGas, err := c.client.EstimateGas(context.Background(), callMsg)
+	estimatedGas, err := c.estimateGasWithRetry(context.Background(), callMsg)
 	if err != nil {
 		// Use default if estimation fails (increase for batch)
 		estimatedGas = internal.DefaultGasEstimate * uint64(len(proxyTxns))
@@ -765,7 +765,7 @@ func (c *GaslessClient) waitForTransactionReceipt(txHash common.Hash) (*types.Tr
 
 	for {
 		attemptCount++
-		receipt, err := c.client.TransactionReceipt(ctx, txHash)
+		receipt, err := c.transactionReceiptWithRetry(ctx, txHash)
 		if err == nil {
 			// Check if transaction failed
 			if receipt.Status == 0 {
@@ -778,7 +778,7 @@ func (c *GaslessClient) waitForTransactionReceipt(txHash common.Hash) (*types.Tr
 			}
 
 			// Get transaction to extract To address
-			tx, _, err := c.client.TransactionByHash(ctx, txHash)
+			tx, _, err := c.transactionByHashWithRetry(ctx, txHash)
 			var toAddr *common.Address
 			if err == nil && tx != nil {
 				toAddr = tx.To()
@@ -810,7 +810,7 @@ func (c *GaslessClient) waitForTransactionReceipt(txHash common.Hash) (*types.Tr
 // extractTransactionError 尝试从失败的交易中提取错误信息
 func (c *GaslessClient) extractTransactionError(ctx context.Context, txHash common.Hash, receipt *ethtypes.Receipt) string {
 	// 获取交易详情
-	tx, _, err := c.client.TransactionByHash(ctx, txHash)
+	tx, _, err := c.transactionByHashWithRetry(ctx, txHash)
 	if err != nil {
 		// 如果无法获取交易，至少提供基本信息
 		return fmt.Sprintf("无法获取交易详情 (txHash: %s)", txHash.Hex())
@@ -828,7 +828,7 @@ func (c *GaslessClient) extractTransactionError(ctx context.Context, txHash comm
 
 	// 在交易所在的区块之前执行 call（使用 receipt.BlockNumber - 1）
 	blockNum := new(big.Int).Sub(receipt.BlockNumber, big.NewInt(1))
-	_, err = c.client.CallContract(ctx, msg, blockNum)
+	_, err = c.callContractWithRetry(ctx, msg, blockNum)
 	if err != nil {
 		// 从错误信息中提取 revert reason
 		errStr := err.Error()

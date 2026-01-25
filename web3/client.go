@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/signing"
@@ -33,7 +36,9 @@ type Client interface {
 // baseClient 是Polymarket的基础Web3客户端
 // 不允许直接导出，只能通过 NewClient 创建
 type baseClient struct {
-	client          *ethclient.Client
+	clients         []*ethclient.Client // 多个 RPC 客户端，支持轮询和故障转移
+	currentIndex    int64              // 当前使用的客户端索引（使用 atomic 操作）
+	clientMu        sync.RWMutex        // 保护 clients 切片的并发访问
 	privateKey      *ecdsa.PrivateKey
 	signer          *signing.Signer
 	signatureType   types.SignatureType
@@ -51,20 +56,49 @@ func NewClient(
 	signatureType types.SignatureType,
 	chainID types.ChainID,
 ) (Client, error) {
-	// Connect to Polygon RPC
-	rpcURL := internal.PolygonRPCMainnet
+	// 根据 chainID 选择对应的 RPC 节点列表
+	var rpcURLs []string
 	if chainID == internal.Amoy {
-		rpcURL = internal.PolygonRPCAmoy
+		rpcURLs = internal.PolygonRPCAmoyList
+	} else {
+		rpcURLs = internal.PolygonRPCMainnetList
 	}
 
-	client, err := ethclient.Dial(rpcURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RPC: %w", err)
+	if len(rpcURLs) == 0 {
+		return nil, fmt.Errorf("no RPC URLs configured for chain ID %d", chainID)
+	}
+
+	// 初始化多个 RPC 客户端
+	var clients []*ethclient.Client
+	var failedURLs []string
+
+	for _, rpcURL := range rpcURLs {
+		client, err := ethclient.Dial(rpcURL)
+		if err != nil {
+			failedURLs = append(failedURLs, fmt.Sprintf("%s: %v", rpcURL, err))
+			continue
+		}
+		clients = append(clients, client)
+	}
+
+	// 至少需要一个节点成功连接
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("failed to connect to any RPC node. Errors: %v", failedURLs)
+	}
+
+	// 如果有部分节点连接失败，记录警告（但不影响使用）
+	if len(failedURLs) > 0 {
+		// 可以选择记录日志，这里暂时不记录以避免引入日志依赖
+		_ = failedURLs
 	}
 
 	// Create signer
 	signer, err := signing.NewSigner(privateKey, chainID)
 	if err != nil {
+		// 清理已连接的客户端
+		for _, client := range clients {
+			client.Close()
+		}
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
 
@@ -73,11 +107,16 @@ func NewClient(
 	// Parse exchange ABI (simplified - we only need getPolyProxyWalletAddress)
 	exchangeABI, err := getExchangeABI()
 	if err != nil {
+		// 清理已连接的客户端
+		for _, client := range clients {
+			client.Close()
+		}
 		return nil, fmt.Errorf("failed to parse exchange ABI: %w", err)
 	}
 
 	web3Client := &baseClient{
-		client:          client,
+		clients:         clients,
+		currentIndex:    0,
 		privateKey:      signer.PrivateKey(),
 		signer:          signer,
 		signatureType:   signatureType,
@@ -94,6 +133,249 @@ func NewClient(
 	}
 
 	return web3Client, nil
+}
+
+// isRateLimitError 检查错误是否为 429 rate limit 错误
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "429") ||
+		strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "rate exceeded")
+}
+
+// isRetryableError 检查错误是否可重试（网络错误、429 等）
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return isRateLimitError(err) ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "connection") ||
+		strings.Contains(errStr, "network") ||
+		strings.Contains(errStr, "dial")
+}
+
+// getNextClientIndex 获取下一个客户端索引（轮询）
+func (c *baseClient) getNextClientIndex() int {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	if len(c.clients) == 0 {
+		return 0
+	}
+	current := int(atomic.AddInt64(&c.currentIndex, 1) - 1)
+	return current % len(c.clients)
+}
+
+// callContractWithRetry 带重试的合约调用，支持多节点轮询和故障转移
+func (c *baseClient) callContractWithRetry(
+	ctx context.Context,
+	msg ethereum.CallMsg,
+	blockNumber *big.Int,
+) ([]byte, error) {
+	c.clientMu.RLock()
+	clients := c.clients
+	c.clientMu.RUnlock()
+
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("no RPC clients available")
+	}
+
+	// 从当前索引开始，尝试所有节点
+	startIndex := c.getNextClientIndex()
+	var lastErr error
+
+	for i := 0; i < len(clients); i++ {
+		index := (startIndex + i) % len(clients)
+		client := clients[index]
+
+		result, err := client.CallContract(ctx, msg, blockNumber)
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+
+		// 如果是 429 错误或可重试错误，继续尝试下一个节点
+		if isRetryableError(err) {
+			continue
+		}
+
+		// 对于其他错误（如合约执行错误），直接返回
+		return nil, err
+	}
+
+	// 所有节点都失败了，返回最后一个错误
+	return nil, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
+}
+
+// balanceAtWithRetry 带重试的余额查询，支持多节点轮询和故障转移
+func (c *baseClient) balanceAtWithRetry(
+	ctx context.Context,
+	account common.Address,
+	blockNumber *big.Int,
+) (*big.Int, error) {
+	c.clientMu.RLock()
+	clients := c.clients
+	c.clientMu.RUnlock()
+
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("no RPC clients available")
+	}
+
+	// 从当前索引开始，尝试所有节点
+	startIndex := c.getNextClientIndex()
+	var lastErr error
+
+	for i := 0; i < len(clients); i++ {
+		index := (startIndex + i) % len(clients)
+		client := clients[index]
+
+		balance, err := client.BalanceAt(ctx, account, blockNumber)
+		if err == nil {
+			return balance, nil
+		}
+
+		lastErr = err
+
+		// 如果是 429 错误或可重试错误，继续尝试下一个节点
+		if isRetryableError(err) {
+			continue
+		}
+
+		// 对于其他错误，直接返回
+		return nil, err
+	}
+
+	// 所有节点都失败了，返回最后一个错误
+	return nil, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
+}
+
+// estimateGasWithRetry 带重试的 Gas 估算，支持多节点轮询和故障转移
+func (c *baseClient) estimateGasWithRetry(
+	ctx context.Context,
+	msg ethereum.CallMsg,
+) (uint64, error) {
+	c.clientMu.RLock()
+	clients := c.clients
+	c.clientMu.RUnlock()
+
+	if len(clients) == 0 {
+		return 0, fmt.Errorf("no RPC clients available")
+	}
+
+	// 从当前索引开始，尝试所有节点
+	startIndex := c.getNextClientIndex()
+	var lastErr error
+
+	for i := 0; i < len(clients); i++ {
+		index := (startIndex + i) % len(clients)
+		client := clients[index]
+
+		gas, err := client.EstimateGas(ctx, msg)
+		if err == nil {
+			return gas, nil
+		}
+
+		lastErr = err
+
+		// 如果是 429 错误或可重试错误，继续尝试下一个节点
+		if isRetryableError(err) {
+			continue
+		}
+
+		// 对于其他错误，直接返回
+		return 0, err
+	}
+
+	// 所有节点都失败了，返回最后一个错误
+	return 0, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
+}
+
+// transactionReceiptWithRetry 带重试的交易回执查询，支持多节点轮询和故障转移
+func (c *baseClient) transactionReceiptWithRetry(
+	ctx context.Context,
+	txHash common.Hash,
+) (*ethtypes.Receipt, error) {
+	c.clientMu.RLock()
+	clients := c.clients
+	c.clientMu.RUnlock()
+
+	if len(clients) == 0 {
+		return nil, fmt.Errorf("no RPC clients available")
+	}
+
+	// 从当前索引开始，尝试所有节点
+	startIndex := c.getNextClientIndex()
+	var lastErr error
+
+	for i := 0; i < len(clients); i++ {
+		index := (startIndex + i) % len(clients)
+		client := clients[index]
+
+		receipt, err := client.TransactionReceipt(ctx, txHash)
+		if err == nil {
+			return receipt, nil
+		}
+
+		lastErr = err
+
+		// 如果是 429 错误或可重试错误，继续尝试下一个节点
+		if isRetryableError(err) {
+			continue
+		}
+
+		// 对于其他错误（如交易不存在），直接返回
+		return nil, err
+	}
+
+	// 所有节点都失败了，返回最后一个错误
+	return nil, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
+}
+
+// transactionByHashWithRetry 带重试的交易查询，支持多节点轮询和故障转移
+func (c *baseClient) transactionByHashWithRetry(
+	ctx context.Context,
+	txHash common.Hash,
+) (*ethtypes.Transaction, bool, error) {
+	c.clientMu.RLock()
+	clients := c.clients
+	c.clientMu.RUnlock()
+
+	if len(clients) == 0 {
+		return nil, false, fmt.Errorf("no RPC clients available")
+	}
+
+	// 从当前索引开始，尝试所有节点
+	startIndex := c.getNextClientIndex()
+	var lastErr error
+
+	for i := 0; i < len(clients); i++ {
+		index := (startIndex + i) % len(clients)
+		client := clients[index]
+
+		tx, pending, err := client.TransactionByHash(ctx, txHash)
+		if err == nil {
+			return tx, pending, nil
+		}
+
+		lastErr = err
+
+		// 如果是 429 错误或可重试错误，继续尝试下一个节点
+		if isRetryableError(err) {
+			continue
+		}
+
+		// 对于其他错误（如交易不存在），直接返回
+		return nil, false, err
+	}
+
+	// 所有节点都失败了，返回最后一个错误
+	return nil, false, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
 func (c *baseClient) GetPrivateKey() *ecdsa.PrivateKey {
@@ -167,7 +449,7 @@ func (c *baseClient) getPolyProxyWalletAddress(address types.EthAddress) (types.
 		Data: packed,
 	}
 
-	result, err := c.client.CallContract(context.Background(), callMsg, nil)
+	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call contract: %w", err)
 	}
@@ -206,7 +488,7 @@ func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAdd
 		Data: packed,
 	}
 
-	result, err := c.client.CallContract(context.Background(), callMsg, nil)
+	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call computeProxyAddress: %w", err)
 	}
@@ -223,7 +505,7 @@ func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAdd
 
 // GetPOLBalance 获取基础地址的POL余额
 func (c *baseClient) GetPOLBalance() (float64, error) {
-	balance, err := c.client.BalanceAt(context.Background(), common.HexToAddress(string(c.baseAddress)), nil)
+	balance, err := c.balanceAtWithRetry(context.Background(), common.HexToAddress(string(c.baseAddress)), nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get balance: %w", err)
 	}
@@ -257,7 +539,7 @@ func (c *baseClient) GetUSDCBalance(address types.EthAddress) (float64, error) {
 		Data: packed,
 	}
 
-	result, err := c.client.CallContract(context.Background(), callMsg, nil)
+	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to call contract: %w", err)
 	}
@@ -306,7 +588,7 @@ func (c *baseClient) GetTokenBalance(tokenID string, address types.EthAddress) (
 		Data: packed,
 	}
 
-	result, err := c.client.CallContract(context.Background(), callMsg, nil)
+	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to call contract: %w", err)
 	}
@@ -324,11 +606,16 @@ func (c *baseClient) GetTokenBalance(tokenID string, address types.EthAddress) (
 	return resultFloat, nil
 }
 
-// Close 关闭客户端连接
+// Close 关闭所有客户端连接
 func (c *baseClient) Close() {
-	if c.client != nil {
-		c.client.Close()
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+	for _, client := range c.clients {
+		if client != nil {
+			client.Close()
+		}
 	}
+	c.clients = nil
 }
 
 // getExchangeABI 返回交易所合约的最小ABI

@@ -24,7 +24,7 @@ const (
 // ============================================================================
 
 const (
-	// Polygon RPC 节点
+	// Polygon RPC 节点（保留单个常量以保持向后兼容）
 	PolygonRPCMainnet = "https://rpc-mainnet.matic.quiknode.pro"
 	PolygonRPCAmoy    = "https://rpc-amoy.polygon.technology"
 
@@ -33,6 +33,26 @@ const (
 	GammaAPIDomain = "https://gamma-api.polymarket.com"
 	DataAPIDomain  = "https://data-api.polymarket.com"
 	RelayerDomain  = "https://relayer-v2.polymarket.com"
+)
+
+// Polygon RPC 节点列表（按优先级排序，用于多节点轮询和故障转移）
+var (
+	// PolygonRPCMainnetList 主网 RPC 节点列表（按优先级排序，已测试可用性）
+	PolygonRPCMainnetList = []string{
+		"https://rpc-mainnet.matic.quiknode.pro",        // ✅ 已验证可用
+		"https://polygon-rpc.com",                        // ✅ 已验证可用（官方推荐）
+		"https://polygon.drpc.org",                       // ✅ 已验证可用
+		"https://polygon-bor.publicnode.com",            // ✅ 已验证可用
+		"https://polygon.api.onfinality.io/public",      // ✅ 已验证可用
+		"https://endpoints.omniatech.io/v1/matic/mainnet/public", // ✅ 已验证可用
+		"https://137.rpc.thirdweb.com",                  // ✅ 已验证可用
+	}
+
+	// PolygonRPCAmoyList 测试网 RPC 节点列表
+	PolygonRPCAmoyList = []string{
+		"https://rpc-amoy.polygon.technology",
+		"https://polygon-amoy.drpc.org",
+	}
 )
 
 // ============================================================================

@@ -134,7 +134,7 @@ func (c *GaslessClient) signSafeTransaction(
 		Data: packed,
 	}
 
-	txHashBytes, err := c.client.CallContract(context.Background(), callMsg, nil)
+	txHashBytes, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call getTransactionHash: %w", err)
 	}
@@ -187,7 +187,7 @@ func (c *GaslessClient) getSafeProxyAddress() (types.EthAddress, error) {
 		Data: packed,
 	}
 
-	result, err := c.client.CallContract(context.Background(), callMsg, nil)
+	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call computeProxyAddress: %w", err)
 	}
