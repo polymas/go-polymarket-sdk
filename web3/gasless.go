@@ -27,19 +27,21 @@ type GaslessClient struct {
 	relayerCallCount int64 // 使用 atomic 操作，记录总调用次数
 }
 
-// NewGaslessClient creates a new gasless Web3 client
+// NewGaslessClient creates a new gasless Web3 client.
+// rpcURLs 为可选：若传入至少一个 URL 则使用自定义 RPC 列表，否则使用 SDK 内置列表（与 NewClient 一致）
 func NewGaslessClient(
 	privateKey string,
 	signatureType types.SignatureType,
 	chainID types.ChainID,
 	builderCreds *types.ApiCreds,
+	rpcURLs ...string,
 ) (*GaslessClient, error) {
 	// Only support proxy (1) and safe (2) wallets
 	if signatureType != types.ProxySignatureType && signatureType != types.SafeSignatureType {
 		return nil, fmt.Errorf("gaslessClient only supports signature_type=1 (proxy) and signature_type=2 (safe)")
 	}
 
-	baseClientInterface, err := NewClient(privateKey, signatureType, chainID)
+	baseClientInterface, err := NewClient(privateKey, signatureType, chainID, rpcURLs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base client: %w", err)
 	}
