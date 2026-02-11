@@ -44,7 +44,6 @@ var (
 		"https://polygon.drpc.org",                       // ✅ 已验证可用
 		"https://polygon-bor.publicnode.com",            // ✅ 已验证可用
 		"https://polygon.api.onfinality.io/public",      // ✅ 已验证可用
-		"https://endpoints.omniatech.io/v1/matic/mainnet/public", // ✅ 已验证可用
 		"https://137.rpc.thirdweb.com",                  // ✅ 已验证可用
 	}
 
