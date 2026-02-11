@@ -51,20 +51,24 @@ type baseClient struct {
 
 // NewClient 创建新的基础Web3客户端
 // 返回 Client 接口，不允许直接访问实现类型
+// rpcURLs 为可选：若传入至少一个 URL 则使用自定义 RPC 列表，否则使用 SDK 内置的 Polygon 主网/Amoy 测试网节点列表
 func NewClient(
 	privateKey string,
 	signatureType types.SignatureType,
 	chainID types.ChainID,
+	rpcURLs ...string,
 ) (Client, error) {
-	// 根据 chainID 选择对应的 RPC 节点列表
-	var rpcURLs []string
-	if chainID == internal.Amoy {
-		rpcURLs = internal.PolygonRPCAmoyList
+	// 根据 chainID 或调用方传入选择 RPC 节点列表（未传入时使用内置列表）
+	var list []string
+	if len(rpcURLs) > 0 {
+		list = rpcURLs
+	} else if chainID == internal.Amoy {
+		list = internal.PolygonRPCAmoyList
 	} else {
-		rpcURLs = internal.PolygonRPCMainnetList
+		list = internal.PolygonRPCMainnetList
 	}
 
-	if len(rpcURLs) == 0 {
+	if len(list) == 0 {
 		return nil, fmt.Errorf("no RPC URLs configured for chain ID %d", chainID)
 	}
 
@@ -72,7 +76,7 @@ func NewClient(
 	var clients []*ethclient.Client
 	var failedURLs []string
 
-	for _, rpcURL := range rpcURLs {
+	for _, rpcURL := range list {
 		client, err := ethclient.Dial(rpcURL)
 		if err != nil {
 			failedURLs = append(failedURLs, fmt.Sprintf("%s: %v", rpcURL, err))
