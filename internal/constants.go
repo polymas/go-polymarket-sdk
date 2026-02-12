@@ -52,6 +52,19 @@ var (
 		"https://rpc-amoy.polygon.technology",
 		"https://polygon-amoy.drpc.org",
 	}
+
+	// PolygonWSSMainnetList 主网 WebSocket 节点列表（用于链上订阅，如 eth_subscribe logs/newHeads）
+	PolygonWSSMainnetList = []string{
+		"wss://polygon-bor.publicnode.com",
+		"wss://polygon.drpc.org",
+		"wss://polygon-mainnet.public.blastapi.io",
+	}
+
+	// PolygonWSSAmoyList 测试网 WebSocket 节点列表
+	PolygonWSSAmoyList = []string{
+		"wss://polygon-amoy.drpc.org",
+		"wss://rpc-amoy.polygon.technology",
+	}
 )
 
 // ============================================================================
