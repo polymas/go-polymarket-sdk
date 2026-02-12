@@ -39,12 +39,12 @@ const (
 var (
 	// PolygonRPCMainnetList 主网 RPC 节点列表（按优先级排序，已测试可用性）
 	PolygonRPCMainnetList = []string{
-		"https://rpc-mainnet.matic.quiknode.pro",        // ✅ 已验证可用
-		"https://polygon-rpc.com",                        // ✅ 已验证可用（官方推荐）
-		"https://polygon.drpc.org",                       // ✅ 已验证可用
-		"https://polygon-bor.publicnode.com",            // ✅ 已验证可用
-		"https://polygon.api.onfinality.io/public",      // ✅ 已验证可用
-		"https://137.rpc.thirdweb.com",                  // ✅ 已验证可用
+		"https://rpc-mainnet.matic.quiknode.pro",   // ✅ 已验证可用
+		"https://polygon-rpc.com",                  // ✅ 已验证可用（官方推荐）
+		"https://polygon.drpc.org",                 // ✅ 已验证可用
+		"https://polygon-bor.publicnode.com",       // ✅ 已验证可用
+		"https://polygon.api.onfinality.io/public", // ✅ 已验证可用
+		"https://137.rpc.thirdweb.com",             // ✅ 已验证可用
 	}
 
 	// PolygonRPCAmoyList 测试网 RPC 节点列表
@@ -133,14 +133,14 @@ const (
 
 // Tags endpoints
 const (
-	GetTags    = "/tags"
-	GetTag     = "/tags/"
+	GetTags      = "/tags"
+	GetTag       = "/tags/"
 	GetTagBySlug = "/tags/slug/"
 )
 
 // Series endpoints
 const (
-	GetSeries      = "/series"
+	GetSeries       = "/series"
 	GetSeriesBySlug = "/series/slug/"
 )
 
@@ -152,7 +152,7 @@ const (
 
 // Profiles endpoints
 const (
-	GetProfile         = "/profiles/"
+	GetProfile           = "/profiles/"
 	GetProfileByUsername = "/profiles/username/"
 )
 

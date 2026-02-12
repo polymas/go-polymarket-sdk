@@ -29,6 +29,12 @@ var (
 // ErrNoWSSURL 未配置 WSS URL 且内置列表为空
 var ErrNoWSSURL = errors.New("chainws: no WSS URL configured and built-in list is empty")
 
+// ErrWatchAddrsRequired 未设置 WatchAddresses 或数量超过上限时返回，禁止全量订阅以控制流量
+var ErrWatchAddrsRequired = errors.New("chainws: WatchAddresses required (1 to 100 addresses); refusing full subscription")
+
+// maxWatchAddrsForTopicFilter 使用服务端 topic 过滤时，watch 地址数量上限（避免 RPC 对 topics 数量限制）
+const maxWatchAddrsForTopicFilter = 100
+
 // Client 链上 WebSocket 客户端接口，用于监控当前地址相关的链上数据变化
 type Client interface {
 	// SetOnLog 设置日志回调，仅当日志与监控地址相关时触发（如 ERC20 Transfer 的 from/to）
@@ -55,10 +61,11 @@ type chainWSClient struct {
 	onLog   func(*ethtypes.Log)
 	onBlock func(blockNumber uint64)
 
-	client    *ethclient.Client
-	subLogs   ethereum.Subscription
-	subHead   ethereum.Subscription
-	logCh     chan ethtypes.Log
+	client       *ethclient.Client
+	subLogsList  []ethereum.Subscription // 可能为多个（按 topic 过滤时），或单个（全量订阅）
+	subHead      ethereum.Subscription
+	logCh        chan ethtypes.Log
+	errCh        chan error // 合并多个 sub.Err()，供 runLogLoop 使用
 	stopChan  chan struct{}
 	stopOnce  sync.Once
 	running   bool
@@ -109,6 +116,28 @@ func polymarketContractAddresses() []common.Address {
 		common.HexToAddress(internal.PolygonConditionalTokens),
 		common.HexToAddress(internal.PolygonNegRiskAdapter),
 		common.HexToAddress(internal.PolygonProxyFactory),
+	}
+}
+
+// buildTopicFilterQueries 根据监控地址生成「仅推送与这些地址相关」的 FilterQuery 列表，供服务端过滤以降低流量。
+// Transfer/Approval: topic1=from, topic2=to；TransferSingle: topic2=from, topic3=to。需分别订阅 from 侧与 to 侧。
+// 若仅做仓位追踪，可进一步只订阅 Collateral + ConditionalTokens + NegRiskAdapter（见 polymarketContractAddresses）以再减流量。
+func (c *chainWSClient) buildTopicFilterQueries(addrs []common.Address) []ethereum.FilterQuery {
+	if len(addrs) == 0 || len(addrs) > maxWatchAddrsForTopicFilter {
+		return nil
+	}
+	addrHashes := make([]common.Hash, 0, len(addrs))
+	for _, a := range addrs {
+		addrHashes = append(addrHashes, common.BytesToHash(common.LeftPadBytes(a.Bytes(), 32)))
+	}
+	contracts := c.contractAddrs
+	return []ethereum.FilterQuery{
+		{Addresses: contracts, Topics: [][]common.Hash{{transferEventSig}, addrHashes, nil}},           // Transfer, topic1=from
+		{Addresses: contracts, Topics: [][]common.Hash{{transferEventSig}, nil, addrHashes}},           // Transfer, topic2=to
+		{Addresses: contracts, Topics: [][]common.Hash{{approvalEventSig}, addrHashes, nil}},            // Approval, topic1=owner
+		{Addresses: contracts, Topics: [][]common.Hash{{approvalEventSig}, nil, addrHashes}},           // Approval, topic2=spender
+		{Addresses: contracts, Topics: [][]common.Hash{{transferSingleEventSig}, nil, addrHashes, nil}}, // TransferSingle, topic2=from
+		{Addresses: contracts, Topics: [][]common.Hash{{transferSingleEventSig}, nil, nil, addrHashes}}, // TransferSingle, topic3=to
 	}
 }
 
@@ -202,26 +231,52 @@ func (c *chainWSClient) Start(ctx context.Context) error {
 	}
 	c.client = client
 	c.logCh = make(chan ethtypes.Log, 64)
+	c.errCh = make(chan error, 8)
 
-	query := ethereum.FilterQuery{
-		Addresses: c.contractAddrs,
-		Topics:    [][]common.Hash{{transferEventSig, approvalEventSig, transferSingleEventSig}},
-	}
-	subLogs, err := client.SubscribeFilterLogs(ctx, query, c.logCh)
-	if err != nil {
+	c.watchAddrsMu.RLock()
+	watchAddrs := make([]common.Address, len(c.watchAddrs))
+	copy(watchAddrs, c.watchAddrs)
+	c.watchAddrsMu.RUnlock()
+
+	queries := c.buildTopicFilterQueries(watchAddrs)
+	if len(queries) == 0 {
 		client.Close()
 		c.runningMu.Lock()
 		c.running = false
 		c.runningMu.Unlock()
-		return err
+		return ErrWatchAddrsRequired
 	}
-	c.subLogs = subLogs
+	// 服务端按 topic 过滤，只推送与 watchAddrs 相关的日志，控制流量
+	for _, q := range queries {
+		sub, err := client.SubscribeFilterLogs(ctx, q, c.logCh)
+		if err != nil {
+			for _, s := range c.subLogsList {
+				s.Unsubscribe()
+			}
+			client.Close()
+			c.runningMu.Lock()
+			c.running = false
+			c.runningMu.Unlock()
+			return err
+		}
+		c.subLogsList = append(c.subLogsList, sub)
+		go func(s ethereum.Subscription) {
+			if e := <-s.Err(); e != nil {
+				select {
+				case c.errCh <- e:
+				default:
+				}
+			}
+		}(sub)
+	}
 
 	if c.onBlock != nil {
 		headCh := make(chan *ethtypes.Header, 8)
 		subHead, err := client.SubscribeNewHead(ctx, headCh)
 		if err != nil {
-			subLogs.Unsubscribe()
+			for _, s := range c.subLogsList {
+				s.Unsubscribe()
+			}
 			client.Close()
 			c.runningMu.Lock()
 			c.running = false
@@ -242,12 +297,11 @@ func (c *chainWSClient) runLogLoop() {
 		select {
 		case <-c.stopChan:
 			return
-		case err, ok := <-c.subLogs.Err():
-			if !ok || err == nil {
+		case err := <-c.errCh:
+			if err != nil {
+				// 连接错误，由 runReconnect 处理
 				return
 			}
-			// 连接错误，由 runReconnect 处理
-			return
 		case vLog, ok := <-c.logCh:
 			if !ok {
 				return
@@ -289,10 +343,12 @@ func (c *chainWSClient) Stop() {
 		c.runningMu.Lock()
 		c.running = false
 		c.runningMu.Unlock()
-		if c.subLogs != nil {
-			c.subLogs.Unsubscribe()
-			c.subLogs = nil
+		for _, s := range c.subLogsList {
+			if s != nil {
+				s.Unsubscribe()
+			}
 		}
+		c.subLogsList = nil
 		if c.subHead != nil {
 			c.subHead.Unsubscribe()
 			c.subHead = nil

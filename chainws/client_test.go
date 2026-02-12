@@ -2,6 +2,7 @@ package chainws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -10,9 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/polymas/go-polymarket-sdk/data"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
@@ -80,6 +84,25 @@ func TestIsRunning(t *testing.T) {
 
 	if c.IsRunning() {
 		t.Error("expected not running before Start")
+	}
+}
+
+func TestStartRequiresWatchAddresses(t *testing.T) {
+	// 未设置 WatchAddresses 时 Start 必须报错，禁止全量订阅
+	c, err := NewClient(internal.Polygon, "")
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer c.Stop()
+	ctx := context.Background()
+	err = c.Start(ctx)
+	if err == nil {
+		c.Stop()
+		t.Fatal("Start without WatchAddresses should fail")
+	}
+	if !errors.Is(err, ErrWatchAddrsRequired) {
+		// 无网络时可能是 Dial 错误，跳过
+		t.Skipf("Start without WatchAddresses: got %v (need WSS to assert ErrWatchAddrsRequired)", err)
 	}
 }
 
@@ -273,13 +296,75 @@ func (m mockBalanceReader) GetTokenBalance(_ types.EthAddress, tokenID string) (
 	return m.Tokens[tokenID], nil
 }
 
-// TestGetPositions_Simple 最简用例：创建 Tracker，拉取地址 0xC789151B4dd1F4fd16044742Ab17AAa895ae10FD 的仓位并打印。
+// rpcBalanceReader 测试用：通过 RPC 从链上读取 USDC 与 CT 余额（无需私钥）
+type rpcBalanceReader struct {
+	client *ethclient.Client
+}
+
+func newRPCBalanceReader(t *testing.T, rpcURL string) BalanceReader {
+	client, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		t.Skipf("RPC 连接失败，跳过: %v", err)
+		return nil
+	}
+	t.Cleanup(func() { client.Close() })
+	return &rpcBalanceReader{client: client}
+}
+
+func (r *rpcBalanceReader) GetUSDCBalance(addr types.EthAddress) (float64, error) {
+	usdcAddr := common.HexToAddress(internal.PolygonCollateral)
+	balanceOfABI := `[{"constant":true,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]`
+	parsed, _ := abi.JSON(strings.NewReader(balanceOfABI))
+	packed, _ := parsed.Pack("balanceOf", common.HexToAddress(string(addr)))
+	result, err := r.client.CallContract(context.Background(), ethereum.CallMsg{To: &usdcAddr, Data: packed}, nil)
+	if err != nil {
+		return 0, err
+	}
+	var balance *big.Int
+	_ = parsed.UnpackIntoInterface(&balance, "balanceOf", result)
+	if balance == nil {
+		return 0, nil
+	}
+	f := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1e6))
+	v, _ := f.Float64()
+	return v, nil
+}
+
+func (r *rpcBalanceReader) GetTokenBalance(addr types.EthAddress, tokenID string) (float64, error) {
+	tokenIDBig, ok := new(big.Int).SetString(tokenID, 10)
+	if !ok {
+		return 0, fmt.Errorf("invalid token ID: %s", tokenID)
+	}
+	ctAddr := common.HexToAddress(internal.PolygonConditionalTokens)
+	balanceOfABI := `[{"constant":true,"inputs":[{"name":"account","type":"address"},{"name":"id","type":"uint256"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]`
+	parsed, _ := abi.JSON(strings.NewReader(balanceOfABI))
+	packed, _ := parsed.Pack("balanceOf", common.HexToAddress(string(addr)), tokenIDBig)
+	result, err := r.client.CallContract(context.Background(), ethereum.CallMsg{To: &ctAddr, Data: packed}, nil)
+	if err != nil {
+		return 0, err
+	}
+	var balance *big.Int
+	_ = parsed.UnpackIntoInterface(&balance, "balanceOf", result)
+	if balance == nil {
+		return 0, nil
+	}
+	f := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1e6))
+	v, _ := f.Float64()
+	return v, nil
+}
+
+// TestGetPositions_Simple 最简用例：创建 Tracker，从链上拉取 USDC + Data API 拉取仓位并打印。
 func TestGetPositions_Simple(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping network test in short mode")
 	}
-	addr := types.EthAddress("0xC789151B4dd1F4fd16044742Ab17AAa895ae10FD")
-	tracker, err := NewTracker(internal.Polygon, "", addr, mockBalanceReader{USDC: 0, Tokens: nil}, data.NewClient())
+	addr := types.EthAddress("0x38cc5Cf506aff32B8E26c5d19C7b288561805C4F")
+	rpcURL := internal.PolygonRPCMainnetList[0]
+	reader := newRPCBalanceReader(t, rpcURL)
+	if reader == nil {
+		return
+	}
+	tracker, err := NewTracker(internal.Polygon, "", addr, reader, data.NewClient())
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
 	}
