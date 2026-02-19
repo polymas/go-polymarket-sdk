@@ -31,6 +31,7 @@ type MarketDataClient interface {
 	GetMidpoints(tokenIDs []string) ([]types.Midpoint, error)
 	GetPrice(tokenID string, side types.OrderSide) (*types.Price, error)
 	GetPrices(requests []types.BookParams) ([]types.Price, error)
+	GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error)
 	GetSpread(tokenID string) (*types.Spread, error)
 	GetSpreads(tokenIDs []string) ([]types.Spread, error)
 	GetLastTradePrice(tokenID string) (*types.LastTradePrice, error)

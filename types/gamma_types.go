@@ -150,12 +150,14 @@ func parseOutcomePrices(value interface{}) []float64 {
 	}
 }
 
-// Event 表示Polymarket事件
+// Event 表示Polymarket事件（与 List events API 的 Event schema 对齐）
+// 参考: https://docs.polymarket.com/api-reference/events/list-events
 type Event struct {
 	// 基础字段
 	EventID       string        `json:"id"`
 	Slug          string        `json:"slug"`
 	Ticker        string        `json:"ticker,omitempty"`
+	Subtitle      string        `json:"subtitle,omitempty"`
 	Title         string        `json:"title"`
 	Description   string        `json:"description"`
 	Image         string        `json:"image"`
@@ -174,14 +176,17 @@ type Event struct {
 	Tags          []Tag         `json:"tags,omitempty"`
 
 	// 事件元数据
-	Category    string     `json:"category,omitempty"`
-	SortBy      string     `json:"sortBy,omitempty"`
-	PublishedAt *time.Time `json:"publishedAt,omitempty"`
+	Category     string     `json:"category,omitempty"`
+	Subcategory  string     `json:"subcategory,omitempty"`
+	SortBy       string     `json:"sortBy,omitempty"`
+	PublishedAt  *time.Time `json:"publishedAt,omitempty"`
+	PublishedAt_ string     `json:"published_at,omitempty"` // API 有时返回 snake_case
 
 	// 创建和更新信息
 	CreatedAt *time.Time `json:"createdAt,omitempty"`
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
-	UpdatedBy string     `json:"updatedBy,omitempty"`
+	CreatedBy string    `json:"createdBy,omitempty"`
+	UpdatedBy string    `json:"updatedBy,omitempty"`
 
 	// 事件状态标志
 	New                 bool `json:"new,omitempty"`
@@ -195,6 +200,9 @@ type Event struct {
 	RequiresTranslation bool `json:"requiresTranslation,omitempty"`
 	PendingDeployment   bool `json:"pendingDeployment,omitempty"`
 	Deploying           bool `json:"deploying,omitempty"`
+	IsTemplate          bool `json:"isTemplate,omitempty"`
+	AutomaticallyResolved bool `json:"automaticallyResolved,omitempty"`
+	AutomaticallyActive   bool `json:"automaticallyActive,omitempty"`
 
 	// 数值字段
 	OpenInterest  *float64 `json:"openInterest,omitempty"`
@@ -202,15 +210,70 @@ type Event struct {
 	LiquidityAmm  *float64 `json:"liquidityAmm,omitempty"`
 	LiquidityClob *float64 `json:"liquidityClob,omitempty"`
 	CommentCount  *int     `json:"commentCount,omitempty"`
+	CommentsEnabled *bool  `json:"commentsEnabled,omitempty"`
 
 	// 交易量统计（24小时、1周、1月、1年）
 	Volume24hr *float64 `json:"volume24hr,omitempty"`
 	Volume1wk  *float64 `json:"volume1wk,omitempty"`
 	Volume1mo  *float64 `json:"volume1mo,omitempty"`
 	Volume1yr  *float64 `json:"volume1yr,omitempty"`
+
+	// 扩展字段（List events API）
+	DisqusThread       string   `json:"disqusThread,omitempty"`
+	ParentEvent        string   `json:"parentEvent,omitempty"`
+	EnableOrderBook    *bool    `json:"enableOrderBook,omitempty"`
+	NegRisk            *bool    `json:"negRisk,omitempty"`
+	NegRiskMarketID    string   `json:"negRiskMarketID,omitempty"`
+	NegRiskFeeBips     *int     `json:"negRiskFeeBips,omitempty"`
+	ImageOptimized     *ImageOptimization `json:"imageOptimized,omitempty"`
+	IconOptimized      *ImageOptimization `json:"iconOptimized,omitempty"`
+	FeaturedImageOptimized *ImageOptimization `json:"featuredImageOptimized,omitempty"`
+	SubEvents          []string `json:"subEvents,omitempty"`
+	Series             []Series `json:"series,omitempty"`
+	Categories         []Category `json:"categories,omitempty"`
+	Collections        []Collection `json:"collections,omitempty"`
+	EventDate          string    `json:"eventDate,omitempty"`
+	StartTime          *time.Time `json:"startTime,omitempty"`
+	EventWeek          *int      `json:"eventWeek,omitempty"`
+	SeriesSlug         string    `json:"seriesSlug,omitempty"`
+	Score              string    `json:"score,omitempty"`
+	Elapsed            string    `json:"elapsed,omitempty"`
+	Period             string    `json:"period,omitempty"`
+	Live               *bool     `json:"live,omitempty"`
+	Ended              *bool     `json:"ended,omitempty"`
+	FinishedTimestamp  *time.Time `json:"finishedTimestamp,omitempty"`
+	GmpChartMode       string    `json:"gmpChartMode,omitempty"`
+	TweetCount         *int      `json:"tweetCount,omitempty"`
+	FeaturedOrder      *int      `json:"featuredOrder,omitempty"`
+	EstimateValue      *bool     `json:"estimateValue,omitempty"`
+	CantEstimate       *bool     `json:"cantEstimate,omitempty"`
+	EstimatedValue     string    `json:"estimatedValue,omitempty"`
+	SpreadsMainLine    *float64  `json:"spreadsMainLine,omitempty"`
+	TotalsMainLine     *float64  `json:"totalsMainLine,omitempty"`
+	CarouselMap        string    `json:"carouselMap,omitempty"`
+	DeployingTimestamp *time.Time `json:"deployingTimestamp,omitempty"`
+	ScheduledDeploymentTimestamp *time.Time `json:"scheduledDeploymentTimestamp,omitempty"`
+	GameStatus         string    `json:"gameStatus,omitempty"`
+	TemplateVariables  string   `json:"templateVariables,omitempty"`
 }
 
-// GammaMarket 表示Gamma市场
+// ImageOptimization 表示图片优化信息（List markets API 中的 imageOptimized/iconOptimized）
+// 参考: https://docs.polymarket.com/api-reference/markets/list-markets
+type ImageOptimization struct {
+	ID                     string   `json:"id,omitempty"`
+	ImageURLSource         string   `json:"imageUrlSource,omitempty"`
+	ImageURLOptimized      string   `json:"imageUrlOptimized,omitempty"`
+	ImageSizeKbSource      *float64 `json:"imageSizeKbSource,omitempty"`
+	ImageSizeKbOptimized   *float64 `json:"imageSizeKbOptimized,omitempty"`
+	ImageOptimizedComplete *bool    `json:"imageOptimizedComplete,omitempty"`
+	ImageOptimizedLastUpdated string `json:"imageOptimizedLastUpdated,omitempty"`
+	RelID                  *int    `json:"relID,omitempty"`
+	Field                  string  `json:"field,omitempty"`
+	Relname                string  `json:"relname,omitempty"`
+}
+
+// GammaMarket 表示Gamma市场（与 List markets API 的 Market schema 对齐）
+// 参考: https://docs.polymarket.com/api-reference/markets/list-markets
 type GammaMarket struct {
 	// 基础字段
 	MarketID      string      `json:"id"`
@@ -235,19 +298,45 @@ type GammaMarket struct {
 	OutcomePrices []float64   `json:"outcomePrices,omitempty"` // Parsed from JSON string array if needed
 
 	// 市场元数据
-	ResolutionSource string `json:"resolutionSource,omitempty"`
-	Category         string `json:"category,omitempty"`
-	MarketType       string `json:"marketType,omitempty"`
-	Fee              string `json:"fee,omitempty"`
+	ResolutionSource   string `json:"resolutionSource,omitempty"`
+	Category            string `json:"category,omitempty"`
+	MarketType          string `json:"marketType,omitempty"`
+	FormatType          string `json:"formatType,omitempty"`
+	AmmType             string `json:"ammType,omitempty"`
+	Fee                 string `json:"fee,omitempty"`
+	LowerBound          string `json:"lowerBound,omitempty"`
+	UpperBound          string `json:"upperBound,omitempty"`
+	LowerBoundDate      string `json:"lowerBoundDate,omitempty"`
+	UpperBoundDate      string `json:"upperBoundDate,omitempty"`
+	TwitterCardImage    string `json:"twitterCardImage,omitempty"`
+	XAxisValue          string `json:"xAxisValue,omitempty"`
+	YAxisValue          string `json:"yAxisValue,omitempty"`
+	DenominationToken   string `json:"denominationToken,omitempty"`
+	SponsorName         string `json:"sponsorName,omitempty"`
+	SponsorImage        string `json:"sponsorImage,omitempty"`
+	ShortOutcomes       string `json:"shortOutcomes,omitempty"`
+	DisqusThread        string `json:"disqusThread,omitempty"`
 
 	// 创建和更新信息
 	CreatedAt                *time.Time `json:"createdAt,omitempty"`
 	UpdatedAt                *time.Time `json:"updatedAt,omitempty"`
+	CreatedBy                *int       `json:"createdBy,omitempty"`
 	UpdatedBy                *int       `json:"updatedBy,omitempty"`
 	SubmittedBy              string     `json:"submitted_by,omitempty"`
 	ResolvedBy               string     `json:"resolvedBy,omitempty"`
 	DeployingTimestamp       *time.Time `json:"deployingTimestamp,omitempty"`
+	ScheduledDeploymentTimestamp *time.Time `json:"scheduledDeploymentTimestamp,omitempty"`
 	AcceptingOrdersTimestamp *time.Time `json:"acceptingOrdersTimestamp,omitempty"`
+	ReadyTimestamp           *time.Time `json:"readyTimestamp,omitempty"`
+	FundedTimestamp          *time.Time `json:"fundedTimestamp,omitempty"`
+	CurationOrder            *int       `json:"curationOrder,omitempty"`
+	CommentsEnabled          *bool      `json:"commentsEnabled,omitempty"`
+	NotificationsEnabled     *bool      `json:"notificationsEnabled,omitempty"`
+	MakerBaseFee             *int       `json:"makerBaseFee,omitempty"`
+	TakerBaseFee             *int       `json:"takerBaseFee,omitempty"`
+	Score                    *int       `json:"score,omitempty"`
+	PastSlugs                string     `json:"pastSlugs,omitempty"`
+	EventStartTime           *time.Time `json:"eventStartTime,omitempty"`
 
 	// 市场状态标志
 	New                          bool `json:"new,omitempty"`
@@ -314,15 +403,18 @@ type GammaMarket struct {
 	Volume1yr  *float64 `json:"volume1yr,omitempty"`
 
 	// AMM 交易量统计
-	Volume1wkAmm *float64 `json:"volume1wkAmm,omitempty"`
-	Volume1moAmm *float64 `json:"volume1moAmm,omitempty"`
-	Volume1yrAmm *float64 `json:"volume1yrAmm,omitempty"`
+	Volume24hrAmm *float64 `json:"volume24hrAmm,omitempty"`
+	Volume1wkAmm  *float64 `json:"volume1wkAmm,omitempty"`
+	Volume1moAmm  *float64 `json:"volume1moAmm,omitempty"`
+	Volume1yrAmm  *float64 `json:"volume1yrAmm,omitempty"`
+	VolumeAmm     *float64 `json:"volumeAmm,omitempty"`
 
 	// CLOB 交易量统计
-	Volume1wkClob *float64 `json:"volume1wkClob,omitempty"`
-	Volume1moClob *float64 `json:"volume1moClob,omitempty"`
-	Volume1yrClob *float64 `json:"volume1yrClob,omitempty"`
-	VolumeClob    *float64 `json:"volumeClob,omitempty"`
+	Volume24hrClob *float64 `json:"volume24hrClob,omitempty"`
+	Volume1wkClob  *float64 `json:"volume1wkClob,omitempty"`
+	Volume1moClob  *float64 `json:"volume1moClob,omitempty"`
+	Volume1yrClob  *float64 `json:"volume1yrClob,omitempty"`
+	VolumeClob     *float64 `json:"volumeClob,omitempty"`
 
 	// 价格变化
 	OneHourPriceChange  *float64 `json:"oneHourPriceChange,omitempty"`
@@ -354,7 +446,22 @@ type GammaMarket struct {
 	NegRiskRequestID         string  `json:"negRiskRequestID,omitempty"`
 	CustomLiveness           *int    `json:"customLiveness,omitempty"`
 	SeriesColor              string  `json:"seriesColor,omitempty"`
+	ChartColor               string  `json:"chartColor,omitempty"`
 	Events                   []Event `json:"events,omitempty"`
+
+	// 体育/游戏相关（List markets API）
+	GameStartTime     string   `json:"gameStartTime,omitempty"`
+	SecondsDelay      *int     `json:"secondsDelay,omitempty"`
+	TeamAID           string   `json:"teamAID,omitempty"`
+	TeamBID           string   `json:"teamBID,omitempty"`
+	GameId            string   `json:"gameId,omitempty"`
+	SportsMarketType  string   `json:"sportsMarketType,omitempty"`
+	Line              *float64 `json:"line,omitempty"`
+	GroupItemRange    string   `json:"groupItemRange,omitempty"`
+
+	// 图片优化（嵌套对象）
+	ImageOptimized *ImageOptimization `json:"imageOptimized,omitempty"`
+	IconOptimized  *ImageOptimization `json:"iconOptimized,omitempty"`
 }
 
 // UnmarshalJSON 实现GammaMarket的自定义JSON反序列化
@@ -487,6 +594,35 @@ func GetOutcomeNames(m *GammaMarket) map[string]string {
 	return outcomeNames
 }
 
+// Category 表示分类（Event/Market 等嵌套）
+type Category struct {
+	ID             string     `json:"id"`
+	Label          string     `json:"label,omitempty"`
+	ParentCategory string     `json:"parentCategory,omitempty"`
+	Slug           string     `json:"slug,omitempty"`
+	PublishedAt    string     `json:"publishedAt,omitempty"`
+	CreatedBy      string     `json:"createdBy,omitempty"`
+	UpdatedBy      string     `json:"updatedBy,omitempty"`
+	CreatedAt      string     `json:"createdAt,omitempty"`
+	UpdatedAt      string     `json:"updatedAt,omitempty"`
+}
+
+// Collection 表示合集（Event 嵌套）
+type Collection struct {
+	ID          string `json:"id"`
+	Ticker      string `json:"ticker,omitempty"`
+	Slug        string `json:"slug,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Subtitle    string `json:"subtitle,omitempty"`
+	Description string `json:"description,omitempty"`
+	Image       string `json:"image,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	Layout      string `json:"layout,omitempty"`
+	Active      bool   `json:"active,omitempty"`
+	Closed      bool   `json:"closed,omitempty"`
+	Archived    bool   `json:"archived,omitempty"`
+}
+
 // Tag 表示标签
 type Tag struct {
 	TagID               string     `json:"id"`
@@ -496,6 +632,7 @@ type Tag struct {
 	ForceHide           bool       `json:"forceHide"`
 	IsCarousel          bool       `json:"isCarousel,omitempty"`
 	PublishedAt         *time.Time `json:"publishedAt,omitempty"`
+	CreatedBy           *int       `json:"createdBy,omitempty"`
 	UpdatedBy           *int       `json:"updatedBy,omitempty"`
 	CreatedAt           time.Time  `json:"createdAt"`
 	UpdatedAt           time.Time  `json:"updatedAt"`

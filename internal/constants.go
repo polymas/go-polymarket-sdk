@@ -21,6 +21,7 @@ const (
 
 // ============================================================================
 // API 域名和基础URL
+// 参考: https://docs.polymarket.com/api-reference/introduction
 // ============================================================================
 
 const (
@@ -28,11 +29,20 @@ const (
 	PolygonRPCMainnet = "https://rpc-mainnet.matic.quiknode.pro"
 	PolygonRPCAmoy    = "https://rpc-amoy.polygon.technology"
 
-	// Polymarket API 服务
+	// Polymarket 官方 API 服务（见文档 Introduction）
+	// - CLOB: 订单簿、价格、价差、价格历史、下单/撤单等交易相关
+	// - Gamma: 市场、事件、标签、系列、评论、体育、搜索、公开资料
+	// - Data: 用户持仓、成交、活动、持有人、未平仓、排行榜、Builder 分析
 	ClobAPIDomain  = "https://clob.polymarket.com"
 	GammaAPIDomain = "https://gamma-api.polymarket.com"
 	DataAPIDomain  = "https://data-api.polymarket.com"
 	RelayerDomain  = "https://relayer-v2.polymarket.com"
+
+	// CLOB 测试环境（文档 timeseries 等 OpenAPI 中提供）
+	ClobAPIStagingDomain = "https://clob-staging.polymarket.com"
+
+	// Bridge API 由 fun.xyz 代理，用于存取款，非 Polymarket 直接运营
+	// BridgeAPIDomain = "https://bridge.polymarket.com"
 )
 
 // Polygon RPC 节点列表（按优先级排序，用于多节点轮询和故障转移）
@@ -108,6 +118,7 @@ const (
 	MidPoints           = "/midpoints"
 	Price               = "/price"
 	GetPrices           = "/prices"
+	GetPricesHistory    = "/prices-history" // GET, 历史价格时序，参数: market, startTs, endTs, interval, fidelity
 	GetSpread           = "/spread"
 	GetSpreads          = "/spreads"
 	GetLastTradePrice   = "/last-trade-price"
@@ -119,6 +130,12 @@ const (
 	Trades = "/data/trades"
 )
 
+// Events endpoints（Gamma）
+const (
+	Events       = "/events" // List events
+	GetMarketTradesEvents = "/live-activity/events/"
+)
+
 // Markets endpoints
 const (
 	GetSamplingSimplifiedMarkets = "/sampling-simplified-markets"
@@ -126,7 +143,6 @@ const (
 	GetSimplifiedMarkets         = "/simplified-markets"
 	GetMarkets                   = "/markets"
 	GetMarket                    = "/markets/"
-	GetMarketTradesEvents        = "/live-activity/events/"
 )
 
 // Tags endpoints

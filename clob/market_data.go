@@ -11,6 +11,46 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
+// PricesHistoryOptions 为 GET /prices-history 提供的可选参数
+// 参考: https://docs.polymarket.com/developers/CLOB/timeseries
+type PricesHistoryOptions struct {
+	StartTs   *int64  // 仅返回此 Unix 时间戳之后的数据
+	EndTs     *int64  // 仅返回此 Unix 时间戳之前的数据
+	Interval  string  // 聚合间隔: max, all, 1m, 1w, 1d, 6h, 1h
+	Fidelity  *int    // 精度（分钟），默认 1
+}
+
+// PricesHistoryOption 函数选项类型
+type PricesHistoryOption func(*PricesHistoryOptions)
+
+// WithPricesHistoryStartTs 设置起始时间戳
+func WithPricesHistoryStartTs(ts int64) PricesHistoryOption {
+	return func(o *PricesHistoryOptions) {
+		o.StartTs = &ts
+	}
+}
+
+// WithPricesHistoryEndTs 设置结束时间戳
+func WithPricesHistoryEndTs(ts int64) PricesHistoryOption {
+	return func(o *PricesHistoryOptions) {
+		o.EndTs = &ts
+	}
+}
+
+// WithPricesHistoryInterval 设置时间间隔（max, all, 1m, 1w, 1d, 6h, 1h）
+func WithPricesHistoryInterval(interval string) PricesHistoryOption {
+	return func(o *PricesHistoryOptions) {
+		o.Interval = interval
+	}
+}
+
+// WithPricesHistoryFidelity 设置精度（分钟）
+func WithPricesHistoryFidelity(minutes int) PricesHistoryOption {
+	return func(o *PricesHistoryOptions) {
+		o.Fidelity = &minutes
+	}
+}
+
 // GetTickSize 获取代币的tick大小
 func (c *marketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
 	if tickSize, ok := c.baseClient.tickSizes[tokenID]; ok {
@@ -473,6 +513,32 @@ func (c *marketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
 	return feeRate, nil
 }
 
+// GetPricesHistory 获取市场的历史价格时序（GET /prices-history）
+// market 为必填的 asset id；可选参数见 PricesHistoryOption
+func (c *marketDataClientImpl) GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
+	if market == "" {
+		return nil, fmt.Errorf("market is required")
+	}
+	options := &PricesHistoryOptions{}
+	for _, f := range opts {
+		f(options)
+	}
+	params := map[string]string{"market": market}
+	if options.StartTs != nil {
+		params["startTs"] = strconv.FormatInt(*options.StartTs, 10)
+	}
+	if options.EndTs != nil {
+		params["endTs"] = strconv.FormatInt(*options.EndTs, 10)
+	}
+	if options.Interval != "" {
+		params["interval"] = options.Interval
+	}
+	if options.Fidelity != nil {
+		params["fidelity"] = strconv.Itoa(*options.Fidelity)
+	}
+	return http.Get[types.PricesHistoryResponse](c.baseClient.baseURL, internal.GetPricesHistory, params)
+}
+
 // GetTime 获取服务器时间
 func (c *marketDataClientImpl) GetTime() (time.Time, error) {
 	// API返回的是纯数字（Unix时间戳），不是JSON对象
@@ -831,6 +897,31 @@ func (c *readonlyMarketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
 	// 缓存结果
 	c.readonlyBaseClient.feeRates[tokenID] = feeRate
 	return feeRate, nil
+}
+
+// GetPricesHistory 获取市场的历史价格时序（只读客户端实现）
+func (c *readonlyMarketDataClientImpl) GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
+	if market == "" {
+		return nil, fmt.Errorf("market is required")
+	}
+	options := &PricesHistoryOptions{}
+	for _, f := range opts {
+		f(options)
+	}
+	params := map[string]string{"market": market}
+	if options.StartTs != nil {
+		params["startTs"] = strconv.FormatInt(*options.StartTs, 10)
+	}
+	if options.EndTs != nil {
+		params["endTs"] = strconv.FormatInt(*options.EndTs, 10)
+	}
+	if options.Interval != "" {
+		params["interval"] = options.Interval
+	}
+	if options.Fidelity != nil {
+		params["fidelity"] = strconv.Itoa(*options.Fidelity)
+	}
+	return http.Get[types.PricesHistoryResponse](c.readonlyBaseClient.baseURL, internal.GetPricesHistory, params)
 }
 
 // GetTime 获取服务器时间（只读客户端实现）

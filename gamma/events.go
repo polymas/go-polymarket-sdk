@@ -3,10 +3,10 @@ package gamma
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/polymas/go-polymarket-sdk/http"
+	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -35,26 +35,33 @@ func (c *polymarketGammaClient) GetEventBySlug(slug string, includeChat *bool, i
 }
 
 // GetEventsOptions 包含 GetEvents 的所有可选参数
+// 与 List events API 对齐: https://docs.polymarket.com/api-reference/events/list-events
 type GetEventsOptions struct {
-	Order        *string
-	Ascending    bool
-	EventIDs     interface{} // int, []int, or nil
-	Slugs        []string
-	Archived     *bool
-	Active       *bool
-	Closed       *bool
-	LiquidityMin *float64
-	LiquidityMax *float64
-	VolumeMin    *float64
-	VolumeMax    *float64
-	StartDateMin *time.Time
-	StartDateMax *time.Time
-	EndDateMin   *time.Time
-	EndDateMax   *time.Time
-	Tag          *string
-	TagID        *int
-	TagSlug      *string
-	RelatedTags  bool
+	Order          *string
+	Ascending      bool
+	EventIDs       interface{} // int, []int, or nil → 请求参数 id
+	Slugs          []string    // → 请求参数 slug (array)
+	Archived       *bool
+	Active         *bool
+	Closed         *bool
+	Featured       *bool
+	Cyom           *bool
+	IncludeChat    *bool
+	IncludeTemplate *bool
+	Recurrence     string
+	ExcludeTagIDs  []int
+	LiquidityMin   *float64
+	LiquidityMax   *float64
+	VolumeMin      *float64
+	VolumeMax      *float64
+	StartDateMin   *time.Time
+	StartDateMax   *time.Time
+	EndDateMin     *time.Time
+	EndDateMax     *time.Time
+	Tag            *string
+	TagID          *int
+	TagSlug        *string
+	RelatedTags    bool
 }
 
 // GetEventsOption 函数选项类型
@@ -157,6 +164,48 @@ func WithEventsTagSlug(tagSlug string) GetEventsOption {
 	}
 }
 
+// WithEventsFeatured 按 featured 过滤
+func WithEventsFeatured(featured bool) GetEventsOption {
+	return func(opts *GetEventsOptions) {
+		opts.Featured = &featured
+	}
+}
+
+// WithEventsCyom 按 cyom 过滤
+func WithEventsCyom(cyom bool) GetEventsOption {
+	return func(opts *GetEventsOptions) {
+		opts.Cyom = &cyom
+	}
+}
+
+// WithEventsIncludeChat 设置 include_chat
+func WithEventsIncludeChat(include bool) GetEventsOption {
+	return func(opts *GetEventsOptions) {
+		opts.IncludeChat = &include
+	}
+}
+
+// WithEventsIncludeTemplate 设置 include_template
+func WithEventsIncludeTemplate(include bool) GetEventsOption {
+	return func(opts *GetEventsOptions) {
+		opts.IncludeTemplate = &include
+	}
+}
+
+// WithEventsRecurrence 按 recurrence 过滤
+func WithEventsRecurrence(recurrence string) GetEventsOption {
+	return func(opts *GetEventsOptions) {
+		opts.Recurrence = recurrence
+	}
+}
+
+// WithEventsExcludeTagIDs 排除指定 tag id 列表
+func WithEventsExcludeTagIDs(tagIDs []int) GetEventsOption {
+	return func(opts *GetEventsOptions) {
+		opts.ExcludeTagIDs = tagIDs
+	}
+}
+
 // GetEvents 使用过滤器获取事件列表
 // limit 和 offset 是必要参数，其他参数通过选项函数传入
 func (c *polymarketGammaClient) GetEvents(limit int, offset int, options ...GetEventsOption) ([]types.Event, error) {
@@ -178,23 +227,29 @@ func (c *polymarketGammaClient) GetEvents(limit int, offset int, options ...GetE
 		params["ascending"] = strconv.FormatBool(opts.Ascending)
 	}
 
-	// Handle eventIDs
+	// 与 API 对齐：id 为 array of integer，slug 为 array of string
+	multiParams := make(map[string][]string)
 	if opts.EventIDs != nil {
 		switch v := opts.EventIDs.(type) {
 		case int:
-			params["event_ids"] = strconv.Itoa(v)
+			multiParams["id"] = []string{strconv.Itoa(v)}
 		case []int:
 			eventIDStrs := make([]string, len(v))
 			for i, id := range v {
 				eventIDStrs[i] = strconv.Itoa(id)
 			}
-			params["event_ids"] = strings.Join(eventIDStrs, ",")
+			multiParams["id"] = eventIDStrs
 		}
 	}
-
-	// Handle slugs
 	if len(opts.Slugs) > 0 {
-		params["slugs"] = strings.Join(opts.Slugs, ",")
+		multiParams["slug"] = opts.Slugs
+	}
+	if len(opts.ExcludeTagIDs) > 0 {
+		excludeStrs := make([]string, len(opts.ExcludeTagIDs))
+		for i, id := range opts.ExcludeTagIDs {
+			excludeStrs[i] = strconv.Itoa(id)
+		}
+		multiParams["exclude_tag_id"] = excludeStrs
 	}
 
 	if opts.Archived != nil {
@@ -205,6 +260,21 @@ func (c *polymarketGammaClient) GetEvents(limit int, offset int, options ...GetE
 	}
 	if opts.Closed != nil {
 		params["closed"] = strconv.FormatBool(*opts.Closed)
+	}
+	if opts.Featured != nil {
+		params["featured"] = strconv.FormatBool(*opts.Featured)
+	}
+	if opts.Cyom != nil {
+		params["cyom"] = strconv.FormatBool(*opts.Cyom)
+	}
+	if opts.IncludeChat != nil {
+		params["include_chat"] = strconv.FormatBool(*opts.IncludeChat)
+	}
+	if opts.IncludeTemplate != nil {
+		params["include_template"] = strconv.FormatBool(*opts.IncludeTemplate)
+	}
+	if opts.Recurrence != "" {
+		params["recurrence"] = opts.Recurrence
 	}
 	if opts.LiquidityMin != nil {
 		params["liquidity_min"] = fmt.Sprintf("%f", *opts.LiquidityMin)
@@ -241,5 +311,5 @@ func (c *polymarketGammaClient) GetEvents(limit int, offset int, options ...GetE
 		params["tag_slug"] = *opts.TagSlug
 	}
 
-	return http.GetSlice[types.Event](c.baseURL, "/events", params)
+	return http.GetSlice[types.Event](c.baseURL, internal.Events, params, http.WithMultiParams(multiParams))
 }

@@ -134,6 +134,18 @@ type PriceHistory struct {
 	History []TimeseriesPoint `json:"history"`
 }
 
+// MarketPricePoint 表示 CLOB /prices-history 返回的单个价格点（API 字段名为 t/p）
+// 参考: https://docs.polymarket.com/developers/CLOB/timeseries
+type MarketPricePoint struct {
+	T int64   `json:"t"` // Unix 时间戳（秒）
+	P float64 `json:"p"` // 价格
+}
+
+// PricesHistoryResponse 表示 GET /prices-history 的响应
+type PricesHistoryResponse struct {
+	History []MarketPricePoint `json:"history"`
+}
+
 // PaginatedResponse 表示分页API响应
 type PaginatedResponse[T any] struct {
 	Data       []T    `json:"data"`

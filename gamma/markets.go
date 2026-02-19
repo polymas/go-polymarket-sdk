@@ -25,20 +25,36 @@ func (c *polymarketGammaClient) GetMarketBySlug(slug string, includeTag *bool) (
 }
 
 // GetMarketsOptions 包含 GetMarkets 的所有可选参数
+// 与 List markets API 对齐: https://docs.polymarket.com/api-reference/markets/list-markets
 type GetMarketsOptions struct {
-	Offset              int
-	Order               *string
-	Ascending           bool
-	Archived            *bool
-	Active              *bool
-	Closed              *bool
-	Slugs               []string
-	MarketIDs           []int
-	TokenIDs            []string
-	ConditionIDs        []string
-	TagID               *int
-	RelatedTags         *bool
-	UmaResolutionStatus *string
+	Offset               int
+	Order                *string
+	Ascending            bool
+	Archived             *bool
+	Active               *bool
+	Closed               *bool
+	Slugs                []string
+	MarketIDs            []int   // API 查询参数名: id
+	TokenIDs             []string
+	ConditionIDs         []string
+	TagID                *int
+	RelatedTags          *bool
+	UmaResolutionStatus  *string
+	IncludeTag           *bool
+	Cyom                 *bool
+	MarketMakerAddresses []string
+	LiquidityNumMin      *float64
+	LiquidityNumMax      *float64
+	VolumeNumMin         *float64
+	VolumeNumMax         *float64
+	StartDateMin         string // date-time
+	StartDateMax         string
+	EndDateMin           string
+	EndDateMax           string
+	GameID               string
+	SportsMarketTypes    []string
+	RewardsMinSize       *float64
+	QuestionIDs          []string
 }
 
 // GetMarketsOption 函数选项类型
@@ -120,6 +136,87 @@ func WithTagID(tagID int, relatedTags *bool) GetMarketsOption {
 func WithUmaResolutionStatus(status string) GetMarketsOption {
 	return func(opts *GetMarketsOptions) {
 		opts.UmaResolutionStatus = &status
+	}
+}
+
+// WithIncludeTag 设置是否包含 tag 信息（默认 true）
+func WithIncludeTag(include bool) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.IncludeTag = &include
+	}
+}
+
+// WithCyom 按 CYOM 过滤
+func WithCyom(cyom bool) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.Cyom = &cyom
+	}
+}
+
+// WithMarketMakerAddresses 按做市商地址过滤
+func WithMarketMakerAddresses(addrs []string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.MarketMakerAddresses = addrs
+	}
+}
+
+// WithLiquidityNumRange 按流动性数值范围过滤
+func WithLiquidityNumRange(min, max *float64) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.LiquidityNumMin = min
+		opts.LiquidityNumMax = max
+	}
+}
+
+// WithVolumeNumRange 按成交量数值范围过滤
+func WithVolumeNumRange(min, max *float64) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.VolumeNumMin = min
+		opts.VolumeNumMax = max
+	}
+}
+
+// WithStartDateRange 按开始日期范围过滤（date-time 字符串）
+func WithStartDateRange(min, max string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.StartDateMin = min
+		opts.StartDateMax = max
+	}
+}
+
+// WithEndDateRange 按结束日期范围过滤（date-time 字符串）
+func WithEndDateRange(min, max string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.EndDateMin = min
+		opts.EndDateMax = max
+	}
+}
+
+// WithGameID 按 game_id 过滤（体育等）
+func WithGameID(gameID string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.GameID = gameID
+	}
+}
+
+// WithSportsMarketTypes 按体育市场类型过滤
+func WithSportsMarketTypes(types []string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.SportsMarketTypes = types
+	}
+}
+
+// WithRewardsMinSize 按 rewards_min_size 过滤
+func WithRewardsMinSize(size float64) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.RewardsMinSize = &size
+	}
+}
+
+// WithQuestionIDs 按 question_ids 过滤
+func WithQuestionIDs(ids []string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.QuestionIDs = ids
 	}
 }
 
@@ -213,11 +310,15 @@ func (c *polymarketGammaClient) getMarkets(limit int, options ...GetMarketsOptio
 		option(opts)
 	}
 
-	// 单个值参数
+	// 单个值参数（与 List markets API 对齐）
 	params := make(map[string]string)
-	params["include_tag"] = "true"
 	params["limit"] = strconv.Itoa(limit)
 	params["offset"] = strconv.Itoa(opts.Offset)
+	if opts.IncludeTag != nil {
+		params["include_tag"] = strconv.FormatBool(*opts.IncludeTag)
+	} else {
+		params["include_tag"] = "true"
+	}
 
 	if opts.Order != nil {
 		params["order"] = *opts.Order
@@ -241,27 +342,69 @@ func (c *polymarketGammaClient) getMarkets(limit int, options ...GetMarketsOptio
 	if opts.UmaResolutionStatus != nil {
 		params["uma_resolution_status"] = *opts.UmaResolutionStatus
 	}
+	if opts.Cyom != nil {
+		params["cyom"] = strconv.FormatBool(*opts.Cyom)
+	}
+	if opts.GameID != "" {
+		params["game_id"] = opts.GameID
+	}
+	if opts.LiquidityNumMin != nil {
+		params["liquidity_num_min"] = strconv.FormatFloat(*opts.LiquidityNumMin, 'f', -1, 64)
+	}
+	if opts.LiquidityNumMax != nil {
+		params["liquidity_num_max"] = strconv.FormatFloat(*opts.LiquidityNumMax, 'f', -1, 64)
+	}
+	if opts.VolumeNumMin != nil {
+		params["volume_num_min"] = strconv.FormatFloat(*opts.VolumeNumMin, 'f', -1, 64)
+	}
+	if opts.VolumeNumMax != nil {
+		params["volume_num_max"] = strconv.FormatFloat(*opts.VolumeNumMax, 'f', -1, 64)
+	}
+	if opts.StartDateMin != "" {
+		params["start_date_min"] = opts.StartDateMin
+	}
+	if opts.StartDateMax != "" {
+		params["start_date_max"] = opts.StartDateMax
+	}
+	if opts.EndDateMin != "" {
+		params["end_date_min"] = opts.EndDateMin
+	}
+	if opts.EndDateMax != "" {
+		params["end_date_max"] = opts.EndDateMax
+	}
+	if opts.RewardsMinSize != nil {
+		params["rewards_min_size"] = strconv.FormatFloat(*opts.RewardsMinSize, 'f', -1, 64)
+	}
 
-	// 多个值参数（同名参数）
+	// 多个值参数（API 文档中为 array 的 query）
 	multiParams := make(map[string][]string)
 	if len(opts.ConditionIDs) > 0 {
 		multiParams["condition_ids"] = opts.ConditionIDs
 	}
 	if len(opts.Slugs) > 0 {
-		multiParams["slugs"] = opts.Slugs
+		multiParams["slug"] = opts.Slugs
 	}
 	if len(opts.MarketIDs) > 0 {
 		marketIDStrs := make([]string, len(opts.MarketIDs))
 		for i, id := range opts.MarketIDs {
 			marketIDStrs[i] = strconv.Itoa(id)
 		}
-		multiParams["market_ids"] = marketIDStrs
+		multiParams["id"] = marketIDStrs
 	}
 	if len(opts.TokenIDs) > 0 {
 		multiParams["clob_token_ids"] = opts.TokenIDs
 	}
+	if len(opts.MarketMakerAddresses) > 0 {
+		multiParams["market_maker_address"] = opts.MarketMakerAddresses
+	}
+	if len(opts.SportsMarketTypes) > 0 {
+		multiParams["sports_market_types"] = opts.SportsMarketTypes
+	}
+	if len(opts.QuestionIDs) > 0 {
+		multiParams["question_ids"] = opts.QuestionIDs
+	}
 
-	rawJSON, err := http.GetRaw(c.baseURL, "GET", "/markets", params, http.WithMultiParams(multiParams))
+	rawJSON, err := http.GetRaw(c.baseURL, "GET", internal.GetMarkets, params, http.WithMultiParams(multiParams))
 	if err != nil {
 		return nil, err
 	}
