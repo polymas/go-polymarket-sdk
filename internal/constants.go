@@ -40,7 +40,6 @@ var (
 	// PolygonRPCMainnetList 主网 RPC 节点列表（按优先级排序，已测试可用性）
 	PolygonRPCMainnetList = []string{
 		"https://rpc-mainnet.matic.quiknode.pro",   // ✅ 已验证可用
-		"https://polygon-rpc.com",                  // ✅ 已验证可用（官方推荐）
 		"https://polygon.drpc.org",                 // ✅ 已验证可用
 		"https://polygon-bor.publicnode.com",       // ✅ 已验证可用
 		"https://polygon.api.onfinality.io/public", // ✅ 已验证可用
@@ -57,7 +56,6 @@ var (
 	PolygonWSSMainnetList = []string{
 		"wss://polygon-bor.publicnode.com",
 		"wss://polygon.drpc.org",
-		"wss://polygon-mainnet.public.blastapi.io",
 	}
 
 	// PolygonWSSAmoyList 测试网 WebSocket 节点列表
