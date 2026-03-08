@@ -34,7 +34,7 @@ type GetMarketsOptions struct {
 	Active               *bool
 	Closed               *bool
 	Slugs                []string
-	MarketIDs            []int   // API 查询参数名: id
+	MarketIDs            []int // API 查询参数名: id
 	TokenIDs             []string
 	ConditionIDs         []string
 	TagID                *int
@@ -242,14 +242,35 @@ func (c *polymarketGammaClient) GetDisputeMarkets() ([]types.GammaMarket, error)
 
 // GetCertaintyMarkets 获取尾盘数据（Certainty 市场）
 // 过滤条件：active=true, closed=false, uma_resolution_status=proposed, 按 endDate 升序排序
+// 自动分页获取全部结果（单次 API 最多 500 条）
 func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, error) {
-	return c.getMarkets(500,
-		WithOffset(0),
+	const pageSize = 500
+	volumeNumMin := 100.0
+	opts := []GetMarketsOption{
 		WithOrder("endDate", true),
 		WithActive(true),
 		WithClosed(false),
 		WithUmaResolutionStatus("proposed"),
-	)
+		WithVolumeNumRange(&volumeNumMin, nil),
+	}
+
+	allMarkets := make([]types.GammaMarket, 0)
+	page := 0
+
+	for {
+		offset := page * pageSize
+		markets, err := c.getMarkets(pageSize, append([]GetMarketsOption{WithOffset(offset)}, opts...)...)
+		if err != nil {
+			return nil, err
+		}
+		allMarkets = append(allMarkets, markets...)
+		if len(markets) < pageSize {
+			break
+		}
+		page++
+	}
+
+	return allMarkets, nil
 }
 
 // GetMarketsByConditionIDs 根据条件ID列表获取市场
