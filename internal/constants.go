@@ -48,9 +48,9 @@ const (
 // Polygon RPC 节点列表（按优先级排序，用于多节点轮询和故障转移）
 var (
 	// PolygonRPCMainnetList 主网 RPC 节点列表（按优先级排序，已测试可用性）
+	// 已移除 polygon.drpc.org：该节点 eth_call 对 maxFeePerGas 等处理与其它节点不一致，易报错
 	PolygonRPCMainnetList = []string{
 		"https://rpc-mainnet.matic.quiknode.pro",   // ✅ 已验证可用
-		"https://polygon.drpc.org",                 // ✅ 已验证可用
 		"https://polygon-bor.publicnode.com",       // ✅ 已验证可用
 		"https://polygon.api.onfinality.io/public", // ✅ 已验证可用
 		"https://137.rpc.thirdweb.com",             // ✅ 已验证可用
@@ -63,9 +63,9 @@ var (
 	}
 
 	// PolygonWSSMainnetList 主网 WebSocket 节点列表（用于链上订阅，如 eth_subscribe logs/newHeads）
+	// 已移除 wss://polygon.drpc.org，与 RPC 列表一致
 	PolygonWSSMainnetList = []string{
 		"wss://polygon-bor.publicnode.com",
-		"wss://polygon.drpc.org",
 	}
 
 	// PolygonWSSAmoyList 测试网 WebSocket 节点列表
@@ -232,6 +232,10 @@ const (
 	DefaultGasEstimate    = 10_000_000 // 默认 gas 估算值
 	GasEstimateMultiplier = 130        // Gas 估算倍数（1.3x，以百分比表示）
 	GasEstimateExtra      = 100_000    // Gas 估算额外值（100k）
+
+	// FallbackGasFeeCapWei 用于 eth_call 时的 GasFeeCap 回退值（200 gwei），
+	// 避免在 Polygon 等链上出现 "max fee per gas less than block base fee"
+	FallbackGasFeeCapWei = 200_000_000_000
 
 	// 数量精度
 	QuantityPrecision = 100000.0 // 数量精度（用于四舍五入）
