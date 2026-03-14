@@ -176,3 +176,18 @@ func GetErrorType(err error) ErrorType {
 	}
 	return ErrorTypeUnknown
 }
+
+// RelayFailedError 表示 Gasless Relayer 返回 STATE_FAILED 时的错误，
+// 上层可通过 errors.As(err, &relayErr) 获取 State、TransactionID 等用于日志或重试。
+type RelayFailedError struct {
+	State         string // 如 "STATE_FAILED"
+	TransactionID string // Relayer 侧事务 ID，可用于排查
+	Message       string // 可读错误信息（若 Relayer 未返回则为 "交易提交失败"）
+}
+
+func (e *RelayFailedError) Error() string {
+	if e.TransactionID != "" {
+		return fmt.Sprintf("交易提交失败 (state: %s, transactionID: %s): %s", e.State, e.TransactionID, e.Message)
+	}
+	return fmt.Sprintf("交易提交失败 (state: %s): %s", e.State, e.Message)
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
@@ -179,7 +180,12 @@ func (c *GaslessClient) executeGaslessBatch(
 			log.Printf("[ERROR] [Relayer调用 #%d] 交易提交失败 (state: %s, transactionID: %s): %s",
 				callCount, state, transactionID, fullErrorMsg)
 			log.Printf("[ERROR] [Relayer调用 #%d] 完整响应 (JSON): %s", callCount, formatMapAsJSON(gaslessResp))
-			return nil, fmt.Errorf("交易提交失败 (state: %s, transactionID: %s): %s", state, transactionID, fullErrorMsg)
+			// 返回结构化错误，便于上层用 errors.As(err, &relayErr) 获取 State、TransactionID
+			return nil, &sdkerrors.RelayFailedError{
+				State:         state,
+				TransactionID: transactionID,
+				Message:       fullErrorMsg,
+			}
 		}
 	}
 
@@ -208,8 +214,12 @@ func (c *GaslessClient) executeGaslessBatch(
 			if errMsg, ok := gaslessResp["error"].(string); ok && errMsg != "" {
 				errorMsg = errMsg
 			}
+			txID := ""
+			if id, ok := gaslessResp["transactionID"].(string); ok {
+				txID = id
+			}
 			log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空且状态为失败，响应内容: %+v", callCount, gaslessResp)
-			return nil, fmt.Errorf("交易提交失败 (state: %s): %s", state, errorMsg)
+			return nil, &sdkerrors.RelayFailedError{State: state, TransactionID: txID, Message: errorMsg}
 		}
 		log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空，响应内容: %+v", callCount, gaslessResp)
 		return nil, fmt.Errorf("transaction hash is empty in response: %v", gaslessResp)
