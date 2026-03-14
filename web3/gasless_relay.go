@@ -705,17 +705,18 @@ func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
 		q.Set("type", walletType)
 		req.URL.RawQuery = q.Encode()
 
-		// Create context with timeout for this specific request
+		// Create context with timeout for this specific request.
+		// Must defer cancel() so it runs only after we finish reading the response body;
+		// canceling before body read causes "context canceled" during json.Decode.
 		ctx, cancel := context.WithTimeout(context.Background(), internal.RelayNonceTimeout)
 		req = req.WithContext(ctx)
+		defer cancel()
 
 		// 记录 relayer 调用次数（nonce 请求）
 		callCount := atomic.AddInt64(&c.relayerCallCount, 1)
 		log.Printf("[Relayer调用 #%d] 获取 nonce (类型: %s, 尝试: %d/%d)", callCount, walletType, attempt+1, maxRetries)
 
 		resp, err := c.httpClient.Do(req)
-		cancel()
-
 		if err != nil {
 			lastErr = fmt.Errorf("failed to get nonce (attempt %d/%d): %w", attempt+1, maxRetries, err)
 			// Check if it's a timeout error - if so, retry
