@@ -200,8 +200,8 @@ const (
 // ============================================================================
 
 const (
-	// HTTP 客户端超时时间
-	HTTPClientTimeout     = 30 * time.Second
+	// HTTP 客户端超时时间（与 handler timeout 匹配，避免 goroutine 泄漏）
+	HTTPClientTimeout     = 8 * time.Second
 	HTTPClientLongTimeout = 60 * time.Second
 
 	// WebSocket 相关

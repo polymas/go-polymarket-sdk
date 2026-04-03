@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
 )
@@ -90,13 +92,22 @@ func getOrCreateClient(baseURL string) *httpClient {
 		return client
 	}
 
-	// 创建安全的HTTP传输配置
+	// 创建安全的HTTP传输配置（限制连接池，防止高并发时连接风暴和 fd 耗尽）
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12, // 最低TLS 1.2版本
 			// 不跳过证书验证，使用系统默认的证书验证
 		},
-		Proxy: http.ProxyFromEnvironment, // 支持从环境变量读取代理配置
+		Proxy:                 http.ProxyFromEnvironment, // 支持从环境变量读取代理配置
+		MaxConnsPerHost:       10,                        // 对同一 host 最多 10 个并发连接
+		MaxIdleConnsPerHost:   5,                         // 保留 5 个空闲连接复用
+		MaxIdleConns:          50,                        // 全局最多 50 个空闲连接
+		IdleConnTimeout:       30 * time.Second,          // 空闲 30s 后回收
+		ResponseHeaderTimeout: 10 * time.Second,          // 等待响应头最多 10s
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second, // 建连超时 5s
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
 	}
 
 	client := &httpClient{
