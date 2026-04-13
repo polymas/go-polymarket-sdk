@@ -288,7 +288,7 @@ func GetBTC15MinMarketData(gammaClient interface{}) (*TestMarketData, error) {
 	// 实际使用请参考getTestMarketData函数的实现
 	return nil, fmt.Errorf("请使用以下代码获取BTC 15分钟市场数据:\n" +
 		"gammaClient := gamma.NewClient()\n" +
-		"market, err := gammaClient.GetMarketBySlug(\"btc-15min-up-or-down\", nil)\n" +
+		"market, err := gammaClient.GetMarketBySlug(\"btc-15min-up-or-down\")\n" +
 		"if err != nil {\n" +
 		"    // 尝试其他slug\n" +
 		"}\n" +

@@ -46,8 +46,7 @@ func TestGetMarketBySlug(t *testing.T) {
 
 	// 基本功能测试
 	t.Run("Basic", func(t *testing.T) {
-		includeTag := true
-		market, err := client.GetMarketBySlug(config.TestMarketSlug, &includeTag)
+		market, err := client.GetMarketBySlug(config.TestMarketSlug)
 		if err != nil {
 			t.Fatalf("GetMarketBySlug failed: %v", err)
 		}
@@ -59,7 +58,7 @@ func TestGetMarketBySlug(t *testing.T) {
 
 	// 不带includeTag测试
 	t.Run("WithoutIncludeTag", func(t *testing.T) {
-		market, err := client.GetMarketBySlug(config.TestMarketSlug, nil)
+		market, err := client.GetMarketBySlug(config.TestMarketSlug)
 		if err != nil {
 			t.Fatalf("GetMarketBySlug failed: %v", err)
 		}

@@ -53,7 +53,7 @@ func TestSplitAndMergeBTC4H(t *testing.T) {
 
 	// 优先使用环境变量指定的市场
 	if slug := os.Getenv("POLY_TEST_MARKET_SLUG"); slug != "" {
-		if market, err := gammaClient.GetMarketBySlug(slug, nil); err == nil && market != nil && len(market.TokenIDs) > 0 {
+		if market, err := gammaClient.GetMarketBySlug(slug); err == nil && market != nil && len(market.TokenIDs) > 0 {
 			targetMarket = market
 		}
 	} else if conditionID := os.Getenv("POLY_TEST_CONDITION_ID"); conditionID != "" {

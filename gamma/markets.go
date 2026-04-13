@@ -10,16 +10,18 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// GetMarket 通过市场ID获取市场
+// GetMarket 通过市场ID获取市场（默认 include_tag=true）
 func (c *polymarketGammaClient) GetMarket(marketID string) (*types.GammaMarket, error) {
-	return http.Get[types.GammaMarket](c.baseURL, fmt.Sprintf("/markets/%s", marketID), nil)
+	params := map[string]string{
+		"include_tag": "true",
+	}
+	return http.Get[types.GammaMarket](c.baseURL, fmt.Sprintf("/markets/%s", marketID), params)
 }
 
-// GetMarketBySlug 通过slug获取市场
-func (c *polymarketGammaClient) GetMarketBySlug(slug string, includeTag *bool) (*types.GammaMarket, error) {
-	params := make(map[string]string)
-	if includeTag != nil {
-		params["include_tag"] = strconv.FormatBool(*includeTag)
+// GetMarketBySlug 通过slug获取市场（默认 include_tag=true）
+func (c *polymarketGammaClient) GetMarketBySlug(slug string) (*types.GammaMarket, error) {
+	params := map[string]string{
+		"include_tag": "true",
 	}
 	return http.Get[types.GammaMarket](c.baseURL, fmt.Sprintf("/markets/slug/%s", slug), params)
 }
@@ -27,7 +29,8 @@ func (c *polymarketGammaClient) GetMarketBySlug(slug string, includeTag *bool) (
 // GetMarketsOptions 包含 GetMarkets 的所有可选参数
 // 与 List markets API 对齐: https://docs.polymarket.com/api-reference/markets/list-markets
 type GetMarketsOptions struct {
-	Offset               int
+	Offset               *int
+	AfterCursor          *string
 	Order                *string
 	Ascending            bool
 	Archived             *bool
@@ -63,7 +66,14 @@ type GetMarketsOption func(*GetMarketsOptions)
 // WithOffset 设置偏移量
 func WithOffset(offset int) GetMarketsOption {
 	return func(opts *GetMarketsOptions) {
-		opts.Offset = offset
+		opts.Offset = &offset
+	}
+}
+
+// WithAfterCursor 设置 keyset 分页游标
+func WithAfterCursor(afterCursor string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) {
+		opts.AfterCursor = &afterCursor
 	}
 }
 
@@ -255,19 +265,23 @@ func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, erro
 	}
 
 	allMarkets := make([]types.GammaMarket, 0)
-	page := 0
+	var afterCursor string
 
 	for {
-		offset := page * pageSize
-		markets, err := c.getMarkets(pageSize, append([]GetMarketsOption{WithOffset(offset)}, opts...)...)
+		pageOptions := append([]GetMarketsOption{}, opts...)
+		if afterCursor != "" {
+			pageOptions = append(pageOptions, WithAfterCursor(afterCursor))
+		}
+
+		markets, nextCursor, err := c.getMarketsPage(pageSize, pageOptions...)
 		if err != nil {
 			return nil, err
 		}
 		allMarkets = append(allMarkets, markets...)
-		if len(markets) < pageSize {
+		if nextCursor == "" || len(markets) < pageSize {
 			break
 		}
-		page++
+		afterCursor = nextCursor
 	}
 
 	return allMarkets, nil
@@ -292,11 +306,15 @@ func (c *polymarketGammaClient) GetMarkets(limit int, options ...GetMarketsOptio
 func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
 	const pageSize = 500 // 每页500条，减少请求次数
 	allMarkets := make([]types.GammaMarket, 0)
-	page := 0
+	var afterCursor string
 
 	for {
-		offset := page * pageSize
-		markets, err := c.getMarkets(pageSize, WithOffset(offset), WithOrder("endDate", true))
+		pageOptions := []GetMarketsOption{WithOrder("endDate", true)}
+		if afterCursor != "" {
+			pageOptions = append(pageOptions, WithAfterCursor(afterCursor))
+		}
+
+		markets, nextCursor, err := c.getMarketsPage(pageSize, pageOptions...)
 		if err != nil {
 			return nil, err
 		}
@@ -313,7 +331,10 @@ func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
 			break
 		}
 
-		page++
+		if nextCursor == "" {
+			break
+		}
+		afterCursor = nextCursor
 	}
 
 	return allMarkets, nil
@@ -323,6 +344,19 @@ func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
 // limit 是必要参数，其他参数通过选项函数传入
 // 内部使用 raw 数据解析，确保所有字段都被正确解析
 func (c *polymarketGammaClient) getMarkets(limit int, options ...GetMarketsOption) ([]types.GammaMarket, error) {
+	markets, _, err := c.getMarketsPage(limit, options...)
+	if err != nil {
+		return nil, err
+	}
+	return markets, nil
+}
+
+type keysetMarketsResponse struct {
+	Markets    []types.GammaMarket `json:"markets"`
+	NextCursor string              `json:"next_cursor"`
+}
+
+func (c *polymarketGammaClient) getMarketsPage(limit int, options ...GetMarketsOption) ([]types.GammaMarket, string, error) {
 	// 初始化默认选项
 	opts := &GetMarketsOptions{}
 
@@ -334,7 +368,12 @@ func (c *polymarketGammaClient) getMarkets(limit int, options ...GetMarketsOptio
 	// 单个值参数（与 List markets API 对齐）
 	params := make(map[string]string)
 	params["limit"] = strconv.Itoa(limit)
-	params["offset"] = strconv.Itoa(opts.Offset)
+	if opts.Offset != nil {
+		params["offset"] = strconv.Itoa(*opts.Offset)
+	}
+	if opts.AfterCursor != nil {
+		params["after_cursor"] = *opts.AfterCursor
+	}
 	if opts.IncludeTag != nil {
 		params["include_tag"] = strconv.FormatBool(*opts.IncludeTag)
 	} else {
@@ -425,18 +464,29 @@ func (c *polymarketGammaClient) getMarkets(limit int, options ...GetMarketsOptio
 		multiParams["question_ids"] = opts.QuestionIDs
 	}
 
-	rawJSON, err := http.GetRaw(c.baseURL, "GET", internal.GetMarkets, params, http.WithMultiParams(multiParams))
+	path := internal.GetMarketsKeyset
+	if opts.Offset != nil {
+		path = internal.GetMarkets
+	}
+
+	rawJSON, err := http.GetRaw(c.baseURL, "GET", path, params, http.WithMultiParams(multiParams))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	// 使用 types.GammaMarket 的自定义 UnmarshalJSON 解析
-	var markets1 []types.GammaMarket
-	if err := json.Unmarshal(rawJSON, &markets1); err != nil {
-		return nil, fmt.Errorf("解析市场JSON失败: %w", err)
+	// keyset 端点返回 {markets, next_cursor}
+	var keysetResp keysetMarketsResponse
+	if err := json.Unmarshal(rawJSON, &keysetResp); err == nil && keysetResp.Markets != nil {
+		return keysetResp.Markets, keysetResp.NextCursor, nil
 	}
 
-	return markets1, nil
+	// 兼容旧端点返回 []market
+	var markets []types.GammaMarket
+	if err := json.Unmarshal(rawJSON, &markets); err != nil {
+		return nil, "", fmt.Errorf("解析市场JSON失败: %w", err)
+	}
+
+	return markets, "", nil
 }
 
 // GetSamplingSimplifiedMarkets 获取采样简化市场

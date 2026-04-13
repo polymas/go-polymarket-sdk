@@ -9,7 +9,7 @@ import (
 type Client interface {
 	// 市场相关方法
 	GetMarket(marketID string) (*types.GammaMarket, error)
-	GetMarketBySlug(slug string, includeTag *bool) (*types.GammaMarket, error)
+	GetMarketBySlug(slug string) (*types.GammaMarket, error)
 	GetMarketsByConditionIDs(conditionIDs []string) ([]types.GammaMarket, error)
 	GetMarkets(limit int, options ...GetMarketsOption) ([]types.GammaMarket, error) // 获取市场列表（支持分页和过滤）
 	GetCertaintyMarkets() ([]types.GammaMarket, error)                              // 获取 Certainty 市场（尾盘市场）

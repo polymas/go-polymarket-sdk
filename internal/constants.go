@@ -142,6 +142,7 @@ const (
 	GetSamplingMarkets           = "/sampling-markets"
 	GetSimplifiedMarkets         = "/simplified-markets"
 	GetMarkets                   = "/markets"
+	GetMarketsKeyset             = "/markets/keyset"
 	GetMarket                    = "/markets/"
 )
 

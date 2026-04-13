@@ -154,8 +154,8 @@ func main() {
 
 | 方法                           | 描述                             | 参数                                        | 返回值                         |
 | ------------------------------ | -------------------------------- | ------------------------------------------- | ------------------------------ |
-| `GetMarket`                    | 通过市场ID获取市场               | `marketID`                                  | `*GammaMarket`, `error`        |
-| `GetMarketBySlug`              | 通过slug获取市场                 | `slug`, `includeTag`                        | `*GammaMarket`, `error`        |
+| `GetMarket`                    | 通过市场ID获取市场（默认包含 tag） | `marketID`                                | `*GammaMarket`, `error`        |
+| `GetMarketBySlug`              | 通过slug获取市场（默认包含 tag）   | `slug`                                    | `*GammaMarket`, `error`        |
 | `GetMarketsByConditionIDs`     | 通过条件ID批量获取市场           | `conditionIDs`                              | `[]GammaMarket`, `error`       |
 | `GetMarkets`                   | 获取市场列表（支持分页和过滤）   | `limit`, `options...`                       | `[]GammaMarket`, `error`       |
 | `GetCertaintyMarkets`          | 获取 Certainty 市场（尾盘市场）  | -                                           | `[]GammaMarket`, `error`       |
@@ -178,6 +178,8 @@ func main() {
 | `GetSamplingMarkets`           | 获取采样市场                     | `limit`                                     | `[]GammaMarket`, `error`       |
 | `GetSimplifiedMarkets`         | 获取简化市场列表                 | `limit`, `offset`, `options...`             | `[]SimplifiedMarket`, `error`  |
 | `GetMarketTradesEvents`        | 获取市场交易事件                 | `marketID`, `limit`, `offset`               | `[]MarketTradesEvent`, `error` |
+
+说明：`GetMarket` 和 `GetMarketBySlug` 会默认发送 `include_tag=true`。
 
 ### Data 客户端接口
 

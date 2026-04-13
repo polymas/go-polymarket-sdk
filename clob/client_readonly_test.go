@@ -54,7 +54,7 @@ func getTestMarketData(t *testing.T, slug string) *test.TestMarketData {
 
 		var lastErr error
 		for _, s := range possibleSlugs {
-			market, err = gammaClient.GetMarketBySlug(s, nil)
+			market, err = gammaClient.GetMarketBySlug(s)
 			if err == nil && market != nil && len(market.TokenIDs) > 0 {
 				slug = s
 				t.Logf("Found market by slug: %s", s)
@@ -115,7 +115,7 @@ func getTestMarketData(t *testing.T, slug string) *test.TestMarketData {
 		}
 	} else {
 		// 使用指定的slug
-		market, err = gammaClient.GetMarketBySlug(slug, nil)
+		market, err = gammaClient.GetMarketBySlug(slug)
 		if err != nil {
 			t.Skipf("Skipping test: Failed to get market by slug '%s': %v", slug, err)
 			return nil
