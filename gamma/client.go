@@ -41,6 +41,13 @@ type Client interface {
 	GetSamplingMarkets(limit int) ([]types.GammaMarket, error)
 	GetSimplifiedMarkets(limit int, offset int, options ...GetMarketsOption) ([]types.SimplifiedMarket, error)
 	GetMarketTradesEvents(marketID string, limit int, offset int) ([]types.MarketTradesEvent, error)
+
+	// URL 构建方法：根据市场标识获取 Polymarket 前端事件页 URL
+	// URL 形式: https://polymarket.com/event/{event_slug}/{market_slug}
+	// 单市场事件（event_slug == market_slug）简化为: https://polymarket.com/event/{event_slug}
+	GetEventURLByMarketID(marketID string) (string, error)
+	GetEventURLByConditionID(conditionID string) (string, error)
+	GetEventURLByTokenID(tokenID string) (string, error)
 }
 
 // polymarketGammaClient 处理Gamma API操作

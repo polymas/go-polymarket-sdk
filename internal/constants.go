@@ -38,6 +38,9 @@ const (
 	DataAPIDomain  = "https://data-api.polymarket.com"
 	RelayerDomain  = "https://relayer-v2.polymarket.com"
 
+	// Polymarket 前端站点域名，用于拼接事件/市场页面 URL
+	PolymarketWebDomain = "https://polymarket.com"
+
 	// CLOB 测试环境（文档 timeseries 等 OpenAPI 中提供）
 	ClobAPIStagingDomain = "https://clob-staging.polymarket.com"
 
