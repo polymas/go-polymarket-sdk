@@ -97,102 +97,86 @@ func (c *GaslessClient) executeGaslessBatch(
 		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
 
-	// Submit to relay，失败则 3s 后重试一次，再失败再返回错误（报警）
+	// Submit to relay（单次尝试，不重试）
 	requestURL := fmt.Sprintf("%s/submit", c.relayURL)
 	var gaslessResp map[string]interface{}
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if attempt > 0 {
-			time.Sleep(3 * time.Second)
-			log.Printf("[Relayer调用 #%d] 提交失败，3s 后重试 (第 %d 次)", callCount, attempt+1)
-		}
 
-		req, err := http.NewRequest("POST", requestURL, bytes.NewReader(bodyJSON))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/octet-stream")
-		for k, v := range requestHeaders {
-			req.Header.Set(k, v)
-		}
-
-		log.Printf("[Relayer调用 #%d] 批量提交交易到 relayer (类型: %d, 交易数: %d)", callCount, int(c.signatureType), len(proxyTxns))
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to submit transaction: %w", err)
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			errorMsg := string(bodyBytes)
-			if len(errorMsg) > 200 {
-				errorMsg = errorMsg[:200] + "..."
-			}
-			log.Printf("[ERROR] [Relayer调用 #%d] 批量提交失败: HTTP %d", callCount, resp.StatusCode)
-			lastErr = fmt.Errorf("relay returned error: HTTP %d: %s", resp.StatusCode, errorMsg)
-			continue
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&gaslessResp); err != nil {
-			resp.Body.Close()
-			lastErr = fmt.Errorf("failed to decode response: %w", err)
-			continue
-		}
-		resp.Body.Close()
-
-		// 检查交易状态
-		if state, ok := gaslessResp["state"].(string); ok {
-			if state == "STATE_FAILED" || state == "FAILED" || state == "failed" {
-				errorMsg := "交易提交失败"
-				errorDetails := []string{}
-				if errMsg, ok := gaslessResp["error"].(string); ok && errMsg != "" {
-					errorMsg = errMsg
-				} else if errMsg, ok := gaslessResp["message"].(string); ok && errMsg != "" {
-					errorMsg = errMsg
-				} else if errMsg, ok := gaslessResp["errorMessage"].(string); ok && errMsg != "" {
-					errorMsg = errMsg
-				} else if errMsg, ok := gaslessResp["reason"].(string); ok && errMsg != "" {
-					errorMsg = errMsg
-				} else if errData, ok := gaslessResp["error"].(map[string]interface{}); ok {
-					if msg, ok := errData["message"].(string); ok {
-						errorMsg = msg
-					}
-					if code, ok := errData["code"].(string); ok {
-						errorDetails = append(errorDetails, fmt.Sprintf("code: %s", code))
-					}
-				}
-				if details, ok := gaslessResp["details"].(map[string]interface{}); ok {
-					for k, v := range details {
-						errorDetails = append(errorDetails, fmt.Sprintf("%s: %v", k, v))
-					}
-				}
-				transactionID := ""
-				if txID, ok := gaslessResp["transactionID"].(string); ok {
-					transactionID = txID
-				}
-				fullErrorMsg := errorMsg
-				if len(errorDetails) > 0 {
-					fullErrorMsg = fmt.Sprintf("%s (%s)", errorMsg, strings.Join(errorDetails, ", "))
-				}
-				log.Printf("[ERROR] [Relayer调用 #%d] 交易提交失败 (state: %s, transactionID: %s): %s",
-					callCount, state, transactionID, fullErrorMsg)
-				log.Printf("[ERROR] [Relayer调用 #%d] 完整响应 (JSON): %s", callCount, formatMapAsJSON(gaslessResp))
-				lastErr = &sdkerrors.RelayFailedError{
-					State:         state,
-					TransactionID: transactionID,
-					Message:       fullErrorMsg,
-				}
-				continue
-			}
-		}
-		lastErr = nil
-		break
+	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	if lastErr != nil {
-		return nil, lastErr
+	req.Header.Set("Content-Type", "application/octet-stream")
+	for k, v := range requestHeaders {
+		req.Header.Set(k, v)
+	}
+
+	log.Printf("[Relayer调用 #%d] 批量提交交易到 relayer (类型: %d, 交易数: %d)", callCount, int(c.signatureType), len(proxyTxns))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to submit transaction: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		errorMsg := string(bodyBytes)
+		if len(errorMsg) > 200 {
+			errorMsg = errorMsg[:200] + "..."
+		}
+		log.Printf("[ERROR] [Relayer调用 #%d] 批量提交失败: HTTP %d", callCount, resp.StatusCode)
+		return nil, fmt.Errorf("relay returned error: HTTP %d: %s", resp.StatusCode, errorMsg)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&gaslessResp); err != nil {
+		resp.Body.Close()
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	resp.Body.Close()
+
+	// 检查交易状态
+	if state, ok := gaslessResp["state"].(string); ok {
+		if state == "STATE_FAILED" || state == "FAILED" || state == "failed" {
+			errorMsg := "交易提交失败"
+			errorDetails := []string{}
+			if errMsg, ok := gaslessResp["error"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errMsg, ok := gaslessResp["message"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errMsg, ok := gaslessResp["errorMessage"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errMsg, ok := gaslessResp["reason"].(string); ok && errMsg != "" {
+				errorMsg = errMsg
+			} else if errData, ok := gaslessResp["error"].(map[string]interface{}); ok {
+				if msg, ok := errData["message"].(string); ok {
+					errorMsg = msg
+				}
+				if code, ok := errData["code"].(string); ok {
+					errorDetails = append(errorDetails, fmt.Sprintf("code: %s", code))
+				}
+			}
+			if details, ok := gaslessResp["details"].(map[string]interface{}); ok {
+				for k, v := range details {
+					errorDetails = append(errorDetails, fmt.Sprintf("%s: %v", k, v))
+				}
+			}
+			transactionID := ""
+			if txID, ok := gaslessResp["transactionID"].(string); ok {
+				transactionID = txID
+			}
+			fullErrorMsg := errorMsg
+			if len(errorDetails) > 0 {
+				fullErrorMsg = fmt.Sprintf("%s (%s)", errorMsg, strings.Join(errorDetails, ", "))
+			}
+			log.Printf("[ERROR] [Relayer调用 #%d] 交易提交失败 (state: %s, transactionID: %s): %s",
+				callCount, state, transactionID, fullErrorMsg)
+			log.Printf("[ERROR] [Relayer调用 #%d] 完整响应 (JSON): %s", callCount, formatMapAsJSON(gaslessResp))
+			return nil, &sdkerrors.RelayFailedError{
+				State:         state,
+				TransactionID: transactionID,
+				Message:       fullErrorMsg,
+			}
+		}
 	}
 
 	txHashStr, ok := gaslessResp["transactionHash"].(string)
