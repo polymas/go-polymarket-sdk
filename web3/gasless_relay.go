@@ -444,9 +444,23 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 	}
 
 	// Get relay nonce for Safe wallet
-	nonce, err := c.getRelayNonce("SAFE")
+	relayerNonce, err := c.getRelayNonce("SAFE")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relay nonce: %w", err)
+	}
+
+	// Validate against on-chain Safe nonce — Safe's execTransaction requires the signed
+	// nonce to match the contract's current nonce storage slot, so chain state is the
+	// ground truth. Relayer's /nonce is a cache that can drift (observed: relayer=60 vs
+	// chain=59 causing GS025 reverts). Prefer the on-chain value when they diverge.
+	onChainNonce, err := c.getSafeNonceOnChain(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read on-chain safe nonce: %w", err)
+	}
+	nonce := relayerNonce
+	if uint64(relayerNonce) != onChainNonce {
+		log.Printf("[WARN] Safe nonce mismatch: relayer=%d, on-chain=%d — using on-chain value", relayerNonce, onChainNonce)
+		nonce = int(onChainNonce)
 	}
 
 	// Create multiSend transaction (or use single transaction if only one)

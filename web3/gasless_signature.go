@@ -202,8 +202,46 @@ func (c *GaslessClient) getSafeProxyAddress() (types.EthAddress, error) {
 	return types.EthAddress(proxyAddr.Hex()), nil
 }
 
+// getSafeNonceOnChain reads the current nonce from the Safe proxy contract on-chain.
+// This is the ground-truth nonce — the Safe contract's storage slot that execTransaction
+// checks against. Relayer's /nonce endpoint is a cache and can diverge from chain state.
+func (c *GaslessClient) getSafeNonceOnChain(ctx context.Context) (uint64, error) {
+	safeAddr, err := c.getSafeProxyAddress()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get safe address: %w", err)
+	}
+
+	safeABI, err := getSafeABI()
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse safe ABI: %w", err)
+	}
+
+	packed, err := safeABI.Pack("nonce")
+	if err != nil {
+		return 0, fmt.Errorf("failed to pack nonce call: %w", err)
+	}
+
+	safeAddrCommon := common.HexToAddress(string(safeAddr))
+	callMsg := ethereum.CallMsg{
+		To:   &safeAddrCommon,
+		Data: packed,
+	}
+
+	result, err := c.callContractWithRetry(ctx, callMsg, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call safe.nonce(): %w", err)
+	}
+
+	var nonceBig *big.Int
+	err = safeABI.UnpackIntoInterface(&nonceBig, "nonce", result)
+	if err != nil {
+		return 0, fmt.Errorf("failed to unpack nonce result: %w", err)
+	}
+
+	return nonceBig.Uint64(), nil
+}
+
 // getSafeABI returns a minimal ABI for the Safe contract
-// Only includes getTransactionHash function
 func getSafeABI() (*abi.ABI, error) {
 	abiJSON := `[
 		{
@@ -222,6 +260,15 @@ func getSafeABI() (*abi.ABI, error) {
 			"name": "getTransactionHash",
 			"outputs": [
 				{"internalType": "bytes32", "name": "", "type": "bytes32"}
+			],
+			"stateMutability": "view",
+			"type": "function"
+		},
+		{
+			"inputs": [],
+			"name": "nonce",
+			"outputs": [
+				{"internalType": "uint256", "name": "", "type": "uint256"}
 			],
 			"stateMutability": "view",
 			"type": "function"
