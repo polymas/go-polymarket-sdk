@@ -44,6 +44,11 @@ const (
 	// CLOB 测试环境（文档 timeseries 等 OpenAPI 中提供）
 	ClobAPIStagingDomain = "https://clob-staging.polymarket.com"
 
+	// V2 迁移期临时 CLOB host，仅用于 2026-04-28 切换前的联调
+	// 切换日后 ClobAPIDomain 自身即为 V2，届时应回落到 ClobAPIDomain
+	// 参考：https://docs.polymarket.com/v2-migration
+	ClobAPIV2Domain = "https://clob-v2.polymarket.com"
+
 	// Bridge API 由 fun.xyz 代理，用于存取款，非 Polymarket 直接运营
 	// BridgeAPIDomain = "https://bridge.polymarket.com"
 )

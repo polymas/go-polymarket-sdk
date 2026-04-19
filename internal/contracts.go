@@ -28,4 +28,10 @@ const (
 	PolygonNegRiskAdapter = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
 	// ProxyFactory 合约地址
 	PolygonProxyFactory = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052"
+
+	// V2 Exchange 合约地址（2026-04-28 切换后启用）
+	// 参考：https://docs.polymarket.com/v2-migration
+	// pUSD / V2 CTF / V2 NegRiskAdapter 等其它地址待 /resources/contracts 页补齐后再加
+	PolygonExchangeV2        = "0xE111180000d2663C0091e4f400237545B87B996B"
+	PolygonNegRiskExchangeV2 = "0xe2222d279d744050d28e00520010520000310F59"
 )

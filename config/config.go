@@ -40,6 +40,10 @@ type APIConfig struct {
 
 	// Relayer 域名
 	RelayerDomain string
+
+	// UseClobV2 打开后订单走 V2 签名路径并请求 ClobAPIV2Domain（默认 false）。
+	// 2026-04-28 切换日之前用于联调 clob-v2.polymarket.com；切换后 V1 路径不再可用。
+	UseClobV2 bool
 }
 
 // Web3Config Web3 相关配置
@@ -193,6 +197,13 @@ func WithGammaDomain(domain string) Option {
 func WithDataDomain(domain string) Option {
 	return func(c *Config) {
 		c.API.DataDomain = domain
+	}
+}
+
+// WithUseClobV2 切换到 V2 签名 + V2 CLOB host（2026-04-28 切换前的灰度开关）
+func WithUseClobV2(enabled bool) Option {
+	return func(c *Config) {
+		c.API.UseClobV2 = enabled
 	}
 }
 
