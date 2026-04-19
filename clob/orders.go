@@ -152,6 +152,9 @@ func (c *orderClientImpl) postOrdersBatch(
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
+	if c.baseClient.useV2 {
+		return c.postOrdersBatchV2(orderArgsList, orderTypes, isRetry...)
+	}
 	// 检查是否为重试调用
 	isRetryCall := len(isRetry) > 0 && isRetry[0]
 	if len(orderArgsList) == 0 {

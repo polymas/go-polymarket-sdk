@@ -92,6 +92,19 @@ type baseClient struct {
 	feeRates      map[string]int
 	orderBuilder  *builder.ExchangeOrderBuilderImpl
 	web3Client    web3.Client // 保存 Web3Client 引用（可能为nil，用于只读客户端）
+	useV2         bool        // 打开后订单走 V2 签名 + V2 CLOB host（2026-04-28 切换日前联调）
+}
+
+// ClientOption 客户端构造选项
+type ClientOption func(*baseClient)
+
+// WithV2 切换客户端到 V2 签名路径 + ClobAPIV2Domain。
+// 2026-04-28 切换日前用于联调 clob-v2.polymarket.com；切换日后 V1 路径不再可用。
+func WithV2() ClientOption {
+	return func(c *baseClient) {
+		c.useV2 = true
+		c.baseURL = internal.ClobAPIV2Domain
+	}
 }
 
 // readonlyBaseClient 只读客户端的基础结构，不包含认证相关字段
@@ -185,7 +198,9 @@ func NewReadonlyClient() ReadonlyClient {
 // 需要私钥和API凭证，可以使用所有功能接口
 // 在初始化时自动调用 createOrDeriveAPICreds 获取 API 凭证
 // 返回 Client 接口，不允许直接访问实现类型
-func NewClient(web3Client web3.Client) (Client, error) {
+//
+// opts: 可选配置，如 WithV2() 切到 V2 签名 + V2 CLOB host。
+func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 	// 从 web3.Client 获取所需信息
 	signatureType := web3Client.GetSignatureType()
 	address := web3Client.GetBaseAddress()
@@ -207,6 +222,11 @@ func NewClient(web3Client web3.Client) (Client, error) {
 		feeRates:      make(map[string]int),
 		orderBuilder:  orderBuilder,
 		web3Client:    web3Client,
+	}
+
+	// 应用可选配置（如 WithV2）
+	for _, opt := range opts {
+		opt(base)
 	}
 
 	// 自动创建或派生 API 凭证
