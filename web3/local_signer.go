@@ -87,23 +87,20 @@ func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]s
 		Body:        requestBody,
 	}
 
-	// Choose signing method based on whether builder_creds exists
+	// Relayer uses POLY_BUILDER_* HMAC headers when creds are present,
+	// otherwise falls back to Level 1 EIP-712 signing with the private key.
 	if ls.builderCreds != nil {
-		// Use Level 2 signing (HMAC, requires builder_creds)
-		headers, err := internal.CreateLevel2Headers(
-			ls.signer,
-			ls.builderCreds,
-			requestArgs,
-			true, // builder=true
-		)
+		var body interface{}
+		if requestArgs.Body != nil {
+			body = string(*requestArgs.Body)
+		}
+		headers, err := internal.CreateRelayerHeaders(ls.builderCreds, requestArgs, body)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create level 2 headers: %w", err)
+			return nil, fmt.Errorf("failed to create relayer headers: %w", err)
 		}
 		return headers, nil
 	}
 
-	// Use Level 1 signing (EIP-712, based on private key)
-	// Note: Level 1 signing usually doesn't need body, but we handle it for compatibility
 	var nonce *int
 	headers, err := internal.CreateLevel1Headers(ls.signer, nonce)
 	if err != nil {

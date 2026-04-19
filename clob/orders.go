@@ -43,7 +43,7 @@ func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types
 		Body:        nil, // GET request has no body
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.web3Client.GetSigner(), c.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -298,7 +298,7 @@ func (c *orderClientImpl) postOrdersBatch(
 
 	// Create Level 2 headers (HMAC signature)
 	// Pass requestBody directly (struct/slice) to match Python behavior
-	headers, err := internal.CreateLevel2HeadersWithBody(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, requestBody, false)
+	headers, err := internal.CreateLevel2HeadersWithBody(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -566,7 +566,7 @@ func (c *orderClientImpl) CancelOrders(orderIDs []types.Keccak256) (*types.Order
 
 	// 使用 CreateLevel2Headers，传入格式化后的 JSON 字符串 body
 	// 这样与 CancelAll 的处理方式一致，都使用 CreateLevel2Headers
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -586,7 +586,7 @@ func (c *orderClientImpl) CancelAll() (*types.OrderCancelResponse, error) {
 		Method:      "DELETE",
 		RequestPath: internal.CancelAll,
 	}
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -634,7 +634,7 @@ func (c *orderClientImpl) CancelMarketOrders(conditionID types.Keccak256) (*type
 	requestArgs.Body = &requestBodyForSigning
 
 	// Create Level 2 headers
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}

@@ -26,7 +26,7 @@ func (c *apiKeyClientImpl) GetAPIKeys() ([]types.APIKey, error) {
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -61,7 +61,7 @@ func (c *apiKeyClientImpl) DeleteAPIKey(keyID string) error {
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -88,7 +88,7 @@ func (c *apiKeyClientImpl) CreateReadonlyAPIKey() (*types.APIKey, error) {
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -114,7 +114,7 @@ func (c *apiKeyClientImpl) GetReadonlyAPIKeys() ([]types.APIKey, error) {
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -149,7 +149,7 @@ func (c *apiKeyClientImpl) DeleteReadonlyAPIKey(keyID string) error {
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return fmt.Errorf("failed to create headers: %w", err)
 	}

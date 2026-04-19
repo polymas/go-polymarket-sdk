@@ -48,12 +48,11 @@ func CreateLevel1Headers(signer *signing.Signer, nonce *int) (map[string]string,
 	return headers, nil
 }
 
-// CreateLevel2Headers creates Level 2 Poly headers for a request
+// CreateLevel2Headers creates Level 2 Poly headers for a CLOB API request (POLY_* headers).
 func CreateLevel2Headers(
 	signer *signing.Signer,
 	creds *types.ApiCreds,
 	requestArgs *types.RequestArgs,
-	builder bool,
 ) (map[string]string, error) {
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 
@@ -77,34 +76,22 @@ func CreateLevel2Headers(
 		return nil, err
 	}
 
-	if builder {
-		return map[string]string{
-			PolyBuilderSignature:  hmacSig,
-			PolyBuilderTimestamp:  timestamp,
-			PolyBuilderAPIKey:     creds.Key,
-			PolyBuilderPassphrase: creds.Passphrase,
-		}, nil
-	}
-
-	headers := map[string]string{
+	return map[string]string{
 		PolyAddress:    signer.Address().String(),
 		PolySignature:  hmacSig,
 		PolyTimestamp:  timestamp,
 		PolyAPIKey:     creds.Key,
 		PolyPassphrase: creds.Passphrase,
-	}
-
-	return headers, nil
+	}, nil
 }
 
-// CreateLevel2HeadersWithBody creates Level 2 Poly headers with body passed directly (for POST /orders)
-// This matches Python behavior where body is passed as list/dict, not JSON string
+// CreateLevel2HeadersWithBody creates Level 2 Poly headers for a CLOB API request with body
+// passed directly as struct/slice (preserves field order for HMAC). Used by POST /orders.
 func CreateLevel2HeadersWithBody(
 	signer *signing.Signer,
 	creds *types.ApiCreds,
 	requestArgs *types.RequestArgs,
 	body interface{},
-	builder bool,
 ) (map[string]string, error) {
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 
@@ -120,24 +107,42 @@ func CreateLevel2HeadersWithBody(
 		return nil, err
 	}
 
-	if builder {
-		return map[string]string{
-			PolyBuilderSignature:  hmacSig,
-			PolyBuilderTimestamp:  timestamp,
-			PolyBuilderAPIKey:     creds.Key,
-			PolyBuilderPassphrase: creds.Passphrase,
-		}, nil
-	}
-
-	headers := map[string]string{
+	return map[string]string{
 		PolyAddress:    signer.Address().String(),
 		PolySignature:  hmacSig,
 		PolyTimestamp:  timestamp,
 		PolyAPIKey:     creds.Key,
 		PolyPassphrase: creds.Passphrase,
+	}, nil
+}
+
+// CreateRelayerHeaders creates POLY_BUILDER_* HMAC headers used by the gasless relayer
+// (relayer-v2.polymarket.com/submit). Name is historical — these headers are *not* related
+// to V2 CLOB builder attribution (which moved to the Order struct bytes32 `builder` field).
+func CreateRelayerHeaders(
+	creds *types.ApiCreds,
+	requestArgs *types.RequestArgs,
+	body interface{},
+) (map[string]string, error) {
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+
+	hmacSig, err := signing.BuildHMACSignature(
+		creds.Secret,
+		timestamp,
+		requestArgs.Method,
+		requestArgs.RequestPath,
+		body,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	return headers, nil
+	return map[string]string{
+		PolyBuilderSignature:  hmacSig,
+		PolyBuilderTimestamp:  timestamp,
+		PolyBuilderAPIKey:     creds.Key,
+		PolyBuilderPassphrase: creds.Passphrase,
+	}, nil
 }
 
 // ValidateEthAddress 验证以太坊地址格式

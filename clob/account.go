@@ -34,7 +34,7 @@ func (c *accountClientImpl) GetBalanceAllowance() (*types.BalanceAllowance, erro
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -80,7 +80,7 @@ func (c *accountClientImpl) UpdateBalanceAllowance(amount float64) (*types.Balan
 	}
 
 	// Create Level 2 headers
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -112,7 +112,7 @@ func (c *accountClientImpl) GetNotifications(limit int, offset int) ([]types.Not
 		Body:        nil,
 	}
 
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
@@ -171,7 +171,7 @@ func (c *accountClientImpl) DropNotifications(notificationIDs []string) error {
 	}
 
 	// Create Level 2 headers
-	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, false)
+	headers, err := internal.CreateLevel2Headers(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs)
 	if err != nil {
 		return fmt.Errorf("failed to create headers: %w", err)
 	}
