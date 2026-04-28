@@ -4,12 +4,66 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
+
+// sanitizeTokenIDs 过滤空串/空白串并按原顺序去重。
+// Polymarket 批量端点 (/midpoints, /spreads, /last-trades-prices) 的语义是
+// "全部有效或全部 400"，只要批里出现一个空 token_id，整批就会被拒为
+// {"error":"Invalid payload"}。调用方传入的仓位列表偶发会带上空 TokenID
+// (如已 redeem 的仓位 / Data API 异常返回)，因此需在 SDK 侧主动过滤。
+func sanitizeTokenIDs(tokenIDs []string) []string {
+	seen := make(map[string]struct{}, len(tokenIDs))
+	cleaned := make([]string, 0, len(tokenIDs))
+	for _, id := range tokenIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleaned = append(cleaned, id)
+	}
+	return cleaned
+}
+
+// sanitizeBookParams 与 sanitizeTokenIDs 同语义，但对 BookParams 按
+// (TokenID, Side) 去重，保留 BUY/SELL 同 token 的独立请求。
+func sanitizeBookParams(requests []types.BookParams) []types.BookParams {
+	type key struct{ tokenID, side string }
+	seen := make(map[key]struct{}, len(requests))
+	cleaned := make([]types.BookParams, 0, len(requests))
+	for _, req := range requests {
+		req.TokenID = strings.TrimSpace(req.TokenID)
+		if req.TokenID == "" {
+			continue
+		}
+		k := key{req.TokenID, req.Side}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		cleaned = append(cleaned, req)
+	}
+	return cleaned
+}
+
+// payloadSnippet 截取请求体首 200 字符，用于在批量端点失败时把发出去的
+// JSON 摘要带进 error message，避免线上只能看到 "HTTP 400: Invalid payload"。
+func payloadSnippet(body []byte) string {
+	const max = 200
+	if len(body) <= max {
+		return string(body)
+	}
+	return string(body[:max]) + "...(truncated)"
+}
 
 // PricesHistoryOptions 为 GET /prices-history 提供的可选参数
 // 参考: https://docs.polymarket.com/developers/CLOB/timeseries
@@ -169,13 +223,17 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 	if len(requests) == 0 {
 		return nil, fmt.Errorf("请求数组不能为空")
 	}
-	if len(requests) > 500 {
-		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(requests))
+	cleaned := sanitizeBookParams(requests)
+	if len(cleaned) == 0 {
+		return nil, fmt.Errorf("请求数组不能为空")
+	}
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体（只包含必需的字段）
-	requestBody := make([]map[string]string, len(requests))
-	for i, req := range requests {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, req := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": req.TokenID,
 		}
@@ -185,13 +243,21 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 		}
 	}
 
-	// 发送 POST 请求
-	result, err := http.Post[[]types.OrderBookSummaryResponse](c.baseClient.baseURL, internal.GetOrderBooks, requestBody)
+	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取订单簿失败: %w", err)
+		return nil, fmt.Errorf("批量获取订单簿失败: failed to marshal request body: %w", err)
 	}
 
-	return *result, nil
+	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetOrderBooks, bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("批量获取订单簿失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
+	}
+
+	var result []types.OrderBookSummaryResponse
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("批量获取订单簿失败: failed to decode response: %w", err)
+	}
+	return result, nil
 }
 
 // GetMultipleOrderBooks 批量获取多个订单簿摘要（只读客户端实现）
@@ -200,13 +266,17 @@ func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.Bo
 	if len(requests) == 0 {
 		return nil, fmt.Errorf("请求数组不能为空")
 	}
-	if len(requests) > 500 {
-		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(requests))
+	cleaned := sanitizeBookParams(requests)
+	if len(cleaned) == 0 {
+		return nil, fmt.Errorf("请求数组不能为空")
+	}
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体（只包含必需的字段）
-	requestBody := make([]map[string]string, len(requests))
-	for i, req := range requests {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, req := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": req.TokenID,
 		}
@@ -216,13 +286,21 @@ func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.Bo
 		}
 	}
 
-	// 发送 POST 请求
-	result, err := http.Post[[]types.OrderBookSummaryResponse](c.readonlyBaseClient.baseURL, internal.GetOrderBooks, requestBody)
+	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取订单簿失败: %w", err)
+		return nil, fmt.Errorf("批量获取订单簿失败: failed to marshal request body: %w", err)
 	}
 
-	return *result, nil
+	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetOrderBooks, bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("批量获取订单簿失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
+	}
+
+	var result []types.OrderBookSummaryResponse
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("批量获取订单簿失败: failed to decode response: %w", err)
+	}
+	return result, nil
 }
 
 // GetMidpoint 获取单个代币的中间价
@@ -233,16 +311,17 @@ func (c *marketDataClientImpl) GetMidpoint(tokenID string) (*types.Midpoint, err
 
 // GetMidpoints 批量获取多个代币的中间价
 func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint, error) {
-	if len(tokenIDs) == 0 {
+	cleaned := sanitizeTokenIDs(tokenIDs)
+	if len(cleaned) == 0 {
 		return []types.Midpoint{}, nil
 	}
-	if len(tokenIDs) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(tokenIDs))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(tokenIDs))
-	for i, tokenID := range tokenIDs {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, tokenID := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": tokenID,
 		}
@@ -250,15 +329,14 @@ func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint
 
 	// API返回的是对象 map[token_id]price_string，而不是数组
 	// 需要先获取原始响应，然后转换为数组
-	// 先序列化请求体
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取中间价失败: failed to marshal request body: %w", err)
 	}
-	
+
 	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.MidPoints, bodyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取中间价失败: %w", err)
+		return nil, fmt.Errorf("批量获取中间价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
 	// 解析为map[string]string (token_id -> price_string)
@@ -268,8 +346,8 @@ func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint
 	}
 
 	// 转换为数组格式
-	result := make([]types.Midpoint, 0, len(tokenIDs))
-	for _, tokenID := range tokenIDs {
+	result := make([]types.Midpoint, 0, len(cleaned))
+	for _, tokenID := range cleaned {
 		if priceStr, ok := responseMap[tokenID]; ok {
 			price, err := strconv.ParseFloat(priceStr, 64)
 			if err != nil {
@@ -386,16 +464,17 @@ func (c *marketDataClientImpl) GetSpread(tokenID string) (*types.Spread, error) 
 
 // GetSpreads 批量获取多个代币的价差
 func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, error) {
-	if len(tokenIDs) == 0 {
+	cleaned := sanitizeTokenIDs(tokenIDs)
+	if len(cleaned) == 0 {
 		return []types.Spread{}, nil
 	}
-	if len(tokenIDs) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(tokenIDs))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(tokenIDs))
-	for i, tokenID := range tokenIDs {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, tokenID := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": tokenID,
 		}
@@ -407,10 +486,10 @@ func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, er
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价差失败: failed to marshal request body: %w", err)
 	}
-	
+
 	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetSpreads, bodyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取价差失败: %w", err)
+		return nil, fmt.Errorf("批量获取价差失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
 	// 解析为map[string]string (token_id -> spread_string)
@@ -420,8 +499,8 @@ func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, er
 	}
 
 	// 转换为数组格式
-	result := make([]types.Spread, 0, len(tokenIDs))
-	for _, tokenID := range tokenIDs {
+	result := make([]types.Spread, 0, len(cleaned))
+	for _, tokenID := range cleaned {
 		if spreadStr, ok := responseMap[tokenID]; ok {
 			spread, err := strconv.ParseFloat(spreadStr, 64)
 			if err != nil {
@@ -445,27 +524,37 @@ func (c *marketDataClientImpl) GetLastTradePrice(tokenID string) (*types.LastTra
 
 // GetLastTradesPrices 批量获取多个代币的最后成交价
 func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error) {
-	if len(tokenIDs) == 0 {
+	cleaned := sanitizeTokenIDs(tokenIDs)
+	if len(cleaned) == 0 {
 		return []types.LastTradePrice{}, nil
 	}
-	if len(tokenIDs) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(tokenIDs))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(tokenIDs))
-	for i, tokenID := range tokenIDs {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, tokenID := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": tokenID,
 		}
 	}
 
-	result, err := http.Post[[]types.LastTradePrice](c.baseClient.baseURL, internal.GetLastTradesPrices, requestBody)
+	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取最后成交价失败: %w", err)
+		return nil, fmt.Errorf("批量获取最后成交价失败: failed to marshal request body: %w", err)
 	}
 
-	return *result, nil
+	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetLastTradesPrices, bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("批量获取最后成交价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
+	}
+
+	var result []types.LastTradePrice
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("批量获取最后成交价失败: failed to decode response: %w", err)
+	}
+	return result, nil
 }
 
 // GetFeeRate 获取代币的手续费率（以 bps 为单位，1 bps = 0.01%）
@@ -593,16 +682,17 @@ func (c *readonlyMarketDataClientImpl) GetMidpoint(tokenID string) (*types.Midpo
 
 // GetMidpoints 批量获取多个代币的中间价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint, error) {
-	if len(tokenIDs) == 0 {
+	cleaned := sanitizeTokenIDs(tokenIDs)
+	if len(cleaned) == 0 {
 		return []types.Midpoint{}, nil
 	}
-	if len(tokenIDs) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(tokenIDs))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(tokenIDs))
-	for i, tokenID := range tokenIDs {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, tokenID := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": tokenID,
 		}
@@ -610,15 +700,14 @@ func (c *readonlyMarketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.
 
 	// API返回的是对象 map[token_id]price_string，而不是数组
 	// 需要先获取原始响应，然后转换为数组
-	// 先序列化请求体
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取中间价失败: failed to marshal request body: %w", err)
 	}
-	
+
 	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.MidPoints, bodyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取中间价失败: %w", err)
+		return nil, fmt.Errorf("批量获取中间价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
 	// 解析为map[string]string (token_id -> price_string)
@@ -628,8 +717,8 @@ func (c *readonlyMarketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.
 	}
 
 	// 转换为数组格式
-	result := make([]types.Midpoint, 0, len(tokenIDs))
-	for _, tokenID := range tokenIDs {
+	result := make([]types.Midpoint, 0, len(cleaned))
+	for _, tokenID := range cleaned {
 		if priceStr, ok := responseMap[tokenID]; ok {
 			price, err := strconv.ParseFloat(priceStr, 64)
 			if err != nil {
@@ -746,16 +835,17 @@ func (c *readonlyMarketDataClientImpl) GetSpread(tokenID string) (*types.Spread,
 
 // GetSpreads 批量获取多个代币的价差（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, error) {
-	if len(tokenIDs) == 0 {
+	cleaned := sanitizeTokenIDs(tokenIDs)
+	if len(cleaned) == 0 {
 		return []types.Spread{}, nil
 	}
-	if len(tokenIDs) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(tokenIDs))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(tokenIDs))
-	for i, tokenID := range tokenIDs {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, tokenID := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": tokenID,
 		}
@@ -767,10 +857,10 @@ func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Sp
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价差失败: failed to marshal request body: %w", err)
 	}
-	
+
 	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetSpreads, bodyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取价差失败: %w", err)
+		return nil, fmt.Errorf("批量获取价差失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
 	// 解析为map[string]string (token_id -> spread_string)
@@ -780,8 +870,8 @@ func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Sp
 	}
 
 	// 转换为数组格式
-	result := make([]types.Spread, 0, len(tokenIDs))
-	for _, tokenID := range tokenIDs {
+	result := make([]types.Spread, 0, len(cleaned))
+	for _, tokenID := range cleaned {
 		if spreadStr, ok := responseMap[tokenID]; ok {
 			spread, err := strconv.ParseFloat(spreadStr, 64)
 			if err != nil {
@@ -805,27 +895,37 @@ func (c *readonlyMarketDataClientImpl) GetLastTradePrice(tokenID string) (*types
 
 // GetLastTradesPrices 批量获取多个代币的最后成交价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error) {
-	if len(tokenIDs) == 0 {
+	cleaned := sanitizeTokenIDs(tokenIDs)
+	if len(cleaned) == 0 {
 		return []types.LastTradePrice{}, nil
 	}
-	if len(tokenIDs) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(tokenIDs))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(tokenIDs))
-	for i, tokenID := range tokenIDs {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, tokenID := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": tokenID,
 		}
 	}
 
-	result, err := http.Post[[]types.LastTradePrice](c.readonlyBaseClient.baseURL, internal.GetLastTradesPrices, requestBody)
+	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取最后成交价失败: %w", err)
+		return nil, fmt.Errorf("批量获取最后成交价失败: failed to marshal request body: %w", err)
 	}
 
-	return *result, nil
+	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetLastTradesPrices, bodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("批量获取最后成交价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
+	}
+
+	var result []types.LastTradePrice
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("批量获取最后成交价失败: failed to decode response: %w", err)
+	}
+	return result, nil
 }
 
 // GetFeeRate 获取代币的手续费率（只读客户端实现）
