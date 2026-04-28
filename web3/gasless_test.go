@@ -27,7 +27,7 @@ func newTestGaslessClient(t *testing.T) *GaslessClient {
 	return client
 }
 
-func TestRedeemPositions(t *testing.T) {
+func TestRedeemPositionsV1(t *testing.T) {
 	client := newTestGaslessClient(t)
 	config := test.LoadTestConfig()
 
@@ -37,7 +37,7 @@ func TestRedeemPositions(t *testing.T) {
 
 	// 注意：这个测试会实际赎回仓位，需要谨慎
 	t.Run("Basic", func(t *testing.T) {
-		positions := []RedeemPositionInfo{
+		positions := []RedeemPositionInfoV1{
 			{
 				ConditionID: config.TestConditionID,
 				Amounts:     []float64{1.0, 0.0},
@@ -45,7 +45,7 @@ func TestRedeemPositions(t *testing.T) {
 			},
 		}
 
-		receipt, err := client.RedeemPositions(positions)
+		receipt, err := client.RedeemPositionsV1(positions)
 		if err != nil {
 			t.Fatalf("RedeemPositions failed: %v", err)
 		}
@@ -57,14 +57,14 @@ func TestRedeemPositions(t *testing.T) {
 
 	// 边界条件测试 - 空数组
 	t.Run("EmptyArray", func(t *testing.T) {
-		_, err := client.RedeemPositions([]RedeemPositionInfo{})
+		_, err := client.RedeemPositionsV1([]RedeemPositionInfoV1{})
 		if err == nil {
 			t.Error("Expected error for empty positions array")
 		}
 	})
 }
 
-func TestSplitUSDC(t *testing.T) {
+func TestSplitUSDCV1(t *testing.T) {
 	client := newTestGaslessClient(t)
 	config := test.LoadTestConfig()
 
@@ -75,7 +75,7 @@ func TestSplitUSDC(t *testing.T) {
 	// 注意：这个测试会实际拆分USDC，需要谨慎
 	t.Run("Basic", func(t *testing.T) {
 		amount := 10.0
-		receipt, err := client.SplitUSDC(amount, config.TestConditionID, false)
+		receipt, err := client.SplitUSDCV1(amount, config.TestConditionID, false)
 		if err != nil {
 			t.Fatalf("SplitUSDC failed: %v", err)
 		}
@@ -87,7 +87,7 @@ func TestSplitUSDC(t *testing.T) {
 
 	// 边界条件测试 - 零金额
 	t.Run("ZeroAmount", func(t *testing.T) {
-		_, err := client.SplitUSDC(0.0, config.TestConditionID, false)
+		_, err := client.SplitUSDCV1(0.0, config.TestConditionID, false)
 		if err == nil {
 			t.Error("Expected error for zero amount")
 		}
@@ -95,7 +95,7 @@ func TestSplitUSDC(t *testing.T) {
 
 	// 测试负数金额
 	t.Run("NegativeAmount", func(t *testing.T) {
-		_, err := client.SplitUSDC(-10.0, config.TestConditionID, false)
+		_, err := client.SplitUSDCV1(-10.0, config.TestConditionID, false)
 		if err == nil {
 			t.Error("Expected error for negative amount")
 		} else {
@@ -106,7 +106,7 @@ func TestSplitUSDC(t *testing.T) {
 	// 测试极大金额
 	t.Run("LargeAmount", func(t *testing.T) {
 		largeAmount := 1e15
-		_, err := client.SplitUSDC(largeAmount, config.TestConditionID, false)
+		_, err := client.SplitUSDCV1(largeAmount, config.TestConditionID, false)
 		if err != nil {
 			t.Logf("SplitUSDC with large amount returned error (may be expected): %v", err)
 		} else {
@@ -117,7 +117,7 @@ func TestSplitUSDC(t *testing.T) {
 	// 测试无效conditionID
 	t.Run("InvalidConditionID", func(t *testing.T) {
 		invalidConditionID := types.Keccak256("invalid-condition-id")
-		_, err := client.SplitUSDC(10.0, invalidConditionID, false)
+		_, err := client.SplitUSDCV1(10.0, invalidConditionID, false)
 		if err != nil {
 			t.Logf("SplitUSDC with invalid conditionID returned error (expected): %v", err)
 		} else {
@@ -126,7 +126,7 @@ func TestSplitUSDC(t *testing.T) {
 	})
 }
 
-func TestMergeTokens(t *testing.T) {
+func TestMergeTokensV1(t *testing.T) {
 	client := newTestGaslessClient(t)
 	config := test.LoadTestConfig()
 
@@ -137,7 +137,7 @@ func TestMergeTokens(t *testing.T) {
 	// 注意：这个测试会实际合并代币，需要谨慎
 	t.Run("Basic", func(t *testing.T) {
 		amount := 1.0
-		receipt, err := client.MergeTokens(config.TestConditionID, amount, false)
+		receipt, err := client.MergeTokensV1(config.TestConditionID, amount, false)
 		if err != nil {
 			t.Fatalf("MergeTokens failed: %v", err)
 		}
@@ -149,11 +149,11 @@ func TestMergeTokens(t *testing.T) {
 
 	// 边界条件测试 - 零或负数
 	t.Run("ZeroOrNegative", func(t *testing.T) {
-		_, err := client.MergeTokens(config.TestConditionID, 0.0, false)
+		_, err := client.MergeTokensV1(config.TestConditionID, 0.0, false)
 		if err == nil {
 			t.Error("Expected error for zero amount")
 		}
-		_, err = client.MergeTokens(config.TestConditionID, -1.0, false)
+		_, err = client.MergeTokensV1(config.TestConditionID, -1.0, false)
 		if err == nil {
 			t.Error("Expected error for negative amount")
 		}
@@ -163,7 +163,7 @@ func TestMergeTokens(t *testing.T) {
 	t.Run("DifferentAmounts", func(t *testing.T) {
 		amounts := []float64{0.5, 1.0, 2.0}
 		for _, amount := range amounts {
-			receipt, err := client.MergeTokens(config.TestConditionID, amount, false)
+			receipt, err := client.MergeTokensV1(config.TestConditionID, amount, false)
 			if err != nil {
 				t.Logf("MergeTokens with amount %f failed (may be expected): %v", amount, err)
 			} else if receipt != nil {
@@ -175,7 +175,7 @@ func TestMergeTokens(t *testing.T) {
 	// 测试无效conditionID
 	t.Run("InvalidConditionID", func(t *testing.T) {
 		invalidConditionID := types.Keccak256("invalid-condition-id")
-		_, err := client.MergeTokens(invalidConditionID, 1.0, false)
+		_, err := client.MergeTokensV1(invalidConditionID, 1.0, false)
 		if err != nil {
 			t.Logf("MergeTokens with invalid conditionID returned error (expected): %v", err)
 		} else {

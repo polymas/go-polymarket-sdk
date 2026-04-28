@@ -11,16 +11,16 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// RedeemPositionInfo represents a single position to redeem
-type RedeemPositionInfo struct {
+// RedeemPositionInfoV1 represents a single position to redeem
+type RedeemPositionInfoV1 struct {
 	ConditionID types.Keccak256
 	Amounts     []float64
 	NegRisk     bool
 }
 
-// RedeemPositions redeems multiple positions into USDC in a single batch transaction
-func (c *GaslessClient) RedeemPositions(
-	positions []RedeemPositionInfo,
+// RedeemPositionsV1 redeems multiple positions into USDC in a single batch transaction
+func (c *GaslessClient) RedeemPositionsV1(
+	positions []RedeemPositionInfoV1,
 ) (*types.TransactionReceipt, error) {
 	if len(positions) == 0 {
 		return nil, fmt.Errorf("no positions to redeem")
@@ -155,8 +155,8 @@ func (c *GaslessClient) encodeRedeemNegRisk(conditionID types.Keccak256, amounts
 	return data, nil
 }
 
-// SplitUSDC splits USDC into outcome tokens
-func (c *GaslessClient) SplitUSDC(amount float64, conditionID types.Keccak256, negRisk bool) (*types.TransactionReceipt, error) {
+// SplitUSDCV1 splits USDC into outcome tokens
+func (c *GaslessClient) SplitUSDCV1(amount float64, conditionID types.Keccak256, negRisk bool) (*types.TransactionReceipt, error) {
 	// Convert amount to int (multiply by 1e6)
 	amountFloat := big.NewFloat(amount)
 	multiplier := big.NewFloat(1e6)
@@ -200,8 +200,8 @@ func (c *GaslessClient) SplitUSDC(amount float64, conditionID types.Keccak256, n
 	return c.executeGaslessBatch(proxyTxns, "Split USDC", "split")
 }
 
-// MergeTokens merges outcome tokens back into USDC
-func (c *GaslessClient) MergeTokens(conditionID types.Keccak256, amount float64, negRisk bool) (*types.TransactionReceipt, error) {
+// MergeTokensV1 merges outcome tokens back into USDC
+func (c *GaslessClient) MergeTokensV1(conditionID types.Keccak256, amount float64, negRisk bool) (*types.TransactionReceipt, error) {
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive, got: %f", amount)
 	}

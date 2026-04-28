@@ -30,8 +30,24 @@ const (
 	PolygonProxyFactory = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052"
 
 	// V2 Exchange 合约地址（2026-04-28 切换后启用）
-	// 参考：https://docs.polymarket.com/v2-migration
-	// pUSD / V2 CTF / V2 NegRiskAdapter 等其它地址待 /resources/contracts 页补齐后再加
+	// 参考：https://docs.polymarket.com/resources/contracts
 	PolygonExchangeV2        = "0xE111180000d2663C0091e4f400237545B87B996B"
 	PolygonNegRiskExchangeV2 = "0xe2222d279d744050d28e00520010520000310F59"
+
+	// V2 collateral：pUSD（1:1 USDC.e 封装，V2 CLOB 真正记账用的 token）
+	PolygonPUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+	// CollateralOnramp：USDC.e → pUSD wrap
+	PolygonCollateralOnramp = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+	// CollateralOfframp：pUSD → USDC.e unwrap
+	PolygonCollateralOfframp = "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
+	// CtfCollateralAdapter：V2 Exchange 的 pUSD 桥
+	PolygonCtfCollateralAdapter = "0xADa100874d00e3331D00F2007a9c336a65009718"
+	// NegRiskCtfCollateralAdapter：V2 NegRisk Exchange 的 pUSD 桥
+	PolygonNegRiskCtfCollateralAdapter = "0xAdA200001000ef00D07553cEE7006808F895c6F1"
+
+	// PolymarketAutoClaimer：Polymarket 后端自动 redeem 服务的合约地址。
+	// 用户通过 CTF.setApprovalForAll(PolymarketAutoClaimer, true/false) 开/关自动 claim。
+	// 开启后 Polymarket 服务在市场结算后自动把赢家仓位换成 pUSD 返给用户 Safe。
+	// 参考链上 tx：0x22d6dcec5feb6bce8fdec26b86e1ee1b54aa333819aabc19d70f3006680cfd55
+	PolymarketAutoClaimer = "0x05Cd9922a5D37faE921fc5DEe280A9dbc4C3B393"
 )

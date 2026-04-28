@@ -1,7 +1,7 @@
 // v2_smoke 在 clob-v2.polymarket.com 上跑最小联调验证。
 //
 // 必选环境变量：
-//   POLY_PRIVATE_KEY          钱包私钥（0x 前缀可选）
+//   poly_sec                  钱包私钥（0x 前缀可选；兼容旧名 POLY_PRIVATE_KEY）
 //
 // 可选环境变量：
 //   POLY_SIGNATURE_TYPE       0=EOA, 1=Proxy (默认), 2=Safe
@@ -29,7 +29,10 @@ import (
 )
 
 func main() {
-	privateKey := mustEnv("POLY_PRIVATE_KEY")
+	privateKey := firstEnv("poly_sec", "POLY_PRIVATE_KEY")
+	if privateKey == "" {
+		log.Fatalf("缺少必选环境变量 poly_sec（或兼容旧名 POLY_PRIVATE_KEY）")
+	}
 	sigType := types.SignatureType(getEnvInt("POLY_SIGNATURE_TYPE", int(types.ProxySignatureType)))
 	testToken := os.Getenv("POLY_V2_TEST_TOKEN")
 	runPost := os.Getenv("POLY_V2_SMOKE_POST") == "1"
@@ -149,12 +152,13 @@ func stepB(client clob.Client, testToken string) {
 	fmt.Println("\n✅ POST + CANCEL round-trip 成功 —— V2 签名和请求体字段名都对得上")
 }
 
-func mustEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("缺少必选环境变量 %s", key)
+func firstEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
 	}
-	return v
+	return ""
 }
 
 func getEnvInt(key string, def int) int {

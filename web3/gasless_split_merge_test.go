@@ -90,7 +90,7 @@ func TestSplitAndMergeBTC4H(t *testing.T) {
 	testAmount := 5.0
 
 	t.Run("SplitUSDC", func(t *testing.T) {
-		receipt, err := gaslessClient.SplitUSDC(testAmount, conditionID, negRisk)
+		receipt, err := gaslessClient.SplitUSDCV1(testAmount, conditionID, negRisk)
 		if err != nil {
 			t.Fatalf("SplitUSDC failed: %v", err)
 		}
@@ -101,7 +101,7 @@ func TestSplitAndMergeBTC4H(t *testing.T) {
 	})
 
 	t.Run("MergeTokens", func(t *testing.T) {
-		receipt, err := gaslessClient.MergeTokens(conditionID, testAmount, negRisk)
+		receipt, err := gaslessClient.MergeTokensV1(conditionID, testAmount, negRisk)
 		if err != nil {
 			t.Fatalf("MergeTokens failed: %v", err)
 		}
@@ -113,11 +113,11 @@ func TestSplitAndMergeBTC4H(t *testing.T) {
 
 	t.Run("SplitAndMergeFlow", func(t *testing.T) {
 		flowAmount := 0.5
-		splitReceipt, err := gaslessClient.SplitUSDC(flowAmount, conditionID, negRisk)
+		splitReceipt, err := gaslessClient.SplitUSDCV1(flowAmount, conditionID, negRisk)
 		if err != nil {
 			t.Fatalf("SplitUSDC failed: %v", err)
 		}
-		mergeReceipt, err := gaslessClient.MergeTokens(conditionID, flowAmount, negRisk)
+		mergeReceipt, err := gaslessClient.MergeTokensV1(conditionID, flowAmount, negRisk)
 		if err != nil {
 			t.Fatalf("MergeTokens failed: %v", err)
 		}

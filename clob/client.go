@@ -78,6 +78,9 @@ type Client interface {
 	OrderClient
 	AccountClient
 	APIKeyClient
+
+	// GetAPICreds 返回初始化时派生的 API 凭证，用于需要 Level2 鉴权的外部调用（如 GaslessClient）
+	GetAPICreds() *types.ApiCreds
 }
 
 // baseClient 基础客户端结构，包含所有共享的字段和方法
@@ -261,6 +264,11 @@ func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 	}
 
 	return clobClient, nil
+}
+
+// GetAPICreds 返回初始化时派生/创建的 API 凭证（不复制，调用方不得修改）
+func (c *baseClient) GetAPICreds() *types.ApiCreds {
+	return c.deriveCreds
 }
 
 // CreateOrDeriveAPICreds creates or derives API credentials

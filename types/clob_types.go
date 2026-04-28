@@ -478,10 +478,11 @@ type PolygonTrade struct {
 // LastTradePrice 表示最后成交价
 type LastTradePrice TokenValue
 
-// BalanceAllowance 表示余额授权信息
+// BalanceAllowance 表示余额授权信息。V2 服务端把 balance/allowance 序列化为字符串
+// （最小单位的 uint256，例如 "43468934"），所以这里用 string 承接再由调用方解析。
 type BalanceAllowance struct {
-	Allowance float64 `json:"allowance"`
-	Balance   float64 `json:"balance"`
+	Allowance string `json:"allowance"`
+	Balance   string `json:"balance"`
 }
 
 // APIKey 表示 API 密钥信息
