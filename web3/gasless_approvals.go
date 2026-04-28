@@ -13,7 +13,12 @@ import (
 )
 
 const (
-	approveERC20ABISource      = `[{"name":"approve","type":"function","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"type":"bool"}]}]`
+	// erc20ABI 含写方法 approve + 只读 balanceOf / allowance（V2 Ensure* 需要查链上）。
+	approveERC20ABISource = `[
+{"name":"approve","type":"function","stateMutability":"nonpayable","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[{"type":"bool"}]},
+{"name":"balanceOf","type":"function","stateMutability":"view","inputs":[{"name":"a","type":"address"}],"outputs":[{"type":"uint256"}]},
+{"name":"allowance","type":"function","stateMutability":"view","inputs":[{"name":"o","type":"address"},{"name":"s","type":"address"}],"outputs":[{"type":"uint256"}]}
+]`
 	setApprovalForAllABISource = `[{"name":"setApprovalForAll","type":"function","stateMutability":"nonpayable","inputs":[{"name":"operator","type":"address"},{"name":"approved","type":"bool"}],"outputs":[]}]`
 	collateralOnrampABISource  = `[{"name":"wrap","type":"function","stateMutability":"nonpayable","inputs":[{"name":"asset","type":"address"},{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[]}]`
 )
