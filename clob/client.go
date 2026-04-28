@@ -101,12 +101,13 @@ type baseClient struct {
 // ClientOption 客户端构造选项
 type ClientOption func(*baseClient)
 
-// WithV2 切换客户端到 V2 签名路径 + ClobAPIV2Domain。
-// 2026-04-28 切换日前用于联调 clob-v2.polymarket.com；切换日后 V1 路径不再可用。
+// WithV2 切换客户端到 V2 签名路径。
+// 2026-04-28 切换日后 ClobAPIDomain (clob.polymarket.com) 自身即为 V2，
+// clob-v2.polymarket.com 已 301 重定向回主域，沿用旧域会让 POST 被降级成 GET 报 405。
+// 因此这里只切签名路径，host 保持默认 ClobAPIDomain。
 func WithV2() ClientOption {
 	return func(c *baseClient) {
 		c.useV2 = true
-		c.baseURL = internal.ClobAPIV2Domain
 	}
 }
 
