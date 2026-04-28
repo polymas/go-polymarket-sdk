@@ -45,9 +45,13 @@ const (
 	// NegRiskCtfCollateralAdapter：V2 NegRisk Exchange 的 pUSD 桥
 	PolygonNegRiskCtfCollateralAdapter = "0xAdA200001000ef00D07553cEE7006808F895c6F1"
 
-	// PolymarketAutoClaimer：Polymarket 后端自动 redeem 服务的合约地址。
+	// PolymarketAutoClaimer：Polymarket V2 后端自动 redeem 服务的合约地址。
 	// 用户通过 CTF.setApprovalForAll(PolymarketAutoClaimer, true/false) 开/关自动 claim。
 	// 开启后 Polymarket 服务在市场结算后自动把赢家仓位换成 pUSD 返给用户 Safe。
-	// 参考链上 tx：0x22d6dcec5feb6bce8fdec26b86e1ee1b54aa333819aabc19d70f3006680cfd55
-	PolymarketAutoClaimer = "0x05Cd9922a5D37faE921fc5DEe280A9dbc4C3B393"
+	// 来源：从前端 SAFE setApprovalForAll(operator, true) 的 calldata 反推。
+	PolymarketAutoClaimer = "0xf3cFb6A6EbfEB51876289Eb235719eb1c65252b0"
+
+	// PolymarketAutoClaimerDeprecated：早期 V1 试验地址，前端已弃用。
+	// 留作历史标记，便于排查老 Safe 上的残留 approval。
+	PolymarketAutoClaimerDeprecated = "0x05Cd9922a5D37faE921fc5DEe280A9dbc4C3B393"
 )
