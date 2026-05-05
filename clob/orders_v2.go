@@ -175,10 +175,19 @@ func (c *orderClientImpl) createSignedOrderV2(
 	baseAddr := string(c.baseClient.web3Client.GetBaseAddress())
 	makerAddr := baseAddr
 	signerAddr := baseAddr
-	if c.baseClient.signatureType == types.ProxySignatureType ||
-		c.baseClient.signatureType == types.SafeSignatureType ||
-		c.baseClient.signatureType == types.CWIASignatureType {
+	switch c.baseClient.signatureType {
+	case types.ProxySignatureType, types.SafeSignatureType:
+		// V1 风格：maker = proxy（资金来源），signer = EOA（API key 持有者）
 		makerAddr = string(c.baseClient.proxyAddress)
+	case types.CWIASignatureType:
+		// V2 POLY_1271 (=3) 语义：合约钱包通过 EIP-1271 验证签名，
+		// 因此 signer 字段必须 = funder/proxy 地址，不能是 EOA。
+		// 对照 py-clob-client-v2/order_builder/builder.py 的 _v2_order_signer：
+		//   if signature_type == POLY_1271: return funder
+		// 不这么做 CLOB 会报 "the order signer address has to be the
+		// address of the API KEY"（v2 后端对 1271 类型走另一套校验）。
+		makerAddr = string(c.baseClient.proxyAddress)
+		signerAddr = string(c.baseClient.proxyAddress)
 	}
 
 	var side signing.V2OrderSide
