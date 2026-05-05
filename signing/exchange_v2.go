@@ -17,9 +17,21 @@ var (
 	V2ExchangeProtocolName    = crypto.Keccak256Hash([]byte("Polymarket CTF Exchange"))
 	V2ExchangeProtocolVersion = crypto.Keccak256Hash([]byte("2"))
 
-	V2OrderTypehash = crypto.Keccak256Hash([]byte(
-		"Order(uint256 salt,address maker,address signer,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,uint256 timestamp,bytes32 metadata,bytes32 builder)",
-	))
+	// V2OrderTypeString 是 V2 Order 的 EIP-712 类型字符串。注意：solady ERC-1271
+	// 嵌套签名（POLY_1271 路径）需要把这个字符串原样附在最终签名末尾，所以
+	// 单独保留为变量，不要内联。
+	V2OrderTypeString = "Order(uint256 salt,address maker,address signer,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,uint256 timestamp,bytes32 metadata,bytes32 builder)"
+
+	V2OrderTypehash = crypto.Keccak256Hash([]byte(V2OrderTypeString))
+
+	// solady TypedDataSign 类型字符串（POLY_1271 嵌套签名专用）。
+	// 来源：py-clob-client-v2 exchange_order_builder_v2.SOLADY_TYPE_STRING
+	V2SoladyTypeString = "TypedDataSign(Order contents,string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)" + V2OrderTypeString
+	V2SoladyTypeHash   = crypto.Keccak256Hash([]byte(V2SoladyTypeString))
+
+	// DepositWallet 域参数（POLY_1271 内层 domain，verifyingContract = wallet）
+	V2DepositWalletNameHash    = crypto.Keccak256Hash([]byte("DepositWallet"))
+	V2DepositWalletVersionHash = crypto.Keccak256Hash([]byte("1"))
 )
 
 // V2OrderABIStruct 与 V2OrderTypehash 的字段顺序严格对齐，供 EIP-712 ABI 编码使用。

@@ -63,6 +63,12 @@ type V2SignedOrder struct {
 // chainID:          typically 137 (Polygon mainnet) — use types.Polygon converted to *big.Int.
 // exchangeAddress:  V2 Exchange (internal.PolygonExchangeV2) or V2 NegRisk Exchange
 //                   (internal.PolygonNegRiskExchangeV2) wrapped via common.HexToAddress.
+//
+// 签名分支（按 V2OrderData.SignatureType）：
+//   - 0/1/2 (EOA / PolyProxy / Safe)  : 标准 EIP-712 ECDSA，65 字节签名
+//   - 3     (POLY_1271 / CWIA)         : solady ERC-1271 嵌套签名，~326 字节
+//                                        包含 inner_sig || appDomainSep || contents_hash
+//                                        || ORDER_TYPE_STRING || uint16(len)
 func BuildSignedV2Order(
 	privateKey *ecdsa.PrivateKey,
 	data *V2OrderData,
@@ -72,6 +78,14 @@ func BuildSignedV2Order(
 	order, err := buildV2Order(data)
 	if err != nil {
 		return nil, err
+	}
+
+	if order.SignatureType == types.CWIASignatureType {
+		signature, err := signV2OrderPoly1271(order, chainID, exchangeAddress, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		return &V2SignedOrder{V2Order: *order, Signature: signature}, nil
 	}
 
 	digest, err := V2OrderDigest(order, chainID, exchangeAddress)
@@ -89,6 +103,85 @@ func BuildSignedV2Order(
 	}
 
 	return &V2SignedOrder{V2Order: *order, Signature: signature}, nil
+}
+
+// signV2OrderPoly1271 实现 solady ERC-1271 nested TypedDataSign 签名。
+//
+// 对照 py-clob-client-v2 _build_poly_1271_order_signature。
+// signer 字段必须 = DepositWallet 代理地址（这是内层 domain 的 verifyingContract）。
+func signV2OrderPoly1271(
+	o *V2Order,
+	chainID *big.Int,
+	exchangeAddress common.Address,
+	privateKey *ecdsa.PrivateKey,
+) ([]byte, error) {
+	// 1) 外层 app domain separator = CTF Exchange V2 domain
+	appDomain, err := buildV2DomainSeparator(chainID, exchangeAddress)
+	if err != nil {
+		return nil, fmt.Errorf("build app domain: %w", err)
+	}
+
+	// 2) Order struct hash（"contents"）—— 与普通 EIP-712 路径用同一份 ABI 编码
+	contentsHash, err := v2OrderStructHash(o)
+	if err != nil {
+		return nil, fmt.Errorf("contents hash: %w", err)
+	}
+
+	// 3) TypedDataSign struct hash —— 内层 domain 用 DepositWallet 的参数，
+	//    verifyingContract = order.signer（必须是钱包代理地址）
+	tdsArgs := []abi.Type{
+		v2Bytes32Type, // SOLADY_TYPE_HASH
+		v2Bytes32Type, // contents_hash
+		v2Bytes32Type, // name hash ("DepositWallet")
+		v2Bytes32Type, // version hash ("1")
+		v2Uint256Type, // chainId
+		v2AddressType, // verifyingContract = wallet
+		v2Bytes32Type, // salt = bytes32(0)
+	}
+	var zero32 [32]byte
+	tdsValues := []interface{}{
+		V2SoladyTypeHash,
+		contentsHash,
+		V2DepositWalletNameHash,
+		V2DepositWalletVersionHash,
+		chainID,
+		o.Signer, // = wallet proxy
+		zero32,
+	}
+	tdsEncoded, err := packABI(tdsArgs, tdsValues)
+	if err != nil {
+		return nil, fmt.Errorf("encode TypedDataSign: %w", err)
+	}
+	tdsHash := crypto.Keccak256Hash(tdsEncoded)
+
+	// 4) digest = keccak256(0x1901 || appDomain || tdsHash)
+	buf := make([]byte, 0, 2+32+32)
+	buf = append(buf, 0x19, 0x01)
+	buf = append(buf, appDomain.Bytes()...)
+	buf = append(buf, tdsHash.Bytes()...)
+	digest := crypto.Keccak256Hash(buf)
+
+	// 5) inner signature = ECDSA(digest)
+	innerSig, err := crypto.Sign(digest.Bytes(), privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign POLY_1271 digest: %w", err)
+	}
+	if len(innerSig) == 65 && innerSig[64] < 27 {
+		innerSig[64] += 27
+	}
+
+	// 6) 拼最终签名：inner_sig || appDomain || contents_hash || typeStr || uint16(len)
+	typeStr := []byte(V2OrderTypeString)
+	out := make([]byte, 0, 65+32+32+len(typeStr)+2)
+	out = append(out, innerSig...)
+	out = append(out, appDomain.Bytes()...)
+	out = append(out, contentsHash.Bytes()...)
+	out = append(out, typeStr...)
+	out = append(out,
+		byte(len(typeStr)>>8),
+		byte(len(typeStr)),
+	)
+	return out, nil
 }
 
 // V2OrderDigest returns the EIP-712 digest that gets signed (0x1901 || domain || structHash).
