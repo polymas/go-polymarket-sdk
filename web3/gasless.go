@@ -36,9 +36,13 @@ func NewGaslessClient(
 	builderCreds *types.ApiCreds,
 	rpcURLs ...string,
 ) (*GaslessClient, error) {
-	// Only support proxy (1) and safe (2) wallets
-	if signatureType != types.ProxySignatureType && signatureType != types.SafeSignatureType {
-		return nil, fmt.Errorf("gaslessClient only supports signature_type=1 (proxy) and signature_type=2 (safe)")
+	// Supported: proxy (1), safe (2), CWIA / DepositWallet (3).
+	// CWIA 走完全不同的链上路径（DepositWalletFactory.proxy(Batch[],bytes[])），
+	// 但 Polymarket relayer 仍在同一域名下，只是 type=WALLET。
+	if signatureType != types.ProxySignatureType &&
+		signatureType != types.SafeSignatureType &&
+		signatureType != types.CWIASignatureType {
+		return nil, fmt.Errorf("gaslessClient only supports signature_type=1 (proxy), 2 (safe), 3 (CWIA/DepositWallet)")
 	}
 
 	baseClientInterface, err := NewClient(privateKey, signatureType, chainID, rpcURLs...)

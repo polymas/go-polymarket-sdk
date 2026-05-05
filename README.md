@@ -510,7 +510,8 @@ go test -cover ./...
     - 当前 impl：`0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB`（SDK 通过 `factory.implementation()` 实时读取，impl 升级后不需要改代码）
     - 派生函数：`predictWalletAddress(impl, bytes32(uint160(owner)))`
     - 与老两类型并存，老账号不迁移；签名仍走 EIP-1271（Exchange 调用代理 `isValidSignature`）。
-    - ⚠️ `gasless` 路径目前仅支持 PolyProxy / Safe，CWIA 暂未接入。
+    - **链上 gasless（v1.10.0+）**：`signing.SignCWIABatch` + `web3.BuildCWIABatchCalldata` 已对照真实链上 tx 字节级匹配，可直接广播 `DepositWalletFactory.proxy(Batch[],bytes[])`（需 operator 角色）。
+    - **走 Polymarket relayer 提交**：`NewGaslessClient(..., CWIASignatureType, ...)` 已可创建；高层方法（SplitPosition / MergePositions / RedeemPositions / SetAutoClaim 等）会自动走 CWIA 分支。⚠️ relayer `/submit` 对 `type=WALLET` 的请求体 schema 未公开发布，本 SDK 按 PROXY/SAFE 同构最简映射构造（见 `CWIARelayBody`），上线前请用真实账号小额试单验证；如 relayer 拒绝，按响应错误调整字段即可。
 - `OrderSide`: 订单方向（BUY/SELL）
 - `OrderType`: 订单类型（GTC/FOK/FAK/IOC）
 - `OrderArgs`: 订单参数
