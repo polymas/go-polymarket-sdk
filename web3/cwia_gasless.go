@@ -194,38 +194,62 @@ func getDepositWalletFactoryProxyABI() (*abi.ABI, error) {
 	return &parsed, nil
 }
 
-// Polymarket relayer 对 CWIA 用 type="WALLET"（已验证 /nonce 接受此值并返回
-// 与链上 wallet.nonce() 一致的数值）。
+// Polymarket relayer 用 type="WALLET" 表示 DepositWallet。已对照
+// py-builder-relayer-client（github.com/Polymarket/py-builder-relayer-client）
+// 中的 DepositWalletBatchRequest.to_dict() 校准 schema。
 const cwiaRelayerWalletType = "WALLET"
 
-// CWIARelayBody 是 GaslessClient 提交到 /submit 的 CWIA 请求体。
+// CWIADepositWalletParams 是 /submit body 中嵌套的 depositWalletParams。
 //
-// ⚠️ 注意：Polymarket 公开渠道未发布该 type 的 schema。本结构基于以下推断：
-//  1. /nonce?type=WALLET 已验证存在并返回 wallet.nonce()
-//  2. 字段命名沿用 PROXY/SAFE 同构风格
-//  3. CWIA 的链上签名（Batch EIP-712）已嵌在 data 中（factory.proxy 调用
-//     的第二个参数），所以 signature 这里留空（与 PROXY/SAFE 不同）
+// 字段顺序与官方 Python 客户端的 dict 插入顺序一致——这关系到 HMAC 签名所
+// 用到的 body 字符串，不能乱序。
+type CWIADepositWalletParams struct {
+	DepositWallet string                  `json:"depositWallet"` // wallet 代理地址
+	Deadline      string                  `json:"deadline"`      // unix 秒
+	Calls         []CWIARelayCallPayload  `json:"calls"`
+}
+
+// CWIARelayCallPayload 是单条 call 在 relayer body 中的 JSON 形态。
+type CWIARelayCallPayload struct {
+	Target string `json:"target"`
+	Value  string `json:"value"` // 整数字符串
+	Data   string `json:"data"`  // 0x-prefixed hex
+}
+
+// CWIARelayBody 与官方 DepositWalletBatchRequest.to_dict() 完全对齐：
 //
-// 如果首次提交被 relayer 拒绝，错误响应会指明缺失/多余字段，按需调整即可。
+//	{
+//	  "type":      "WALLET",
+//	  "from":      <EOA>,
+//	  "to":        <factory>,
+//	  "nonce":     <on-chain wallet nonce>,
+//	  "signature": <EIP-712 batch sig 0x...>,
+//	  "depositWalletParams": {
+//	    "depositWallet": <wallet>,
+//	    "deadline":      <unix>,
+//	    "calls":         [{target, value, data}, ...]
+//	  }
+//	}
 type CWIARelayBody struct {
-	Data        string `json:"data"`        // factory.proxy([batch],[sig]) calldata（含 0x）
-	From        string `json:"from"`        // 签名者 EOA
-	Metadata    string `json:"metadata"`    //
-	Nonce       string `json:"nonce"`       // 链上 wallet.nonce() 字符串
-	ProxyWallet string `json:"proxyWallet"` // DepositWallet 代理地址
-	Signature   string `json:"signature"`   // 留空（batch sig 已在 data 内）
-	To          string `json:"to"`          // PolygonDepositWalletFactory
-	Type        string `json:"type"`        // "WALLET"
+	Type                string                  `json:"type"`
+	From                string                  `json:"from"`
+	To                  string                  `json:"to"`
+	Nonce               string                  `json:"nonce"`
+	Signature           string                  `json:"signature"`
+	DepositWalletParams CWIADepositWalletParams `json:"depositWalletParams"`
 }
 
 // buildCWIARelayTransactionBatch 把 GaslessClient 的 proxyTxns ([]map) 转换为
 // CWIA Batch、签名，并打包成提交到 relayer 的请求体。
 //
-// proxyTxns 中每条期望包含至少 {"to": <addr>, "data": <0x...>, "value": <int>}
-// （typeCode/operation 字段会被忽略）。
+// proxyTxns 中每条期望包含 {"to": <addr>, "data": <0x...>, "value": <int>}
+// （typeCode/operation 字段会被忽略——CWIA 一律 Call，没有 DelegateCall）。
+//
+// 与 PROXY/SAFE 关键区别：CWIA 的 body 不含 `data`（由 relayer 自行编码
+// `factory.proxy(Batch[],bytes[])` 调用），用户只提供原始 calls + signature。
 func (c *GaslessClient) buildCWIARelayTransactionBatch(
 	proxyTxns []map[string]interface{},
-	metadata string,
+	_ string, // metadata：CWIA 端没有 metadata 字段，忽略
 ) (*CWIARelayBody, error) {
 	if len(proxyTxns) == 0 {
 		return nil, fmt.Errorf("no transactions to batch")
@@ -261,7 +285,7 @@ func (c *GaslessClient) buildCWIARelayTransactionBatch(
 		})
 	}
 
-	batch, sig, calldata, err := c.baseClient.BuildAndSignCWIABatch(
+	batch, sig, _, err := c.baseClient.BuildAndSignCWIABatch(
 		context.Background(), wallet, calls, nil, nil,
 	)
 	if err != nil {
@@ -270,14 +294,25 @@ func (c *GaslessClient) buildCWIARelayTransactionBatch(
 
 	factoryAddr := common.HexToAddress(internal.PolygonDepositWalletFactory)
 
+	relayCalls := make([]CWIARelayCallPayload, len(batch.Calls))
+	for i, call := range batch.Calls {
+		relayCalls[i] = CWIARelayCallPayload{
+			Target: call.Target.Hex(),
+			Value:  call.Value.String(),
+			Data:   "0x" + hex.EncodeToString(call.Data),
+		}
+	}
+
 	return &CWIARelayBody{
-		Data:        "0x" + hex.EncodeToString(calldata),
-		From:        string(c.baseAddress),
-		Metadata:    metadata,
-		Nonce:       batch.Nonce.String(),
-		ProxyWallet: wallet.Hex(),
-		Signature:   "0x" + hex.EncodeToString(sig), // 同时带上 batch sig，relayer 不用就忽略
-		To:          factoryAddr.Hex(),
-		Type:        cwiaRelayerWalletType,
+		Type:      cwiaRelayerWalletType,
+		From:      string(c.baseAddress),
+		To:        factoryAddr.Hex(),
+		Nonce:     batch.Nonce.String(),
+		Signature: "0x" + hex.EncodeToString(sig),
+		DepositWalletParams: CWIADepositWalletParams{
+			DepositWallet: wallet.Hex(),
+			Deadline:      batch.Deadline.String(),
+			Calls:         relayCalls,
+		},
 	}, nil
 }
