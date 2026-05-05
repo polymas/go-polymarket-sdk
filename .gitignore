@@ -42,3 +42,12 @@ test_config.json
 # Temporary files
 tmp/
 temp/
+
+# Local build outputs (cross-built binaries)
+bin/
+
+# Stray binaries left at repo root by `go build ./examples/<name>`
+/eoa_btc5m_double_quote
+/eoa_query
+/v2_eoa_approve
+/cwia_smoke
