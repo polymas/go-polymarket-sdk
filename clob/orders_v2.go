@@ -20,6 +20,11 @@ import (
 // 注意：服务端确切字段名和 salt/signatureType 的数值/字符串选择，官方 V2 POST /order 文档
 // 未正式公开。下面按 V1 惯例推断（salt/signatureType 为整数，其它数值量为十进制字符串）。
 // 联调时如遇 422，先看这里的键名。
+// orderedOrderV2 字段顺序对照 py-clob-client-v2/order_utils/model/order_data_v2.py
+// 中的 order_to_json_v2() 输出顺序锁定（HMAC 签名敏感）：
+//
+//	salt, maker, signer, tokenId, makerAmount, takerAmount, side,
+//	expiration, signatureType, timestamp, metadata, builder, signature
 type orderedOrderV2 struct {
 	Salt          int64  `json:"salt"`
 	Maker         string `json:"maker"`
@@ -27,18 +32,22 @@ type orderedOrderV2 struct {
 	TokenId       string `json:"tokenId"`
 	MakerAmount   string `json:"makerAmount"`
 	TakerAmount   string `json:"takerAmount"`
-	Side          string `json:"side"` // "BUY" / "SELL"
+	Side          string `json:"side"`         // "BUY" / "SELL"
+	Expiration    string `json:"expiration"`   // unix 秒字符串；GTC 订单为 "0"
 	SignatureType int    `json:"signatureType"`
-	Timestamp     string `json:"timestamp"` // 毫秒整数的字符串形式
-	Metadata      string `json:"metadata"`  // 0x + 64 hex
-	Builder       string `json:"builder"`   // 0x + 64 hex
-	Signature     string `json:"signature"` // 0x + 130 hex
+	Timestamp     string `json:"timestamp"`    // 毫秒整数的字符串形式
+	Metadata      string `json:"metadata"`     // 0x + 64 hex
+	Builder       string `json:"builder"`      // 0x + 64 hex
+	Signature     string `json:"signature"`    // 0x + 130 hex
 }
 
+// orderRequestV2 是单笔订单的提交载荷。字段顺序与官方 to_dict 保持一致。
 type orderRequestV2 struct {
 	Order     orderedOrderV2 `json:"order"`
 	Owner     string         `json:"owner"`
 	OrderType string         `json:"orderType"`
+	DeferExec bool           `json:"deferExec"`
+	PostOnly  bool           `json:"postOnly"`
 }
 
 // postOrdersBatchV2 对应 V1 的 postOrdersBatch，走 V2 签名路径。
@@ -76,9 +85,11 @@ func (c *orderClientImpl) postOrdersBatchV2(
 		}
 
 		requestBody = append(requestBody, orderRequestV2{
-			Order:     signedOrderToJSONV2(signed, orderArgs.Side),
+			Order:     signedOrderToJSONV2(signed, orderArgs.Side, orderArgs.Expiration),
 			Owner:     c.baseClient.deriveCreds.Key,
 			OrderType: string(orderTypes[i]),
+			DeferExec: orderArgs.DeferExec,
+			PostOnly:  orderArgs.PostOnly,
 		})
 	}
 
@@ -221,7 +232,13 @@ func (c *orderClientImpl) createSignedOrderV2(
 }
 
 // signedOrderToJSONV2 把 V2SignedOrder 转换成请求体 JSON 结构。
-func signedOrderToJSONV2(s *signing.V2SignedOrder, side types.OrderSide) orderedOrderV2 {
+//
+// expiration 取自 OrderArgs.Expiration（unix 秒）：0 表示 GTC（不过期），
+// 非 0 表示 GTD 订单的截止时间。注意：expiration 仅出现在 wire body 里，
+// 不是 V2 EIP-712 签名结构的一部分（见 docs.polymarket.com 的 post-multiple-orders
+// 说明："expiration remains in the POST /order wire body for GTD/order-expiry
+// handling, but it is not part of the CLOB V2 EIP-712 signed order struct"）。
+func signedOrderToJSONV2(s *signing.V2SignedOrder, side types.OrderSide, expiration int64) orderedOrderV2 {
 	return orderedOrderV2{
 		Salt:          s.Salt.Int64(),
 		Maker:         s.Maker.Hex(),
@@ -230,6 +247,7 @@ func signedOrderToJSONV2(s *signing.V2SignedOrder, side types.OrderSide) ordered
 		MakerAmount:   s.MakerAmount.String(),
 		TakerAmount:   s.TakerAmount.String(),
 		Side:          string(side),
+		Expiration:    strconv.FormatInt(expiration, 10),
 		SignatureType: int(s.SignatureType),
 		Timestamp:     s.TimestampMS.String(),
 		Metadata:      "0x" + hex.EncodeToString(s.Metadata[:]),

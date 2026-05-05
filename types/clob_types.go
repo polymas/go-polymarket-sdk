@@ -171,13 +171,24 @@ const (
 	OrderSideSELL OrderSide = "SELL"
 )
 
-// OrderArgs 表示创建订单的参数
+// OrderArgs 表示创建订单的参数。
+//
+// 可选 V2 字段（零值即当前默认行为，向后兼容）：
+//
+//   - Expiration : GTD 订单过期 unix 秒；0 表示 GTC（不过期）
+//   - PostOnly   : 只做 maker；下单瞬间会被 match 则拒单（不上单）
+//   - DeferExec  : 静默入态机但不立即撮合；做市商批量预提交场景使用
+//
+// 仅 V2 路径（postOrdersBatchV2 / WithV2 客户端）会读这些字段；V1 路径忽略。
 type OrderArgs struct {
 	TokenID    string    `json:"token_id"`
 	Price      float64   `json:"price"`
 	Size       float64   `json:"size"`
 	Side       OrderSide `json:"side"`
 	FeeRateBps *int      `json:"fee_rate_bps,omitempty"`
+	Expiration int64     `json:"expiration,omitempty"`  // unix 秒；0 = GTC
+	PostOnly   bool      `json:"post_only,omitempty"`
+	DeferExec  bool      `json:"defer_exec,omitempty"`
 }
 
 // MarketOrderArgs 表示创建市价单的参数
