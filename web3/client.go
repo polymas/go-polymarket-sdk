@@ -132,7 +132,9 @@ func NewClient(
 
 	// Initialize proxy address (will be lazy-loaded on first call)
 	// For non-proxy types, proxy address equals base address
-	if signatureType != types.ProxySignatureType && signatureType != types.SafeSignatureType {
+	if signatureType != types.ProxySignatureType &&
+		signatureType != types.SafeSignatureType &&
+		signatureType != types.CWIASignatureType {
 		web3Client.proxyAddress = baseAddress
 	}
 
@@ -422,6 +424,8 @@ func (c *baseClient) GetPolyProxyAddress() (types.EthAddress, error) {
 		proxyAddr, err = c.getPolyProxyWalletAddress(c.baseAddress)
 	case types.SafeSignatureType:
 		proxyAddr, err = c.getSafeProxyAddress(c.baseAddress)
+	case types.CWIASignatureType:
+		proxyAddr, err = c.getCWIAProxyAddress(c.baseAddress)
 	default:
 		// For EOA or unknown types, return the base address
 		proxyAddr = c.baseAddress
@@ -505,6 +509,61 @@ func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAdd
 	}
 
 	return types.EthAddress(proxyAddr.Hex()), nil
+}
+
+// getCWIAProxyAddress 获取给定 EOA 对应的 Polymarket DepositWallet 代理地址。
+//
+// 派生方式：调用 DepositWalletFactory.predictWalletAddress(impl, id)，其中
+//   - impl = factory.implementation()（实时读取，避免硬编码失效）
+//   - id   = bytes32(uint256(uint160(owner)))（Polymarket 后端约定）
+//
+// CREATE2 由工厂内部按 LibClone.predictDeterministicAddressERC1967 计算，
+// 本地复刻收益不大且需要严格匹配 solady 实现，因此这里直接走 RPC（与
+// PolyProxy / Safe 两条路径一致）。
+func (c *baseClient) getCWIAProxyAddress(owner types.EthAddress) (types.EthAddress, error) {
+	factoryAddr := common.HexToAddress(internal.PolygonDepositWalletFactory)
+	factoryABI, err := getDepositWalletFactoryABI()
+	if err != nil {
+		return "", fmt.Errorf("failed to parse deposit wallet factory ABI: %w", err)
+	}
+
+	// 1) 读取当前 implementation
+	implCall, err := factoryABI.Pack("implementation")
+	if err != nil {
+		return "", fmt.Errorf("failed to pack implementation call: %w", err)
+	}
+	implRes, err := c.callContractWithRetry(context.Background(), ethereum.CallMsg{
+		To: &factoryAddr, Data: implCall,
+	}, nil)
+	var impl common.Address
+	if err == nil {
+		err = factoryABI.UnpackIntoInterface(&impl, "implementation", implRes)
+	}
+	if err != nil || (impl == common.Address{}) {
+		// 兜底：使用已知默认 impl（避免 RPC 暂时不可用导致整个流程阻塞）
+		impl = common.HexToAddress(internal.PolygonDepositWalletImpl)
+	}
+
+	// 2) predictWalletAddress(impl, bytes32(owner))
+	ownerAddr := common.HexToAddress(string(owner))
+	var idArg [32]byte
+	copy(idArg[12:], ownerAddr.Bytes())
+
+	predictCall, err := factoryABI.Pack("predictWalletAddress", impl, idArg)
+	if err != nil {
+		return "", fmt.Errorf("failed to pack predictWalletAddress: %w", err)
+	}
+	res, err := c.callContractWithRetry(context.Background(), ethereum.CallMsg{
+		To: &factoryAddr, Data: predictCall,
+	}, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to call predictWalletAddress: %w", err)
+	}
+	var proxy common.Address
+	if err := factoryABI.UnpackIntoInterface(&proxy, "predictWalletAddress", res); err != nil {
+		return "", fmt.Errorf("failed to unpack predictWalletAddress: %w", err)
+	}
+	return types.EthAddress(proxy.Hex()), nil
 }
 
 // GetPOLBalance 获取基础地址的POL余额
@@ -653,6 +712,36 @@ func getExchangeABI() (*abi.ABI, error) {
 		return nil, err
 	}
 
+	return &parsedABI, nil
+}
+
+// getDepositWalletFactoryABI 返回 Polymarket DepositWalletFactory 的最小 ABI。
+// 仅包含派生新版代理地址需要的两个 view 函数。
+func getDepositWalletFactoryABI() (*abi.ABI, error) {
+	abiJSON := `[
+		{
+			"inputs": [],
+			"name": "implementation",
+			"outputs": [{"internalType": "address", "name": "", "type": "address"}],
+			"stateMutability": "view",
+			"type": "function"
+		},
+		{
+			"inputs": [
+				{"internalType": "address", "name": "_implementation", "type": "address"},
+				{"internalType": "bytes32", "name": "_id", "type": "bytes32"}
+			],
+			"name": "predictWalletAddress",
+			"outputs": [{"internalType": "address", "name": "", "type": "address"}],
+			"stateMutability": "view",
+			"type": "function"
+		}
+	]`
+
+	parsedABI, err := abi.JSON(strings.NewReader(abiJSON))
+	if err != nil {
+		return nil, err
+	}
 	return &parsedABI, nil
 }
 

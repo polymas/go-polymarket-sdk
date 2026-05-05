@@ -167,7 +167,7 @@ func TestGetSignatureType(t *testing.T) {
 	// 基本功能测试
 	t.Run("Basic", func(t *testing.T) {
 		sigType := client.GetSignatureType()
-		if sigType < 0 || sigType > 2 {
+		if sigType < 0 || sigType > 3 {
 			t.Errorf("Invalid signature type: %d", sigType)
 		}
 		t.Logf("GetSignatureType returned: %d", sigType)

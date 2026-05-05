@@ -501,7 +501,16 @@ go test -cover ./...
 - `EthAddress`: 以太坊地址
 - `Keccak256`: Keccak256 哈希
 - `ChainID`: 链 ID
-- `SignatureType`: 签名类型
+- `SignatureType`: 签名类型，支持以下四种并存：
+  - `EOASignatureType` (0)：普通 EOA，maker == signer == EOA。
+  - `ProxySignatureType` (1)：老版 PolyProxy，工厂 `0x4bFb…982E`，派生函数 `getPolyProxyWalletAddress(address)`。
+  - `SafeSignatureType` (2)：Gnosis Safe，工厂 `0xaacF…541b`，派生函数 `computeProxyAddress(address)`。
+  - `CWIASignatureType` (3)：新版 Polymarket DepositWallet（ERC-7760 / ERC-1967 + immutable args，新注册账号默认走这套）。
+    - 工厂：`0x00000000000Fb5C9ADea0298D729A0CB3823Cc07`
+    - 当前 impl：`0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB`（SDK 通过 `factory.implementation()` 实时读取，impl 升级后不需要改代码）
+    - 派生函数：`predictWalletAddress(impl, bytes32(uint160(owner)))`
+    - 与老两类型并存，老账号不迁移；签名仍走 EIP-1271（Exchange 调用代理 `isValidSignature`）。
+    - ⚠️ `gasless` 路径目前仅支持 PolyProxy / Safe，CWIA 暂未接入。
 - `OrderSide`: 订单方向（BUY/SELL）
 - `OrderType`: 订单类型（GTC/FOK/FAK/IOC）
 - `OrderArgs`: 订单参数

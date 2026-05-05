@@ -467,6 +467,10 @@ func (c *orderClientImpl) createSignedOrder(
 		sigType = ordermodel.POLY_PROXY
 	case 2:
 		sigType = ordermodel.POLY_GNOSIS_SAFE
+	case types.CWIASignatureType:
+		// New Polymarket DepositWallet (ERC-7760) — go-order-utils 尚未定义常量，
+		// 直接传 int(3)。Exchange 通过 EIP-1271 调用代理的 isValidSignature 验证。
+		sigType = ordermodel.SignatureType(int(types.CWIASignatureType))
 	default:
 		sigType = ordermodel.EOA
 	}
@@ -480,7 +484,9 @@ func (c *orderClientImpl) createSignedOrder(
 	signerAddr := baseAddr
 
 	// For proxy wallet, maker should be proxy address (funder)
-	if c.baseClient.signatureType == types.ProxySignatureType || c.baseClient.signatureType == types.SafeSignatureType {
+	if c.baseClient.signatureType == types.ProxySignatureType ||
+		c.baseClient.signatureType == types.SafeSignatureType ||
+		c.baseClient.signatureType == types.CWIASignatureType {
 		// Use proxy address as maker (funder) and base address as signer
 		// proxyAddress is already set during initialization
 		makerAddr = string(c.baseClient.proxyAddress)

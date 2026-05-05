@@ -29,6 +29,17 @@ const (
 	// ProxyFactory 合约地址
 	PolygonProxyFactory = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052"
 
+	// DepositWalletFactory：Polymarket 新版代理钱包工厂（ERC-7760 / ERC-1967 +
+	// immutable args）。新注册账号默认走这套代理；与老的 PolyProxy / Safe 并存，
+	// 老账号不迁移。派生函数：predictWalletAddress(address impl, bytes32 id)。
+	// 来源：proxy 0x6CBf…4859 -> impl 0x58cA…b1eB -> factory.implementation()
+	// = 0x58cA…b1eB（与样例匹配）。如未来 Polymarket 升级 impl，本 SDK 会通过
+	// 调用 factory.implementation() 自动获取最新 impl，无需改代码。
+	PolygonDepositWalletFactory = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
+	// 当前默认 DepositWallet 实现合约地址。仅作 RPC 故障时的兜底——派生流程
+	// 优先调用 factory.implementation() 取实时值。
+	PolygonDepositWalletImpl = "0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB"
+
 	// V2 Exchange 合约地址（2026-04-28 切换后启用）
 	// 参考：https://docs.polymarket.com/resources/contracts
 	PolygonExchangeV2        = "0xE111180000d2663C0091e4f400237545B87B996B"

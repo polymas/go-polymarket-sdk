@@ -175,7 +175,9 @@ func (c *orderClientImpl) createSignedOrderV2(
 	baseAddr := string(c.baseClient.web3Client.GetBaseAddress())
 	makerAddr := baseAddr
 	signerAddr := baseAddr
-	if c.baseClient.signatureType == types.ProxySignatureType || c.baseClient.signatureType == types.SafeSignatureType {
+	if c.baseClient.signatureType == types.ProxySignatureType ||
+		c.baseClient.signatureType == types.SafeSignatureType ||
+		c.baseClient.signatureType == types.CWIASignatureType {
 		makerAddr = string(c.baseClient.proxyAddress)
 	}
 

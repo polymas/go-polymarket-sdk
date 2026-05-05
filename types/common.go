@@ -93,6 +93,11 @@ const (
 	ProxySignatureType SignatureType = 1
 	// SafeSignatureType - Safe/Gnosis wallet
 	SafeSignatureType SignatureType = 2
+	// CWIASignatureType - Polymarket Deposit Wallet (ERC-7760 / ERC-1967 with
+	// immutable args). Used by accounts created after Polymarket switched to
+	// the new DepositWalletFactory. Coexists with the older PolyProxy / Safe
+	// types — old accounts are not migrated.
+	CWIASignatureType SignatureType = 3
 )
 
 // BookSnapshot 表示订单簿快照
