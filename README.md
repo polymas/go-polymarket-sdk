@@ -512,6 +512,8 @@ go test -cover ./...
     - 与老两类型并存，老账号不迁移；签名仍走 EIP-1271（Exchange 调用代理 `isValidSignature`）。
     - **链上 gasless（v1.10.0+）**：`signing.SignCWIABatch` + `web3.BuildCWIABatchCalldata` 已对照真实链上 tx 字节级匹配，可直接广播 `DepositWalletFactory.proxy(Batch[],bytes[])`（需 operator 角色）。
     - **走 Polymarket relayer 提交（v1.10.1+）**：`NewGaslessClient(..., CWIASignatureType, ...)` 已可创建；高层方法（SplitPosition / MergePositions / RedeemPositions / SetAutoClaim 等）会自动走 CWIA 分支。`CWIARelayBody` 已对照官方 [py-builder-relayer-client](https://github.com/Polymarket/py-builder-relayer-client) 中 `DepositWalletBatchRequest.to_dict()` 校准，包含 `depositWalletParams` 嵌套结构（depositWallet/deadline/calls）。
+    - **首次部署（v1.10.6+）**：新注册 EOA 的 DepositWallet 是 counter-factual 地址，发批量交易前需先部署。调用 `gaslessClient.DeployDepositWallet(false)` 走 `type=WALLET-CREATE`；force=false 时已部署的钱包会自动跳过。如果在未部署的钱包上直接调 batch 方法，会得到 sentinel `web3.ErrDepositWalletNotDeployed`，业务层可 `errors.Is` 判断并触发 deploy。
+    - **POLY_1271 签名（v1.10.4+）**：CLOB v2 订单签名采用 solady ERC-1271 嵌套 TypedDataSign 格式（~317 字节，含 inner_sig + appDomainSep + contents_hash + ORDER_TYPE_STRING + uint16 长度），不是普通 EIP-712 ECDSA。已对照 py-clob-client-v2 字节级一致。
 - `OrderSide`: 订单方向（BUY/SELL）
 - `OrderType`: 订单类型（GTC/FOK/FAK/IOC）
 - `OrderArgs`: 订单参数

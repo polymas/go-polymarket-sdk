@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -61,6 +62,11 @@ func (c *GaslessClient) executeGaslessBatch(
 	}
 
 	if err != nil {
+		// 把 CWIA "钱包未部署" 错误向上透传成同名 sentinel，让业务层
+		// 可以 errors.Is(err, ErrDepositWalletNotDeployed) 触发先 deploy 流程。
+		if errors.Is(err, ErrDepositWalletNotDeployed) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("failed to build relay transaction: %w", err)
 	}
 

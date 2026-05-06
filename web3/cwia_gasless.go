@@ -36,10 +36,20 @@ type CWIACallInput struct {
 	Data  []byte
 }
 
+// ErrDepositWalletNotDeployed 表示 DepositWallet 代理地址被推导出来但合约
+// 还没部署到链上。新注册的 CWIA 用户首次发批量交易前必须先调
+// GaslessClient.DeployDepositWallet() 走 type=WALLET-CREATE 在 relayer
+// 部署钱包。
+var ErrDepositWalletNotDeployed = fmt.Errorf("DepositWallet not deployed")
+
 // GetDepositWalletNonce 读取给定 DepositWallet 的链上 nonce。
 //
 // 这是 Batch.nonce 字段的唯一可信来源 —— relayer /nonce 接口在迁移期
 // 可能滞后或缓存（参考 Safe 的 GS025 教训）。
+//
+// 如果 DepositWallet 还未部署（counter-factual 地址但链上无合约代码），
+// eth_call wallet.nonce() 返回空 bytes —— 此时返回 ErrDepositWalletNotDeployed。
+// 调用方应先通过 GaslessClient.DeployDepositWallet() 部署。
 func (c *baseClient) GetDepositWalletNonce(ctx context.Context, wallet common.Address) (uint64, error) {
 	// nonce() selector = 0xaffed0e0
 	data, err := hex.DecodeString("affed0e0")
@@ -51,9 +61,23 @@ func (c *baseClient) GetDepositWalletNonce(ctx context.Context, wallet common.Ad
 		return 0, fmt.Errorf("read wallet.nonce(): %w", err)
 	}
 	if len(res) == 0 {
-		return 0, fmt.Errorf("empty result from wallet.nonce()")
+		return 0, fmt.Errorf("%w (%s)：先调用 GaslessClient.DeployDepositWallet() 部署",
+			ErrDepositWalletNotDeployed, wallet.Hex())
 	}
 	return new(big.Int).SetBytes(res).Uint64(), nil
+}
+
+// IsDepositWalletDeployed 探测给定地址上是否有合约代码（DepositWallet 是否已部署）。
+// 不区分 ERC-7760 / 其他，只检查"地址有 code"。便于业务层在调用 batch 前
+// 决定是否要先 deploy。
+func (c *baseClient) IsDepositWalletDeployed(ctx context.Context, wallet common.Address) (bool, error) {
+	// 直接读 nonce()；空响应 == 没部署
+	data, _ := hex.DecodeString("affed0e0")
+	res, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &wallet, Data: data}, nil)
+	if err != nil {
+		return false, fmt.Errorf("probe wallet.nonce(): %w", err)
+	}
+	return len(res) > 0, nil
 }
 
 // BuildCWIABatchCalldata 编码 DepositWalletFactory.proxy([batch], [sig]) 调用。
