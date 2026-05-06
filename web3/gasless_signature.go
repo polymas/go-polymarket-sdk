@@ -232,6 +232,14 @@ func (c *GaslessClient) getSafeNonceOnChain(ctx context.Context) (uint64, error)
 		return 0, fmt.Errorf("failed to call safe.nonce(): %w", err)
 	}
 
+	// Counter-factual Safe：地址通过 CREATE2 推导出来但合约还没部署，
+	// eth_call 此时对一个 EOA-like 地址返回空 bytes（不是 revert）。
+	// Relayer 在首次 execTransaction 时会先把 Safe 部署起来，初始 nonce=0
+	// —— 因此 on-chain 空响应等价于 nonce=0，与 relayer /nonce 返回值一致。
+	if len(result) == 0 {
+		return 0, nil
+	}
+
 	var nonceBig *big.Int
 	err = safeABI.UnpackIntoInterface(&nonceBig, "nonce", result)
 	if err != nil {
