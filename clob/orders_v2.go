@@ -50,10 +50,129 @@ type orderRequestV2 struct {
 	PostOnly  bool           `json:"postOnly"`
 }
 
+// dropOrderbookNotFoundRegex 匹配 CLOB v2 批量端点的 top-level 错误：
+//
+//	HTTP 400: {"error":"the orderbook 12345 does not exist"}
+//
+// 捕获组取出 tokenId（十进制 uint256 字符串）。
+//
+// 实测（2026-05-07，POST /orders 带 3 个不同的坏 token）：CLOB 只报响应里
+// 出现的**第一个**坏 token，整批 400。所以多个坏 token 必须迭代清——每轮
+// 重试只能干掉一个。这里仍用 FindAll 提取，是为了防御后端将来改成一次返回
+// 多个 token 的情况（届时一轮就能清干净，省重试次数）。
+var dropOrderbookNotFoundRegex = regexp.MustCompile(`orderbook\s+(\d+)\s+does\s+not\s+exist`)
+
+// postOrdersBatchV2DropMaxRetries 是 "orderbook X does not exist" 自动剥离重试
+// 的最大次数。每轮把响应里报告的所有坏 token 剥掉；按当前 CLOB 行为（一次
+// 只报一个），3 次重试最多能清掉 3 个不同的坏 token。批量大小上限 15，超过
+// 这个数说明上游 list 大量无效，停手让人工介入。
+const postOrdersBatchV2DropMaxRetries = 3
+
 // postOrdersBatchV2 对应 V1 的 postOrdersBatch，走 V2 签名路径。
-// 沿用 V1 的 negRisk 重试模式：先以 V2 标准 Exchange 为 verifyingContract 签，
-// 若返回 "invalid signature" 则改用 V2 NegRisk Exchange 重试。
+//
+// 重试机制（两层独立）：
+//
+//  1. **bad-token 重试（外层 / HTTP 400）**：CLOB 在 top-level 校验时发现某个
+//     tokenId 没有对应 orderbook（已结算 / 已下架 / 错误抓取），返回 400 拒掉
+//     整批。本函数自动从批内剥离该 token 的所有订单并重发，最多 3 次。被剥离
+//     的订单不会出现在返回数组里——业务方对照输入/输出长度即可判断哪些被丢。
+//
+//  2. **negRisk 重试（内层 / HTTP 200 + per-order）**：单个订单返回
+//     "invalid signature" 时改用 V2 NegRisk Exchange 重新签名+重发。
+//
+// 两层正交：bad-token 是请求级，negRisk 是订单级。
 func (c *orderClientImpl) postOrdersBatchV2(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	isRetry ...bool,
+) ([]types.OrderPostResponse, error) {
+	// 外层 bad-token 剥离重试。每轮失败都会从入参里删掉 CLOB 报告的坏
+	// token 并重新签名/打包/POST；干净的 negRisk 重试由内部分支保留。
+	args := append([]types.OrderArgs(nil), orderArgsList...)
+	otypes := append([]types.OrderType(nil), orderTypes...)
+	for attempt := 0; ; attempt++ {
+		resp, err := c.postOrdersBatchV2Once(args, otypes, isRetry...)
+		if err == nil {
+			return resp, nil
+		}
+		if attempt >= postOrdersBatchV2DropMaxRetries {
+			return nil, fmt.Errorf("V2 batch order: 已剥离 %d 个不存在的 orderbook 但批内仍有更多坏 token（达到 %d 次上限），上游 list 可能严重过期，请人工排查: %w",
+				attempt, postOrdersBatchV2DropMaxRetries, err)
+		}
+		badTokens := extractBadOrderbookTokensFromErr(err)
+		if len(badTokens) == 0 {
+			// 非 "orderbook X does not exist" 的错误：直接透传，不重试
+			return nil, err
+		}
+		// 把响应里报告的所有坏 token 一并剥离（防御 CLOB 后端改成多 token 响应）
+		badSet := make(map[string]struct{}, len(badTokens))
+		for _, t := range badTokens {
+			badSet[t] = struct{}{}
+		}
+		newArgs := make([]types.OrderArgs, 0, len(args))
+		newTypes := make([]types.OrderType, 0, len(otypes))
+		droppedPerToken := make(map[string]int, len(badTokens))
+		for i, a := range args {
+			if _, bad := badSet[a.TokenID]; bad {
+				droppedPerToken[a.TokenID]++
+				continue
+			}
+			newArgs = append(newArgs, a)
+			newTypes = append(newTypes, otypes[i])
+		}
+		totalDropped := 0
+		for _, n := range droppedPerToken {
+			totalDropped += n
+		}
+		if totalDropped == 0 {
+			// CLOB 报告的 token 不在我们这批里——无法处理，避免死循环
+			return nil, fmt.Errorf("V2 batch: CLOB reports bad orderbook(s) %v but no matching order in batch: %w",
+				badTokens, err)
+		}
+		// 日志：列出每个被剥离的 token + 笔数，便于排查上游 list 来源问题
+		var summary []string
+		for t, n := range droppedPerToken {
+			summary = append(summary, fmt.Sprintf("%s×%d", t, n))
+		}
+		internal.LogError("V2 batch: 剥离不存在的 orderbook [%s]，剩余 %d 笔重试 (attempt %d/%d)",
+			strings.Join(summary, ", "), len(newArgs), attempt+1, postOrdersBatchV2DropMaxRetries)
+		args = newArgs
+		otypes = newTypes
+		if len(args) == 0 {
+			return []types.OrderPostResponse{}, nil
+		}
+	}
+}
+
+// extractBadOrderbookTokensFromErr 从 HTTP 400 错误里抠出 CLOB 报告的所有坏
+// token。CLOB 实测一次报一个，但用 FindAllStringSubmatch 兼容未来后端把多个
+// token 写在同一条响应里的情况（去重后返回）。
+func extractBadOrderbookTokensFromErr(err error) []string {
+	if err == nil {
+		return nil
+	}
+	matches := dropOrderbookNotFoundRegex.FindAllStringSubmatch(err.Error(), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		if _, ok := seen[m[1]]; ok {
+			continue
+		}
+		seen[m[1]] = struct{}{}
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// postOrdersBatchV2Once 是 postOrdersBatchV2 的单次提交逻辑（不含 bad-token
+// 重试）。负责 negRisk 内部重试 + 真正的 HTTP POST。
+func (c *orderClientImpl) postOrdersBatchV2Once(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 	isRetry ...bool,

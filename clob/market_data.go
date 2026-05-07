@@ -3,6 +3,7 @@ package clob
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,17 +13,43 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// sanitizeTokenIDs 过滤空串/空白串并按原顺序去重。
-// Polymarket 批量端点 (/midpoints, /spreads, /last-trades-prices) 的语义是
-// "全部有效或全部 400"，只要批里出现一个空 token_id，整批就会被拒为
-// {"error":"Invalid payload"}。调用方传入的仓位列表偶发会带上空 TokenID
-// (如已 redeem 的仓位 / Data API 异常返回)，因此需在 SDK 侧主动过滤。
+// tokenIDPattern: ERC1155 tokenId 是 uint256 的十进制字符串，1~78 位数字
+// （uint256 max = 2^256-1 共 78 位）。SDK 在调用批量端点前用此模式预过滤，
+// 把明显非法的输入（hex / 字母 / 过长 / 全 0）直接挡掉，避免无意义的网关
+// 往返。
+var tokenIDPattern = regexp.MustCompile(`^[0-9]{1,78}$`)
+
+// isValidTokenIDFormat 判断字符串是否是合法格式的 ERC1155 tokenId。
+// 注意：仅做格式校验，不保证该 token 在链上存在或市场仍然有效——这两类
+// "格式合法但不存在/已结算" 的情况由网关返回缺失项，业务层视 len(result)
+// 短于输入长度即可识别。
+func isValidTokenIDFormat(id string) bool {
+	if !tokenIDPattern.MatchString(id) {
+		return false
+	}
+	// 拒绝全 0（"0"、"00" 等），它们格式合法但语义无效
+	if strings.Trim(id, "0") == "" {
+		return false
+	}
+	return true
+}
+
+// sanitizeTokenIDs 对批量端点的输入做三重清洗：
+//  1. trim 前后空白（实测 V2 网关不做 trim，"  V1  " 会被当作未知 token）
+//  2. 丢弃空串和格式非法（非数字 / 超过 78 位 / 全 0）的项
+//  3. 按原顺序去重（V2 网关也会自动 dedupe，但提前去重能减少请求体大小）
+//
+// 实测（2026-05-07，V2 数据面 = clob.polymarket.com）：批量端点对绝大多数
+// 坏 token 是容错的——空串、null、不存在的 77 位数、字母串都会被静默丢弃，
+// 整批仍 200。唯二会触发 400 Invalid payload 的是：① token_id 不是 JSON
+// 字符串（数字/数组/bool）；② 顶层不是数组。SDK 编码层用 map[string]string
+// 已规避 ①，本函数主要为节省往返 + 让业务层透明处理坏数据。
 func sanitizeTokenIDs(tokenIDs []string) []string {
 	seen := make(map[string]struct{}, len(tokenIDs))
 	cleaned := make([]string, 0, len(tokenIDs))
 	for _, id := range tokenIDs {
 		id = strings.TrimSpace(id)
-		if id == "" {
+		if !isValidTokenIDFormat(id) {
 			continue
 		}
 		if _, ok := seen[id]; ok {
@@ -42,7 +69,7 @@ func sanitizeBookParams(requests []types.BookParams) []types.BookParams {
 	cleaned := make([]types.BookParams, 0, len(requests))
 	for _, req := range requests {
 		req.TokenID = strings.TrimSpace(req.TokenID)
-		if req.TokenID == "" {
+		if !isValidTokenIDFormat(req.TokenID) {
 			continue
 		}
 		k := key{req.TokenID, req.Side}
@@ -219,13 +246,11 @@ func (c *readonlyMarketDataClientImpl) GetOrderBook(tokenID string) (*types.Orde
 // 最大数组长度: 500
 // 返回: 订单簿摘要数组
 func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error) {
-	// 验证请求数量
-	if len(requests) == 0 {
-		return nil, fmt.Errorf("请求数组不能为空")
-	}
 	cleaned := sanitizeBookParams(requests)
+	// 与 GetMidpoints/GetSpreads/GetLastTradesPrices 行为对齐：sanitize 后为空
+	// 直接返回空切片，不发请求也不报错，让业务层透明处理坏 tokenId。
 	if len(cleaned) == 0 {
-		return nil, fmt.Errorf("请求数组不能为空")
+		return []types.OrderBookSummaryResponse{}, nil
 	}
 	if len(cleaned) > 500 {
 		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
@@ -262,13 +287,9 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 
 // GetMultipleOrderBooks 批量获取多个订单簿摘要（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error) {
-	// 验证请求数量
-	if len(requests) == 0 {
-		return nil, fmt.Errorf("请求数组不能为空")
-	}
 	cleaned := sanitizeBookParams(requests)
 	if len(cleaned) == 0 {
-		return nil, fmt.Errorf("请求数组不能为空")
+		return []types.OrderBookSummaryResponse{}, nil
 	}
 	if len(cleaned) > 500 {
 		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
@@ -374,16 +395,17 @@ func (c *marketDataClientImpl) GetPrice(tokenID string, side types.OrderSide) (*
 
 // GetPrices 批量获取多个代币的价格
 func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.Price, error) {
-	if len(requests) == 0 {
+	cleaned := sanitizeBookParams(requests)
+	if len(cleaned) == 0 {
 		return []types.Price{}, nil
 	}
-	if len(requests) > 500 {
-		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(requests))
+	if len(cleaned) > 500 {
+		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
 	}
 
 	// 构建请求体
-	requestBody := make([]map[string]string, len(requests))
-	for i, req := range requests {
+	requestBody := make([]map[string]string, len(cleaned))
+	for i, req := range cleaned {
 		requestBody[i] = map[string]string{
 			"token_id": req.TokenID,
 		}
@@ -400,7 +422,7 @@ func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.P
 	
 	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetPrices, bodyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("批量获取价格失败: %w", err)
+		return nil, fmt.Errorf("批量获取价格失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
 	// 先尝试解析为数组（向后兼容）
@@ -416,8 +438,8 @@ func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.P
 	}
 
 	// 转换为数组格式
-	result := make([]types.Price, 0, len(requests))
-	for _, req := range requests {
+	result := make([]types.Price, 0, len(cleaned))
+	for _, req := range cleaned {
 		if tokenMap, ok := responseMap[req.TokenID]; ok {
 			// 如果指定了side，使用指定的side；否则尝试BUY或SELL
 			var priceStr string

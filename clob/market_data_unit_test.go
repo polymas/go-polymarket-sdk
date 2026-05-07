@@ -3,6 +3,7 @@ package clob
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,10 @@ import (
 )
 
 func TestSanitizeTokenIDs(t *testing.T) {
+	// 真实形态的 ERC1155 tokenId（77~78 位十进制 uint256）
+	v1 := "78433024518676680431174478322854148606578065650008220678402966840627347604025"
+	v2 := "62125911194459356377883400729034971285539783764180402613717505645465050447006"
+	v3 := "50346565575310273995396997144874891836871065259829083228393044602519086496922"
 	cases := []struct {
 		name string
 		in   []string
@@ -20,9 +25,13 @@ func TestSanitizeTokenIDs(t *testing.T) {
 		{"empty slice", []string{}, []string{}},
 		{"only empty string", []string{""}, []string{}},
 		{"only whitespace", []string{"   ", "\t", " \n"}, []string{}},
-		{"trim and dedup", []string{"abc", "", "abc"}, []string{"abc"}},
-		{"trim wraps dedup", []string{"  abc  ", "abc"}, []string{"abc"}},
-		{"preserve order", []string{"b", "a", "b", "c"}, []string{"b", "a", "c"}},
+		{"reject non-numeric", []string{"abc", "0xdead"}, []string{}},
+		{"reject all zeros", []string{"0", "00"}, []string{}},
+		{"reject too long", []string{strings.Repeat("9", 79)}, []string{}},
+		{"trim and dedup", []string{v1, "", v1}, []string{v1}},
+		{"trim wraps dedup", []string{"  " + v1 + "  ", v1}, []string{v1}},
+		{"mixed bad and good", []string{v1, "", "abc", v2, "0xdead", v1, "0"}, []string{v1, v2}},
+		{"preserve order", []string{v2, v1, v2, v3}, []string{v2, v1, v3}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,19 +49,24 @@ func TestSanitizeTokenIDs(t *testing.T) {
 }
 
 func TestSanitizeBookParams(t *testing.T) {
+	v1 := "78433024518676680431174478322854148606578065650008220678402966840627347604025"
+	v2 := "62125911194459356377883400729034971285539783764180402613717505645465050447006"
 	in := []types.BookParams{
-		{TokenID: "a", Side: "BUY"},
+		{TokenID: v1, Side: "BUY"},
 		{TokenID: "", Side: "BUY"},
 		{TokenID: "  ", Side: "SELL"},
-		{TokenID: "a", Side: "BUY"},   // duplicate of first
-		{TokenID: "a", Side: "SELL"},  // same token, different side — keep
-		{TokenID: " b ", Side: "BUY"}, // trimmed to "b"
+		{TokenID: "abc", Side: "BUY"},     // bad format — drop
+		{TokenID: "0xdead", Side: "BUY"},  // hex — drop
+		{TokenID: "0", Side: "BUY"},       // all-zero — drop
+		{TokenID: v1, Side: "BUY"},        // duplicate of first
+		{TokenID: v1, Side: "SELL"},       // same token, different side — keep
+		{TokenID: " " + v2 + " ", Side: "BUY"}, // trimmed
 	}
 	got := sanitizeBookParams(in)
 	want := []types.BookParams{
-		{TokenID: "a", Side: "BUY"},
-		{TokenID: "a", Side: "SELL"},
-		{TokenID: "b", Side: "BUY"},
+		{TokenID: v1, Side: "BUY"},
+		{TokenID: v1, Side: "SELL"},
+		{TokenID: v2, Side: "BUY"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("length mismatch: got %v, want %v", got, want)
@@ -133,13 +147,23 @@ func TestGetMidpointsTooMany(t *testing.T) {
 	client := newReadonlyMarketDataAt("http://invalid.invalid")
 	ids := make([]string, 501)
 	for i := range ids {
-		// 每个 id 唯一,避免被去重逻辑压到 500 以下。
-		ids[i] = "tok-" + strings.Repeat("a", i+1)
+		// 每个 id 必须是合法格式且唯一,否则 sanitize 会过滤掉。
+		// 用 7843...4025 + 4 位 padding 凑出 501 个唯一的 81 位以下数字串。
+		ids[i] = "1" + strings.Repeat("0", 4) + leftPad(i, 4)
 	}
 	_, err := client.GetMidpoints(ids)
 	if err == nil || !strings.Contains(err.Error(), "不能超过500") {
 		t.Fatalf("expected length error, got %v", err)
 	}
+}
+
+// leftPad 把整数 i 左补 0 到 width 位（用于构造唯一 tokenId 测试输入）。
+func leftPad(i, width int) string {
+	s := strconv.Itoa(i)
+	if len(s) >= width {
+		return s
+	}
+	return strings.Repeat("0", width-len(s)) + s
 }
 
 // TestGetMidpointsHTTPErrorIncludesPayloadSnippet 验证 SDK 在 HTTP 调用失败时
@@ -148,7 +172,9 @@ func TestGetMidpointsTooMany(t *testing.T) {
 // 失败路径而无需起 TLS 测试服务器。
 func TestGetMidpointsHTTPErrorIncludesPayloadSnippet(t *testing.T) {
 	client := newReadonlyMarketDataAt("http://invalid.invalid.localhost")
-	_, err := client.GetMidpoints([]string{"abc", "def"})
+	v1 := "78433024518676680431174478322854148606578065650008220678402966840627347604025"
+	v2 := "62125911194459356377883400729034971285539783764180402613717505645465050447006"
+	_, err := client.GetMidpoints([]string{v1, v2})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -159,7 +185,7 @@ func TestGetMidpointsHTTPErrorIncludesPayloadSnippet(t *testing.T) {
 	if !strings.Contains(msg, "n=2") {
 		t.Errorf("error should include n=2, got: %s", msg)
 	}
-	if !strings.Contains(msg, `"token_id":"abc"`) {
+	if !strings.Contains(msg, `"token_id":"`+v1+`"`) {
 		t.Errorf("error should include payload snippet with token_id, got: %s", msg)
 	}
 }
@@ -206,9 +232,10 @@ func TestGetLastTradesPricesSkipsRequestWhenAllEmpty(t *testing.T) {
 	}
 }
 
-// TestGetMultipleOrderBooksRejectsAllEmpty 覆盖 /books 的入参清洗。
-// /books 的语义是 "请求数组不能为空", 故全空 token_id 视为空请求,返回明确错误。
-func TestGetMultipleOrderBooksRejectsAllEmpty(t *testing.T) {
+// TestGetMultipleOrderBooksAllBadInput 覆盖 /books 的入参清洗。
+// 与 GetMidpoints/GetSpreads/GetLastTradesPrices 行为统一：sanitize 后为空
+// 直接返回空切片，不发请求也不报错。
+func TestGetMultipleOrderBooksAllBadInput(t *testing.T) {
 	var hits int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -216,17 +243,78 @@ func TestGetMultipleOrderBooksRejectsAllEmpty(t *testing.T) {
 	defer server.Close()
 
 	client := newReadonlyMarketDataAt(server.URL)
-	_, err := client.GetMultipleOrderBooks([]types.BookParams{
-		{TokenID: ""},
-		{TokenID: "  "},
-	})
-	if err == nil {
-		t.Fatal("expected error for all-empty request, got nil")
-	}
-	if !strings.Contains(err.Error(), "不能为空") {
-		t.Fatalf("expected '不能为空' error, got: %v", err)
+	for _, tc := range [][]types.BookParams{
+		nil,
+		{},
+		{{TokenID: ""}, {TokenID: "  "}},
+		{{TokenID: "abc"}, {TokenID: "0xdead"}, {TokenID: "0"}},
+	} {
+		got, err := client.GetMultipleOrderBooks(tc)
+		if err != nil {
+			t.Fatalf("GetMultipleOrderBooks(%v) error: %v", tc, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("GetMultipleOrderBooks(%v) = %v, want empty slice", tc, got)
+		}
 	}
 	if atomic.LoadInt32(&hits) != 0 {
 		t.Fatalf("expected zero HTTP calls, got %d", hits)
+	}
+}
+
+// TestGetPricesSanitizesInput 验证 GetPrices 也会过滤坏 tokenId。
+// 这是历史漏过的端点（修复前 GetPrices 不调用 sanitize），混入 hex/字母/全 0
+// 会导致网关的请求体含无意义的 token_id，浪费一次往返。
+func TestGetPricesSanitizesInput(t *testing.T) {
+	var hits int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+	}))
+	defer server.Close()
+
+	// readonly client 没有 GetPrices，直接构造 marketDataClientImpl 测。
+	client := &marketDataClientImpl{baseClient: &baseClient{baseURL: server.URL}}
+	got, err := client.GetPrices([]types.BookParams{
+		{TokenID: "abc", Side: "BUY"},
+		{TokenID: "0xdead", Side: "BUY"},
+		{TokenID: "0", Side: "BUY"},
+		{TokenID: "", Side: "BUY"},
+	})
+	if err != nil {
+		t.Fatalf("GetPrices unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty result, got %v", got)
+	}
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Fatalf("expected zero HTTP calls, got %d", hits)
+	}
+}
+
+// TestIsValidTokenIDFormat 单点验证 ERC1155 tokenId 格式校验。
+func TestIsValidTokenIDFormat(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"78433024518676680431174478322854148606578065650008220678402966840627347604025", true},
+		{"1", true},
+		{"123", true},
+		// uint256 max 是 78 位
+		{strings.Repeat("9", 78), true},
+		{"", false},
+		{"0", false},        // 全 0
+		{"00", false},       // 全 0
+		{"0xdead", false},   // hex
+		{"abc", false},      // 字母
+		{"-123", false},     // 负数
+		{"1.5", false},      // 浮点
+		{"1 2 3", false},    // 含空格
+		{strings.Repeat("9", 79), false}, // 超过 78 位
+	}
+	for _, tc := range cases {
+		if got := isValidTokenIDFormat(tc.in); got != tc.want {
+			t.Errorf("isValidTokenIDFormat(%q) = %v, want %v", tc.in, got, tc.want)
+		}
 	}
 }

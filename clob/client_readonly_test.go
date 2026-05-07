@@ -249,10 +249,15 @@ func TestGetMultipleOrderBooks(t *testing.T) {
 	})
 
 	// 边界条件测试 - 空请求数组
+	// 行为对齐：空输入返回空切片，与 GetMidpoints/GetSpreads/GetLastTradesPrices
+	// 一致，让业务层透明处理坏 tokenId（不再报错）。
 	t.Run("EmptyRequests", func(t *testing.T) {
-		_, err := client.GetMultipleOrderBooks([]types.BookParams{})
-		if err == nil {
-			t.Error("Expected error for empty requests array")
+		got, err := client.GetMultipleOrderBooks([]types.BookParams{})
+		if err != nil {
+			t.Errorf("Expected no error for empty requests, got: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("Expected empty result for empty input, got %d items", len(got))
 		}
 	})
 
