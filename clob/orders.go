@@ -72,6 +72,11 @@ func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types
 //   - tickSize 默认使用 0.001
 //   - negRisk 默认使用 false，如果出现签名错误则使用 true 重试
 //   - 统一检查所有订单的 price 是否符合条件
+//
+// 返回契约：成功路径下返回的切片长度恒等于 len(orderArgsList) 且同序；被
+// SDK 自动剥离（如 "orderbook X does not exist"）或批次失败的位置会回填
+// Status=OrderStrippedStatus 或 ErrorMsg 非空的合成响应。调用方可安全地
+// 通过下标 results[i] 与 orderArgsList[i] 对齐。失败路径仍返回 nil + error。
 func (c *orderClientImpl) CreateAndPostOrders(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,

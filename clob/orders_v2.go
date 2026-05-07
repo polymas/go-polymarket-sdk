@@ -68,32 +68,81 @@ var dropOrderbookNotFoundRegex = regexp.MustCompile(`orderbook\s+(\d+)\s+does\s+
 // 这个数说明上游 list 大量无效，停手让人工介入。
 const postOrdersBatchV2DropMaxRetries = 3
 
+// OrderStrippedStatus 标识被 SDK 自动剥离的合成失败响应。当批量提交因
+// "orderbook X does not exist" 触发剥离重试时，被剥离的订单不会出现在 CLOB
+// 响应里，SDK 会在对应原始下标位置回填一条 OrderPostResponse{Status: this}，
+// 以保证返回数组与入参等长同序。业务侧可用 r.Status == OrderStrippedStatus
+// 做语义判断，不必字符串匹配 ErrorMsg。
+const OrderStrippedStatus = "stripped"
+
 // postOrdersBatchV2 对应 V1 的 postOrdersBatch，走 V2 签名路径。
 //
 // 重试机制（两层独立）：
 //
 //  1. **bad-token 重试（外层 / HTTP 400）**：CLOB 在 top-level 校验时发现某个
 //     tokenId 没有对应 orderbook（已结算 / 已下架 / 错误抓取），返回 400 拒掉
-//     整批。本函数自动从批内剥离该 token 的所有订单并重发，最多 3 次。被剥离
-//     的订单不会出现在返回数组里——业务方对照输入/输出长度即可判断哪些被丢。
+//     整批。本函数自动从批内剥离该 token 的所有订单并重发，最多 3 次。
 //
 //  2. **negRisk 重试（内层 / HTTP 200 + per-order）**：单个订单返回
 //     "invalid signature" 时改用 V2 NegRisk Exchange 重新签名+重发。
 //
 // 两层正交：bad-token 是请求级，negRisk 是订单级。
+//
+// **返回契约**：成功路径下返回的切片长度恒等于 len(orderArgsList)，且与入参
+// 同序。被剥离的位置回填 OrderPostResponse{Status: OrderStrippedStatus,
+// ErrorMsg: "orderbook X does not exist (stripped by SDK retry)"}，调用方可
+// 直接 `for i, r := range results { ... orderArgsList[i] ... }` 按下标对齐。
+// 失败路径（重试上限耗尽 / 非 bad-token 错误）保持 nil + error，不做长度补齐。
 func (c *orderClientImpl) postOrdersBatchV2(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
-	// 外层 bad-token 剥离重试。每轮失败都会从入参里删掉 CLOB 报告的坏
-	// token 并重新签名/打包/POST；干净的 negRisk 重试由内部分支保留。
+	return runV2BatchWithStrip(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
+		return c.postOrdersBatchV2Once(a, t, isRetry...)
+	})
+}
+
+// runV2BatchWithStrip 实现 bad-token 自动剥离重试 + 等长结果回填。抽出来是
+// 为了让纯逻辑（索引簿记、stripped 合成响应、retry 上限语义）能脱离
+// orderClientImpl 单测——见 orders_v2_strip_test.go。
+func runV2BatchWithStrip(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	postFn func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error),
+) ([]types.OrderPostResponse, error) {
+	n := len(orderArgsList)
 	args := append([]types.OrderArgs(nil), orderArgsList...)
 	otypes := append([]types.OrderType(nil), orderTypes...)
+	// originalIndex[i] = 当前 args[i] 在原始 orderArgsList 中的下标
+	originalIndex := make([]int, n)
+	for i := range originalIndex {
+		originalIndex[i] = i
+	}
+	// 被剥离订单的原始下标 → tokenID，用于回填合成 stripped 响应
+	strippedAt := make(map[int]string, 0)
+
+	buildFinal := func(resp []types.OrderPostResponse) []types.OrderPostResponse {
+		final := make([]types.OrderPostResponse, n)
+		for j, r := range resp {
+			if j >= len(originalIndex) {
+				break
+			}
+			final[originalIndex[j]] = r
+		}
+		for origIdx, tokenID := range strippedAt {
+			final[origIdx] = types.OrderPostResponse{
+				Status:   OrderStrippedStatus,
+				ErrorMsg: fmt.Sprintf("orderbook %s does not exist (stripped by SDK retry)", tokenID),
+			}
+		}
+		return final
+	}
+
 	for attempt := 0; ; attempt++ {
-		resp, err := c.postOrdersBatchV2Once(args, otypes, isRetry...)
+		resp, err := postFn(args, otypes)
 		if err == nil {
-			return resp, nil
+			return buildFinal(resp), nil
 		}
 		if attempt >= postOrdersBatchV2DropMaxRetries {
 			return nil, fmt.Errorf("V2 batch order: 已剥离 %d 个不存在的 orderbook 但批内仍有更多坏 token（达到 %d 次上限），上游 list 可能严重过期，请人工排查: %w",
@@ -111,18 +160,21 @@ func (c *orderClientImpl) postOrdersBatchV2(
 		}
 		newArgs := make([]types.OrderArgs, 0, len(args))
 		newTypes := make([]types.OrderType, 0, len(otypes))
+		newIdx := make([]int, 0, len(args))
 		droppedPerToken := make(map[string]int, len(badTokens))
 		for i, a := range args {
 			if _, bad := badSet[a.TokenID]; bad {
 				droppedPerToken[a.TokenID]++
+				strippedAt[originalIndex[i]] = a.TokenID
 				continue
 			}
 			newArgs = append(newArgs, a)
 			newTypes = append(newTypes, otypes[i])
+			newIdx = append(newIdx, originalIndex[i])
 		}
 		totalDropped := 0
-		for _, n := range droppedPerToken {
-			totalDropped += n
+		for _, c := range droppedPerToken {
+			totalDropped += c
 		}
 		if totalDropped == 0 {
 			// CLOB 报告的 token 不在我们这批里——无法处理，避免死循环
@@ -131,15 +183,18 @@ func (c *orderClientImpl) postOrdersBatchV2(
 		}
 		// 日志：列出每个被剥离的 token + 笔数，便于排查上游 list 来源问题
 		var summary []string
-		for t, n := range droppedPerToken {
-			summary = append(summary, fmt.Sprintf("%s×%d", t, n))
+		for t, c := range droppedPerToken {
+			summary = append(summary, fmt.Sprintf("%s×%d", t, c))
 		}
 		internal.LogError("V2 batch: 剥离不存在的 orderbook [%s]，剩余 %d 笔重试 (attempt %d/%d)",
 			strings.Join(summary, ", "), len(newArgs), attempt+1, postOrdersBatchV2DropMaxRetries)
 		args = newArgs
 		otypes = newTypes
+		originalIndex = newIdx
 		if len(args) == 0 {
-			return []types.OrderPostResponse{}, nil
+			// 全部被剥离：直接构造 final 即可（resp 为空切片，buildFinal
+			// 会把所有原始下标都填成 stripped）
+			return buildFinal(nil), nil
 		}
 	}
 }

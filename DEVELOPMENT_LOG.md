@@ -156,6 +156,12 @@
 
 ## 更新日志
 
+### v1.10.8 - 2026-05-07
+- **API 契约强化**：`CreateAndPostOrders` / `postOrdersBatch` / `postOrdersBatchV2` 成功路径下返回切片现在恒等于入参 `orderArgsList` 的长度且同序。被 SDK 自动剥离（`"orderbook X does not exist"`）的位置回填合成响应 `OrderPostResponse{Status: clob.OrderStrippedStatus, ErrorMsg: "orderbook X does not exist (stripped by SDK retry)"}`，调用方可安全地用 `results[i]` 与 `orderArgsList[i]` 按下标对齐。
+- 向后兼容：原来按 `for _, r := range results` 遍历的代码不受影响；按下标取 `results[i]` 的代码现在变安全（不会越界、不会错位）。失败路径（重试上限耗尽 / 非 bad-token 错误）仍返回 `nil + error`，不做长度补齐。
+- 新增导出常量 `clob.OrderStrippedStatus = "stripped"`，供业务侧做语义判断。
+- 不变项：剥离触发逻辑、retry 上限（3 次）、negRisk per-order 重试、V1 路径行为均保持原样。
+
 ### 2025-01-19
 - 创建开发和测试记录文档
 - 记录所有模块的初始状态
