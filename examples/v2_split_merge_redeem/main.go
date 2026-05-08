@@ -3,7 +3,7 @@
 // 子命令：
 //   split   <conditionId> <amountPusd>        把 pUSD split 成 YES+NO 位置 token
 //   merge   <conditionId> <amountPusd>        把 YES+NO 位置 token 合回 pUSD（随时可做）
-//   redeem  <conditionId> [indexSets]         结算后收钱；indexSets 默认 1,2，也可传 1 或 2
+//   redeem  <conditionId> <outcomeIndex> [size]  结算后收钱；outcomeIndex=0(YES)/1(NO)，NegRisk 必填 size
 //
 // 可选参数（全部子命令）：
 //   --neg-risk    使用 NegRiskCtfCollateralAdapter（本仓 5 分钟 BTC 市场是 Regular，不用加）
@@ -14,17 +14,15 @@
 // 示例：
 //   go run ./examples/v2_split_merge_redeem split  0x45fff1... 2
 //   go run ./examples/v2_split_merge_redeem merge  0x45fff1... 1
-//   go run ./examples/v2_split_merge_redeem redeem 0x45fff1... 1,2   # 合并 redeem
-//   go run ./examples/v2_split_merge_redeem redeem 0x45fff1... 1     # 单独 redeem YES
+//   go run ./examples/v2_split_merge_redeem redeem 0x45fff1... 1            # Regular: redeem 胜出方=NO
+//   go run ./examples/v2_split_merge_redeem redeem 0x9e54... 1 50 --neg-risk # NegRisk: 胜出 NO，size=50
 package main
 
 import (
 	"fmt"
 	"log"
-	"math/big"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
@@ -102,20 +100,29 @@ func main() {
 		report(r, err, "merge")
 
 	case "redeem":
-		indexSets := []*big.Int{big.NewInt(1), big.NewInt(2)}
-		if len(positional) >= 1 {
-			parsed, err := parseIndexSets(positional[0])
-			if err != nil {
-				log.Fatalf("解析 indexSets 失败: %v", err)
-			}
-			indexSets = parsed
+		// 用法：redeem <conditionId> <outcomeIndex> [size] [--neg-risk]
+		//   outcomeIndex: 0=YES / 1=NO（胜出方）
+		//   size: 仅 NegRisk 必填，押在 outcomeIndex 上的位置 token 数量（人类单位）
+		if len(positional) < 1 {
+			log.Fatalf("redeem 需要 outcomeIndex（0=YES / 1=NO），NegRisk 还需追加 size")
 		}
-		label := indexSetsLabel(indexSets)
-		fmt.Printf("正在 redeem indexSets=%s…\n", label)
+		outcomeIdx, err := strconv.Atoi(positional[0])
+		if err != nil || (outcomeIdx != 0 && outcomeIdx != 1) {
+			log.Fatalf("非法 outcomeIndex %q：必须是 0 或 1", positional[0])
+		}
+		var size float64
+		if negRisk {
+			if len(positional) < 2 {
+				log.Fatalf("NegRisk redeem 需要 size（押在 outcomeIndex 上的 token 数量）")
+			}
+			size = mustFloat(positional[1], "size")
+		}
+		fmt.Printf("正在 redeem outcomeIndex=%d size=%.6f…\n", outcomeIdx, size)
 		r, err := gasless.RedeemPositions([]web3.RedeemPositionInfo{{
-			ConditionID: cond,
-			IndexSets:   indexSets,
-			NegRisk:     negRisk,
+			ConditionID:  cond,
+			OutcomeIndex: outcomeIdx,
+			Size:         size,
+			NegRisk:      negRisk,
 		}})
 		report(r, err, "redeem")
 
@@ -136,34 +143,6 @@ func report(r *types.TransactionReceipt, err error, label string) {
 		label, r.TxHash, r.BlockNumber, r.Status)
 }
 
-func parseIndexSets(s string) ([]*big.Int, error) {
-	parts := strings.Split(s, ",")
-	out := make([]*big.Int, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		v, ok := new(big.Int).SetString(p, 10)
-		if !ok || v.Sign() <= 0 {
-			return nil, fmt.Errorf("非法 indexSet %q", p)
-		}
-		out = append(out, v)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("indexSets 为空")
-	}
-	return out, nil
-}
-
-func indexSetsLabel(s []*big.Int) string {
-	parts := make([]string, len(s))
-	for i, v := range s {
-		parts[i] = v.String()
-	}
-	return "[" + strings.Join(parts, ",") + "]"
-}
-
 func mustFloat(s, name string) float64 {
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil || v <= 0 {
@@ -176,8 +155,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  go run ./examples/v2_split_merge_redeem split  <conditionId> <amountPusd> [--neg-risk]")
 	fmt.Fprintln(os.Stderr, "  go run ./examples/v2_split_merge_redeem merge  <conditionId> <amountPusd> [--neg-risk]")
-	fmt.Fprintln(os.Stderr, "  go run ./examples/v2_split_merge_redeem redeem <conditionId> [indexSets]  [--neg-risk]")
-	fmt.Fprintln(os.Stderr, "    indexSets 默认 1,2（合并 redeem）；传 1 或 2 做单独 redeem")
+	fmt.Fprintln(os.Stderr, "  go run ./examples/v2_split_merge_redeem redeem <conditionId> <outcomeIndex> [size] [--neg-risk]")
+	fmt.Fprintln(os.Stderr, "    outcomeIndex: 0=YES / 1=NO（胜出方）；NegRisk 必填 size（押在该 outcome 的 token 数量）")
 }
 
 func firstEnv(keys ...string) string {
