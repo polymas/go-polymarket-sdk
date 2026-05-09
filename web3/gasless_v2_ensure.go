@@ -19,7 +19,7 @@ import (
 //  2. pUSD 对 V2 全套 spender（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter /
 //     CtfCollateralAdapter / NegRiskCtfCollateralAdapter）每个未授权的 → 补 approve(MAX)
 //  3. CTF 对 V2 全套 operator（V2 Exchange / V2 NegRisk Exchange / CtfCollateralAdapter /
-//     NegRiskCtfCollateralAdapter）每个未 isApprovedForAll → setApprovalForAll(true)
+//     NegRiskCtfCollateralAdapter / NegRiskAdapter）每个未 isApprovedForAll → setApprovalForAll(true)
 //
 // 全部已就位 → 返回 (nil, nil)，**不发任何 tx**。
 // 否则把所有需要的操作打包成**一笔 gasless batch** 发出去，返回 receipt。
@@ -94,6 +94,10 @@ func ctfOperatorsV2() []common.Address {
 		common.HexToAddress(internal.PolygonNegRiskExchangeV2),
 		common.HexToAddress(internal.PolygonCtfCollateralAdapter),
 		common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter),
+		// NegRisk redeem 直调 NegRiskAdapter.redeemPositions(...) 时，adapter 内部
+		// 会 ctf.safeBatchTransferFrom(safe → adapter)，因此 Safe 必须事先把
+		// NegRiskAdapter 设为 ERC1155 operator。
+		common.HexToAddress(internal.PolygonNegRiskAdapter),
 	}
 }
 

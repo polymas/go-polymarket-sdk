@@ -73,8 +73,9 @@ func packSetApprovalForAll(operator common.Address) ([]byte, error) {
 //   - USDC.e.approve(NegRiskAdapter, MAX)     —— V2 CLOB 的 balance-allowance 把它列进 spender 集合
 //   - CTF.setApprovalForAll(V2_Exchange, true)
 //   - CTF.setApprovalForAll(V2_NegRiskExchange, true)
+//   - CTF.setApprovalForAll(NegRiskAdapter, true)  —— NegRisk redeem 直调时 adapter 拉 NRPositionToken
 //
-// 五笔通过 Relayer 打包在一次 gasless 交易里。
+// 六笔通过 Relayer 打包在一次 gasless 交易里。
 func (c *GaslessClient) SetV2Allowances() (*types.TransactionReceipt, error) {
 	usdc := common.HexToAddress(internal.PolygonCollateral)
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
@@ -83,7 +84,7 @@ func (c *GaslessClient) SetV2Allowances() (*types.TransactionReceipt, error) {
 	nrAdapter := common.HexToAddress(internal.PolygonNegRiskAdapter)
 
 	usdcApproves := []common.Address{exV2, exNRV2, nrAdapter}
-	ctfApprovals := []common.Address{exV2, exNRV2}
+	ctfApprovals := []common.Address{exV2, exNRV2, nrAdapter}
 
 	proxyTxns := make([]map[string]any, 0, len(usdcApproves)+len(ctfApprovals))
 	for _, spender := range usdcApproves {
@@ -113,6 +114,7 @@ func (c *GaslessClient) SetV2Allowances() (*types.TransactionReceipt, error) {
 //  7) pUSD.approve(NegRiskCtfCollateralAdapter, MAX)
 //  8) CTF.setApprovalForAll(CtfCollateralAdapter, true)          —— merge/redeem 时拉 CTF 位置 token
 //  9) CTF.setApprovalForAll(NegRiskCtfCollateralAdapter, true)
+// 10) CTF.setApprovalForAll(NegRiskAdapter, true)                —— NegRisk redeem 直调时 adapter 拉 NRPositionToken
 //
 // amountUSDC 传人类单位（如 40.0 = 40 USDC.e），内部按 6 decimals 转成最小单位。
 // 只接受 Safe 签名类型（wrap 的 to 用 proxy 地址，EOA 路径下 pUSD 会发到 EOA，V2 Exchange 看不到）。
@@ -152,7 +154,11 @@ func (c *GaslessClient) WrapAndApproveV2(amountUSDC float64) (*types.Transaction
 		ctfAdapter,
 		nrCtfAdapter,
 	}
-	ctfApprovals := []common.Address{ctfAdapter, nrCtfAdapter}
+	ctfApprovals := []common.Address{
+		ctfAdapter,
+		nrCtfAdapter,
+		common.HexToAddress(internal.PolygonNegRiskAdapter),
+	}
 
 	proxyTxns := make([]map[string]any, 0, 2+len(pusdSpenders)+len(ctfApprovals))
 	proxyTxns = append(proxyTxns, callTxn(usdc, approveUsdcToOnramp), callTxn(onramp, wrapData))
@@ -173,11 +179,12 @@ func (c *GaslessClient) WrapAndApproveV2(amountUSDC float64) (*types.Transaction
 	return c.executeGaslessBatch(proxyTxns, "Wrap USDC.e and approve pUSD for V2", "wrap-v2")
 }
 
-// ApproveAdaptersV2 补上 V2 split/merge/redeem 必需、WrapAndApproveV2 旧版漏掉的 4 笔 approve：
+// ApproveAdaptersV2 补上 V2 split/merge/redeem 必需、WrapAndApproveV2 旧版漏掉的 5 笔 approve：
 //   - pUSD.approve(CtfCollateralAdapter, MAX)                  —— split 时 adapter 拉 pUSD
 //   - pUSD.approve(NegRiskCtfCollateralAdapter, MAX)
 //   - CTF.setApprovalForAll(CtfCollateralAdapter, true)        —— merge/redeem 时 adapter 拉 CTF 位置 token
 //   - CTF.setApprovalForAll(NegRiskCtfCollateralAdapter, true)
+//   - CTF.setApprovalForAll(NegRiskAdapter, true)              —— NegRisk redeem 直调时 adapter 拉 NRPositionToken
 //
 // 钱包若只跑过老版 WrapAndApproveV2（只补到 V2 Exchange / NegRisk / NRAdapter 三个 spender），
 // 必须再跑一次此函数才能调 splitPosition / mergePositions / redeemPositions via adapter。
@@ -186,9 +193,10 @@ func (c *GaslessClient) ApproveAdaptersV2() (*types.TransactionReceipt, error) {
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
 	ctfAdapter := common.HexToAddress(internal.PolygonCtfCollateralAdapter)
 	nrCtfAdapter := common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter)
+	nrAdapter := common.HexToAddress(internal.PolygonNegRiskAdapter)
 
 	pusdSpenders := []common.Address{ctfAdapter, nrCtfAdapter}
-	ctfApprovals := []common.Address{ctfAdapter, nrCtfAdapter}
+	ctfApprovals := []common.Address{ctfAdapter, nrCtfAdapter, nrAdapter}
 
 	proxyTxns := make([]map[string]any, 0, len(pusdSpenders)+len(ctfApprovals))
 	for _, spender := range pusdSpenders {
