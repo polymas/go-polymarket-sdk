@@ -100,23 +100,17 @@ func main() {
 		report(r, err, "merge")
 
 	case "redeem":
-		// 用法：redeem <conditionId> <outcomeIndex> [size] [--neg-risk]
+		// 用法：redeem <conditionId> <outcomeIndex> <size> [--neg-risk]
 		//   outcomeIndex: 0=YES / 1=NO（胜出方）
-		//   size: 仅 NegRisk 必填，押在 outcomeIndex 上的位置 token 数量（人类单位）
-		if len(positional) < 1 {
-			log.Fatalf("redeem 需要 outcomeIndex（0=YES / 1=NO），NegRisk 还需追加 size")
+		//   size: 押在 outcomeIndex 上的位置 token 数量（人类单位，6 decimals）
+		if len(positional) < 2 {
+			log.Fatalf("redeem 需要 outcomeIndex（0=YES / 1=NO）和 size")
 		}
 		outcomeIdx, err := strconv.Atoi(positional[0])
 		if err != nil || (outcomeIdx != 0 && outcomeIdx != 1) {
 			log.Fatalf("非法 outcomeIndex %q：必须是 0 或 1", positional[0])
 		}
-		var size float64
-		if negRisk {
-			if len(positional) < 2 {
-				log.Fatalf("NegRisk redeem 需要 size（押在 outcomeIndex 上的 token 数量）")
-			}
-			size = mustFloat(positional[1], "size")
-		}
+		size := mustFloat(positional[1], "size")
 		fmt.Printf("正在 redeem outcomeIndex=%d size=%.6f…\n", outcomeIdx, size)
 		r, err := gasless.RedeemPositions([]web3.RedeemPositionInfo{{
 			ConditionID:  cond,

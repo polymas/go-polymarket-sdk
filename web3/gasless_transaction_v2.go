@@ -66,19 +66,24 @@ func (c *GaslessClient) MergePositions(conditionID types.Keccak256, amount float
 
 // RedeemPositionInfo V2 redeem 单位参数。
 //
-// 与 split/merge 不同，V2 redeem 不能走 CtfCollateralAdapter ——
-// Polymarket Gasless Relayer 的白名单只放行底层 ConditionalTokens / NegRiskAdapter，
-// 看到 to=CollateralAdapter 会直接静默返回 STATE_FAILED（无 error/reason）。
-// 这里的 to + calldata 与官方 builder example 对齐：
+// 实测 Polymarket Gasless Relayer 在 Unverified Builder Tier 下封禁了所有
+// `redeemPositions` 走 NegRiskAdapter / NegRiskCtfCollateralAdapter 的 calldata
+// （27ms 内 STATE_FAILED 不广播，TS/Go 同症状），但放行 CTF 长签名 redeem。
+// 因此 NegRisk 路径绕开 NegRiskAdapter，直接拆成与 Regular 同 selector 的两步：
 //
-//	Regular → ConditionalTokens.redeemPositions(USDC.e, 0x00, conditionId, [1<<OutcomeIndex])
-//	NegRisk → NegRiskAdapter.redeemPositions(conditionId, amounts)
-//	          其中 amounts[OutcomeIndex]=Size（6 decimals），另一边为 0
+//	Regular → CTF.redeemPositions(USDC.e, 0x00, conditionId, [1<<OutcomeIndex])
+//
+//	NegRisk → 一笔 batch 里两个 op：
+//	   1) CTF.redeemPositions(wcol, 0x00, conditionId, [1<<OutcomeIndex])
+//	      —— 烧 Safe 持有的 NRPositionToken，给 Safe 转 size 个 wcol
+//	   2) WCol.unwrap(safe, size)
+//	      —— 烧 wcol，给 Safe 转等额 USDC.e
 //
 // 字段说明：
 //   - OutcomeIndex：胜出的 outcome 下标（YES=0 / NO=1）
 //   - Size：押在 OutcomeIndex 上的位置 token 数量（人类单位，6 decimals）；
-//     仅 NegRisk 使用，Regular 直接按 [1<<OutcomeIndex] 索引集合 redeem，无需金额
+//     必填——NegRisk 用来给 WCol.unwrap 的 amount，Regular 也要求 > 0 以与
+//     链上余额一致（不一致会 ERC1155 InsufficientBalance）
 type RedeemPositionInfo struct {
 	ConditionID  types.Keccak256
 	OutcomeIndex int
@@ -88,12 +93,24 @@ type RedeemPositionInfo struct {
 
 // RedeemPositions 在一个 gasless batch 里对多个 position 做 redeem。
 // 结算后才能拿到 collateral；未结算时对 conditionId 调用会 revert。
+//
+// NegRisk 每笔会展开成 2 个 op（CTF.redeemPositions + WCol.unwrap），
+// Regular 每笔 1 个 op。所有 op 一起进 Safe MultiSend。
 func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.TransactionReceipt, error) {
 	if len(positions) == 0 {
 		return nil, fmt.Errorf("no positions to redeem")
 	}
 
-	proxyTxns := make([]map[string]any, 0, len(positions))
+	safeAddrStr, err := c.GetPolyProxyAddress()
+	if err != nil {
+		return nil, fmt.Errorf("GetPolyProxyAddress: %w", err)
+	}
+	safe := common.HexToAddress(string(safeAddrStr))
+
+	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
+	wcol := common.HexToAddress(internal.PolygonNegRiskWrappedCollateral)
+
+	proxyTxns := make([]map[string]any, 0, len(positions)*2)
 	for i, pos := range positions {
 		if err := pos.ConditionID.Validate(); err != nil {
 			return nil, fmt.Errorf("position %d conditionID: %w", i, err)
@@ -101,31 +118,37 @@ func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.
 		if pos.OutcomeIndex != 0 && pos.OutcomeIndex != 1 {
 			return nil, fmt.Errorf("position %d: OutcomeIndex must be 0 (YES) or 1 (NO), got %d", i, pos.OutcomeIndex)
 		}
-
-		var to common.Address
-		var data []byte
-		var err error
-		if pos.NegRisk {
-			if pos.Size <= 0 {
-				return nil, fmt.Errorf("position %d: NegRisk redeem requires positive Size", i)
-			}
-			intSize, err2 := toUnits6(pos.Size)
-			if err2 != nil {
-				return nil, fmt.Errorf("position %d: %w", i, err2)
-			}
-			amounts := []*big.Int{big.NewInt(0), big.NewInt(0)}
-			amounts[pos.OutcomeIndex] = intSize
-			to = common.HexToAddress(internal.PolygonNegRiskAdapter)
-			data, err = encodeRedeemNegRiskShort(pos.ConditionID, amounts)
-		} else {
-			to = common.HexToAddress(internal.PolygonConditionalTokens)
-			indexSet := new(big.Int).Lsh(big.NewInt(1), uint(pos.OutcomeIndex))
-			data, err = encodeRedeemRegularV2(pos.ConditionID, []*big.Int{indexSet})
+		if pos.Size <= 0 {
+			return nil, fmt.Errorf("position %d: redeem requires positive Size (实际持仓数量，6 decimals 人类单位)", i)
 		}
+		intSize, err := toUnits6(pos.Size)
 		if err != nil {
-			return nil, fmt.Errorf("encode redeem V2 position %d: %w", i, err)
+			return nil, fmt.Errorf("position %d size: %w", i, err)
 		}
-		proxyTxns = append(proxyTxns, callTxn(to, data))
+		indexSet := new(big.Int).Lsh(big.NewInt(1), uint(pos.OutcomeIndex))
+
+		var collateralToken common.Address
+		if pos.NegRisk {
+			collateralToken = wcol
+		} else {
+			collateralToken = common.HexToAddress(internal.PolygonCollateral) // USDC.e
+		}
+
+		// op #1: CTF.redeemPositions(collateral, 0, conditionId, [1<<idx])
+		redeemData, err := encodeRedeemCTF(collateralToken, pos.ConditionID, []*big.Int{indexSet})
+		if err != nil {
+			return nil, fmt.Errorf("encode CTF.redeemPositions for position %d: %w", i, err)
+		}
+		proxyTxns = append(proxyTxns, callTxn(ctf, redeemData))
+
+		// NegRisk 多一个 op：把上一步收到的 wcol unwrap 回 USDC.e
+		if pos.NegRisk {
+			unwrapData, err := encodeWColUnwrap(safe, intSize)
+			if err != nil {
+				return nil, fmt.Errorf("encode WCol.unwrap for position %d: %w", i, err)
+			}
+			proxyTxns = append(proxyTxns, callTxn(wcol, unwrapData))
+		}
 	}
 	return c.executeGaslessBatch(proxyTxns, "Redeem Positions V2", "redeem-v2")
 }
@@ -150,49 +173,19 @@ func adapterAddrV2(negRisk bool) common.Address {
 	return common.HexToAddress(internal.PolygonCtfCollateralAdapter)
 }
 
-// encodeRedeemNegRiskShort 编码 NegRiskAdapter.redeemPositions(bytes32,uint256[])
-// selector=0xdbeccb23，amounts 长度=2：amounts[winningOutcomeIndex]=size，另一边为 0。
-func encodeRedeemNegRiskShort(conditionID types.Keccak256, amounts []*big.Int) ([]byte, error) {
-	selector, err := hex.DecodeString("dbeccb23")
-	if err != nil {
-		return nil, fmt.Errorf("decode selector: %w", err)
-	}
-	condHash := common.HexToHash(string(conditionID))
-
-	offset := big.NewInt(0x40)
-	offsetBytes := make([]byte, 32)
-	offset.FillBytes(offsetBytes)
-
-	arrayLen := big.NewInt(int64(len(amounts)))
-	lenBytes := make([]byte, 32)
-	arrayLen.FillBytes(lenBytes)
-
-	data := append([]byte{}, selector...)
-	data = append(data, condHash.Bytes()...)
-	data = append(data, offsetBytes...)
-	data = append(data, lenBytes...)
-	for _, a := range amounts {
-		b := make([]byte, 32)
-		a.FillBytes(b)
-		data = append(data, b...)
-	}
-	return data, nil
-}
-
-// encodeRedeemRegularV2 用 CTF 长签名 redeemPositions(address,bytes32,bytes32,uint256[]) 编码。
-// 直接调底层 ConditionalTokens（不经 adapter），collateralToken=USDC.e。
+// encodeRedeemCTF 编码 CTF 长签名 redeemPositions(address,bytes32,bytes32,uint256[])。
+// collateralToken：Regular 传 USDC.e；NegRisk 传 wcol（NegRiskAdapter 的 wrap 合约）。
 // indexSets 通常只放一个元素 [1<<outcomeIndex]，对齐官方 builder example。
-func encodeRedeemRegularV2(conditionID types.Keccak256, indexSets []*big.Int) ([]byte, error) {
+func encodeRedeemCTF(collateralToken common.Address, conditionID types.Keccak256, indexSets []*big.Int) ([]byte, error) {
 	selector := crypto.Keccak256([]byte("redeemPositions(address,bytes32,bytes32,uint256[])"))[:4]
 
-	usdc := common.HexToAddress(internal.PolygonCollateral)
 	hashZero := common.HexToHash(internal.HashZero)
 	condHash := common.HexToHash(string(conditionID))
 
 	data := append([]byte{}, selector...)
 
 	collateralBytes := make([]byte, 32)
-	copy(collateralBytes[12:], usdc.Bytes())
+	copy(collateralBytes[12:], collateralToken.Bytes())
 	data = append(data, collateralBytes...)
 
 	data = append(data, hashZero.Bytes()...)
@@ -214,6 +207,28 @@ func encodeRedeemRegularV2(conditionID types.Keccak256, indexSets []*big.Int) ([
 		v.FillBytes(elemBytes)
 		data = append(data, elemBytes...)
 	}
+
+	return data, nil
+}
+
+// encodeWColUnwrap 编码 WrappedCollateral.unwrap(address to, uint256 amount)。
+// 没有访问控制：caller 烧自己的 wcol，underlying USDC.e 转给 to。
+// selector=0x39f47693。
+func encodeWColUnwrap(to common.Address, amount *big.Int) ([]byte, error) {
+	selector, err := hex.DecodeString("39f47693")
+	if err != nil {
+		return nil, fmt.Errorf("decode selector: %w", err)
+	}
+
+	data := append([]byte{}, selector...)
+
+	addrBytes := make([]byte, 32)
+	copy(addrBytes[12:], to.Bytes())
+	data = append(data, addrBytes...)
+
+	amountBytes := make([]byte, 32)
+	amount.FillBytes(amountBytes)
+	data = append(data, amountBytes...)
 
 	return data, nil
 }

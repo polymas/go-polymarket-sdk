@@ -26,6 +26,12 @@ const (
 	PolygonConditionalTokens = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 	// NegRiskAdapter 合约地址
 	PolygonNegRiskAdapter = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+	// WrappedCollateral：NegRiskAdapter 内部 wrap 出来的 USDC.e ERC20，
+	// NegRisk position token 在 CTF 里的 collateralToken 实际是它（不是 USDC.e）。
+	// 直接走 CTF.redeemPositions(wcol, ...) 可绕开 NegRiskAdapter.redeemPositions
+	// （后者在 relayer 白名单外，会被 STATE_FAILED 拒）。
+	// 来源：eth_call NegRiskAdapter.wcol() = 0x3a3b...02e2。
+	PolygonNegRiskWrappedCollateral = "0x3A3BD7bb9528E159577F7C2e685CC81A765002E2"
 	// ProxyFactory 合约地址
 	PolygonProxyFactory = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052"
 

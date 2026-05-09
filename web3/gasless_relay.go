@@ -957,3 +957,68 @@ func getSafeMultiSendABI() (*abi.ABI, error) {
 
 	return &parsedABI, nil
 }
+
+// RelayerTransactionInfo 是 GET /transaction?id=... 返回的单笔记录。
+// state 可能是 STATE_NEW / STATE_EXECUTED / STATE_MINED / STATE_CONFIRMED /
+// STATE_INVALID / STATE_FAILED。STATE_FAILED 通常表示已上链且 revert，可用 transactionHash
+// 去 Polygonscan 看 revert 原因；STATE_INVALID 是 relayer 预校验阶段拒绝。
+type RelayerTransactionInfo struct {
+	TransactionID   string `json:"transactionID"`
+	TransactionHash string `json:"transactionHash,omitempty"`
+	From            string `json:"from"`
+	To              string `json:"to"`
+	ProxyAddress    string `json:"proxyAddress"`
+	Data            string `json:"data"`
+	Nonce           string `json:"nonce"`
+	Value           string `json:"value"`
+	Signature       string `json:"signature"`
+	State           string `json:"state"`
+	Type            string `json:"type"`
+	Owner           string `json:"owner"`
+	Metadata        string `json:"metadata"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
+// GetRelayerTransaction 用 transactionID 查询 relayer 那笔的状态详情。
+// 主要给 STATE_FAILED 的事故诊断用：拿到 transactionHash 后去 Polygonscan 看 revert reason。
+func (c *GaslessClient) GetRelayerTransaction(transactionID string) ([]RelayerTransactionInfo, error) {
+	if transactionID == "" {
+		return nil, fmt.Errorf("transactionID required")
+	}
+
+	requestURL := fmt.Sprintf("%s/transaction?id=%s", c.relayURL, transactionID)
+
+	headers, err := c.localSigner.SignRequest("GET", "/transaction", nil)
+	if err != nil {
+		return nil, fmt.Errorf("sign GET /transaction: %w", err)
+	}
+
+	req, err := http.NewRequest("GET", requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("submit request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("relayer GET /transaction status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var out []RelayerTransactionInfo
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("parse response %q: %w", string(body), err)
+	}
+	return out, nil
+}
