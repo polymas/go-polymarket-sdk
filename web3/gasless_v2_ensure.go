@@ -16,10 +16,16 @@ import (
 // 全程幂等：
 //  1. Safe 上有 USDC.e → 自动 wrap 成 pUSD（顺手补 USDC.e→CollateralOnramp 的 approve 如果没到位）
 //     Safe 上没 USDC.e → 跳过 wrap
-//  2. pUSD 对 V2 全套 spender（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter /
-//     CtfCollateralAdapter / NegRiskCtfCollateralAdapter）每个未授权的 → 补 approve(MAX)
-//  3. CTF 对 V2 全套 operator（V2 Exchange / V2 NegRisk Exchange / CtfCollateralAdapter /
-//     NegRiskCtfCollateralAdapter / NegRiskAdapter）每个未 isApprovedForAll → setApprovalForAll(true)
+//  2. pUSD 对 V2 trading 必备 spender（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter）
+//     每个未授权的 → 补 approve(MAX)
+//  3. CTF 对 V2 trading 必备 operator（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter）
+//     每个未 isApprovedForAll → setApprovalForAll(true)
+//
+// 注意：CtfCollateralAdapter / NegRiskCtfCollateralAdapter 这两个 adapter 不在 Polymarket
+// relayer 的 builder 白名单里，approve / setApprovalForAll 它们的 calldata 会被 relayer 直接
+// 拒（"call blocked: approve spender ... is not in the allowed list"），所以这里**不**把它们
+// 算进必查项。需要 split/merge 走 adapter 路径的业务必须通过其它通道（EOA 直签 / Safe 多签等）
+// 完成这两个 adapter 的授权，IsV2Ready 不再代为兜底，避免 EnsureV2Ready 无限重试。
 //
 // 全部已就位 → 返回 (nil, nil)，**不发任何 tx**。
 // 否则把所有需要的操作打包成**一笔 gasless batch** 发出去，返回 receipt。
@@ -44,6 +50,44 @@ func (c *GaslessClient) EnsureV2Ready() (*types.TransactionReceipt, error) {
 		return nil, nil
 	}
 	return c.executeGaslessBatch(proxyTxns, "Ensure V2 Ready", "ensure-v2")
+}
+
+// EnsureV2ReadyOneByOne 把 buildEnsureBatch 生成的每一笔 proxy tx 各自单独提交一次，
+// 用于诊断 "组合 batch 整体被 relayer 吞掉但单笔可能能过" 的场景。
+// 返回值：每笔的 (receipt, err)，按 buildEnsureBatch 的顺序排列。
+//
+// 没有任何 missing 项时返回 (nil, nil, nil)；中途某笔失败也继续提交后续，把所有结果返回让调用方看。
+func (c *GaslessClient) EnsureV2ReadyOneByOne() (receipts []*types.TransactionReceipt, errs []error, err error) {
+	ctx := context.Background()
+	safeStr, err := c.GetPolyProxyAddress()
+	if err != nil {
+		return nil, nil, fmt.Errorf("GetPolyProxyAddress: %w", err)
+	}
+	safe := common.HexToAddress(string(safeStr))
+
+	state, err := c.readV2State(ctx, safe)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	proxyTxns, err := c.buildEnsureBatch(safe, state)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(proxyTxns) == 0 {
+		return nil, nil, nil
+	}
+
+	receipts = make([]*types.TransactionReceipt, len(proxyTxns))
+	errs = make([]error, len(proxyTxns))
+	for i, tx := range proxyTxns {
+		r, e := c.executeGaslessBatch([]map[string]interface{}{tx},
+			fmt.Sprintf("Ensure V2 (split %d/%d)", i+1, len(proxyTxns)),
+			fmt.Sprintf("ensure-v2-split-%d", i))
+		receipts[i] = r
+		errs[i] = e
+	}
+	return receipts, errs, nil
 }
 
 // IsV2Ready 只读版自检：返回 ready=true 说明 EnsureV2Ready() 当前是 no-op（无需发 tx），
@@ -76,15 +120,17 @@ type v2State struct {
 	ctfAppr     map[common.Address]bool     // CTF.isApprovedForAll(safe, operator)
 }
 
-// pusdSpendersV2 / ctfOperatorsV2 是 V2 trading 路径必需的 spender / operator 列表，
-// 出现顺序就是 missing[] 的展示顺序，调用方读起来稳定。
+// pusdSpendersV2 / ctfOperatorsV2 是 **可由 gasless relayer 兜底** 的 V2 trading
+// spender / operator 列表 —— 即 relayer builder 白名单允许我们代发 approve / setApprovalForAll
+// 的目标。出现顺序就是 missing[] 的展示顺序，调用方读起来稳定。
+//
+// 不在此处的（CtfCollateralAdapter / NegRiskCtfCollateralAdapter）见 EnsureV2Ready 顶注：
+// relayer 拒绝代发，需走其它授权通道；IsV2Ready 不再把它们当作必修项。
 func pusdSpendersV2() []common.Address {
 	return []common.Address{
 		common.HexToAddress(internal.PolygonExchangeV2),
 		common.HexToAddress(internal.PolygonNegRiskExchangeV2),
 		common.HexToAddress(internal.PolygonNegRiskAdapter),
-		common.HexToAddress(internal.PolygonCtfCollateralAdapter),
-		common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter),
 	}
 }
 
@@ -92,8 +138,6 @@ func ctfOperatorsV2() []common.Address {
 	return []common.Address{
 		common.HexToAddress(internal.PolygonExchangeV2),
 		common.HexToAddress(internal.PolygonNegRiskExchangeV2),
-		common.HexToAddress(internal.PolygonCtfCollateralAdapter),
-		common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter),
 		// NegRisk redeem 直调 NegRiskAdapter.redeemPositions(...) 时，adapter 内部
 		// 会 ctf.safeBatchTransferFrom(safe → adapter)，因此 Safe 必须事先把
 		// NegRiskAdapter 设为 ERC1155 operator。
@@ -102,7 +146,7 @@ func ctfOperatorsV2() []common.Address {
 }
 
 // readV2State 并发读所有需要的链上状态，单次失败即整体失败。
-// 总共 11 笔 eth_call（1 USDC.e balance + 1 onramp allowance + 5 pUSD allowance + 4 CTF approval），
+// 总共 8 笔 eth_call（1 USDC.e balance + 1 onramp allowance + 3 pUSD allowance + 3 CTF approval），
 // 公网 RPC 串行约 2-5s，并发收敛到 ~300ms 一跳。
 func (c *GaslessClient) readV2State(ctx context.Context, safe common.Address) (*v2State, error) {
 	usdc := common.HexToAddress(internal.PolygonCollateral)
@@ -111,8 +155,8 @@ func (c *GaslessClient) readV2State(ctx context.Context, safe common.Address) (*
 	onramp := common.HexToAddress(internal.PolygonCollateralOnramp)
 
 	state := &v2State{
-		pusdAllow: make(map[common.Address]*big.Int, 5),
-		ctfAppr:   make(map[common.Address]bool, 4),
+		pusdAllow: make(map[common.Address]*big.Int, 3),
+		ctfAppr:   make(map[common.Address]bool, 3),
 	}
 	var (
 		wg       sync.WaitGroup
