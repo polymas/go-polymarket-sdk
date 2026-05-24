@@ -99,6 +99,10 @@ func (c *GaslessClient) executeGaslessBatch(
 		}
 	}
 
+	// 懒加载 V2 relayer key（首次进入会跑 SIWE）。
+	// 失败不阻塞 — ensureV2RelayerKey 内部已 log，并保持旧鉴权 fallback。
+	_ = c.ensureV2RelayerKey(context.Background())
+
 	// Sign request using LocalSigner
 	requestHeaders, err := c.localSigner.SignRequest("POST", "/submit", body)
 	if err != nil {
@@ -967,6 +971,8 @@ func (c *GaslessClient) GetRelayerTransaction(transactionID string) ([]RelayerTr
 	}
 
 	requestURL := fmt.Sprintf("%s/transaction?id=%s", c.relayURL, transactionID)
+
+	_ = c.ensureV2RelayerKey(context.Background())
 
 	headers, err := c.localSigner.SignRequest("GET", "/transaction", nil)
 	if err != nil {

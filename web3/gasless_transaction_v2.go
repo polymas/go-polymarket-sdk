@@ -1,7 +1,6 @@
 package web3
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math/big"
 
@@ -66,24 +65,22 @@ func (c *GaslessClient) MergePositions(conditionID types.Keccak256, amount float
 
 // RedeemPositionInfo V2 redeem 单位参数。
 //
-// 实测 Polymarket Gasless Relayer 在 Unverified Builder Tier 下封禁了所有
-// `redeemPositions` 走 NegRiskAdapter / NegRiskCtfCollateralAdapter 的 calldata
-// （27ms 内 STATE_FAILED 不广播，TS/Go 同症状），但放行 CTF 长签名 redeem。
-// 因此 NegRisk 路径绕开 NegRiskAdapter，直接拆成与 Regular 同 selector 的两步：
+// 2026-05 修正：之前版本以为 NegRisk 必须绕开 NegRiskAdapter 是 relayer 白名单
+// 问题，实测发现是 SDK 还在用已弃用的 POLY_BUILDER_* HMAC 协议被 relayer 401。
+// 切到 V2 (RELAYER_API_KEY) 协议后，NegRisk 重新走官方推荐路径：
 //
-//	Regular → CTF.redeemPositions(USDC.e, 0x00, conditionId, [1<<OutcomeIndex])
+//	Regular → CtfCollateralAdapter.redeemPositions(USDC.e, 0, conditionId, [1<<idx])
+//	          —— 长签名（4 参数），与底层 CTF 同 selector
 //
-//	NegRisk → 一笔 batch 里两个 op：
-//	   1) CTF.redeemPositions(wcol, 0x00, conditionId, [1<<OutcomeIndex])
-//	      —— 烧 Safe 持有的 NRPositionToken，给 Safe 转 size 个 wcol
-//	   2) WCol.unwrap(safe, size)
-//	      —— 烧 wcol，给 Safe 转等额 USDC.e
+//	NegRisk → NegRiskCtfCollateralAdapter.redeemPositions(conditionId, amounts[])
+//	          —— **短签名（2 参数）**，amounts 数组按 OutcomeIndex 排好；
+//	          adapter 内部 NegRiskAdapter→unwrap WCol→wrap pUSD→给 Safe 一气呵成。
+//	          原 v1.10.13 试图直调 WCol.unwrap 注定 revert（OnlyOwner=NegRiskAdapter）。
 //
 // 字段说明：
-//   - OutcomeIndex：胜出的 outcome 下标（YES=0 / NO=1）
-//   - Size：押在 OutcomeIndex 上的位置 token 数量（人类单位，6 decimals）；
-//     必填——NegRisk 用来给 WCol.unwrap 的 amount，Regular 也要求 > 0 以与
-//     链上余额一致（不一致会 ERC1155 InsufficientBalance）
+//   - OutcomeIndex：胜出的 outcome 下标（YES=0 / NO=1，多结果 NegRisk 市场可 ≥2）
+//   - Size：押在 OutcomeIndex 上的位置 token 数量（6 decimals 人类单位）；
+//     必填 — Regular 也要求 > 0 以保证链上余额一致（否则 ERC1155 InsufficientBalance）
 type RedeemPositionInfo struct {
 	ConditionID  types.Keccak256
 	OutcomeIndex int
@@ -94,62 +91,90 @@ type RedeemPositionInfo struct {
 // RedeemPositions 在一个 gasless batch 里对多个 position 做 redeem。
 // 结算后才能拿到 collateral；未结算时对 conditionId 调用会 revert。
 //
-// NegRisk 每笔会展开成 2 个 op（CTF.redeemPositions + WCol.unwrap），
-// Regular 每笔 1 个 op。所有 op 一起进 Safe MultiSend。
+// NegRisk 同 conditionId 的多个 outcome 会合并成一个 adapter.redeemPositions 调用
+// （amounts 按 OutcomeIndex 排位，缺位补 0），Regular 每个 outcome 一个 op。
 func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.TransactionReceipt, error) {
 	if len(positions) == 0 {
 		return nil, fmt.Errorf("no positions to redeem")
 	}
 
-	safeAddrStr, err := c.GetPolyProxyAddress()
-	if err != nil {
-		return nil, fmt.Errorf("GetPolyProxyAddress: %w", err)
-	}
-	safe := common.HexToAddress(string(safeAddrStr))
-
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
-	wcol := common.HexToAddress(internal.PolygonNegRiskWrappedCollateral)
+	nrCtfAdapter := common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter)
+	usdcE := common.HexToAddress(internal.PolygonCollateral)
 
-	proxyTxns := make([]map[string]any, 0, len(positions)*2)
+	// NegRisk 按 conditionId 分组 → 同组合并到一笔 redeemPositions(amounts[])。
+	type nrGroup struct {
+		amounts map[int]*big.Int // outcomeIndex → intSize
+		maxIdx  int
+	}
+	nrGroups := map[string]*nrGroup{}
+	regularOps := []map[string]any{}
+
 	for i, pos := range positions {
 		if err := pos.ConditionID.Validate(); err != nil {
 			return nil, fmt.Errorf("position %d conditionID: %w", i, err)
 		}
-		if pos.OutcomeIndex != 0 && pos.OutcomeIndex != 1 {
-			return nil, fmt.Errorf("position %d: OutcomeIndex must be 0 (YES) or 1 (NO), got %d", i, pos.OutcomeIndex)
+		if pos.OutcomeIndex < 0 {
+			return nil, fmt.Errorf("position %d: OutcomeIndex must be >= 0, got %d", i, pos.OutcomeIndex)
+		}
+		if !pos.NegRisk && pos.OutcomeIndex > 1 {
+			return nil, fmt.Errorf("position %d: Regular 二元市场 OutcomeIndex 只能 0 或 1，got %d", i, pos.OutcomeIndex)
 		}
 		if pos.Size <= 0 {
-			return nil, fmt.Errorf("position %d: redeem requires positive Size (实际持仓数量，6 decimals 人类单位)", i)
+			return nil, fmt.Errorf("position %d: redeem requires positive Size", i)
 		}
 		intSize, err := toUnits6(pos.Size)
 		if err != nil {
 			return nil, fmt.Errorf("position %d size: %w", i, err)
 		}
-		indexSet := new(big.Int).Lsh(big.NewInt(1), uint(pos.OutcomeIndex))
 
-		var collateralToken common.Address
 		if pos.NegRisk {
-			collateralToken = wcol
-		} else {
-			collateralToken = common.HexToAddress(internal.PolygonCollateral) // USDC.e
-		}
-
-		// op #1: CTF.redeemPositions(collateral, 0, conditionId, [1<<idx])
-		redeemData, err := encodeRedeemCTF(collateralToken, pos.ConditionID, []*big.Int{indexSet})
-		if err != nil {
-			return nil, fmt.Errorf("encode CTF.redeemPositions for position %d: %w", i, err)
-		}
-		proxyTxns = append(proxyTxns, callTxn(ctf, redeemData))
-
-		// NegRisk 多一个 op：把上一步收到的 wcol unwrap 回 USDC.e
-		if pos.NegRisk {
-			unwrapData, err := encodeWColUnwrap(safe, intSize)
-			if err != nil {
-				return nil, fmt.Errorf("encode WCol.unwrap for position %d: %w", i, err)
+			condHex := string(pos.ConditionID)
+			g, ok := nrGroups[condHex]
+			if !ok {
+				g = &nrGroup{amounts: map[int]*big.Int{}, maxIdx: -1}
+				nrGroups[condHex] = g
 			}
-			proxyTxns = append(proxyTxns, callTxn(wcol, unwrapData))
+			if existing, dup := g.amounts[pos.OutcomeIndex]; dup {
+				g.amounts[pos.OutcomeIndex] = new(big.Int).Add(existing, intSize)
+			} else {
+				g.amounts[pos.OutcomeIndex] = intSize
+			}
+			if pos.OutcomeIndex > g.maxIdx {
+				g.maxIdx = pos.OutcomeIndex
+			}
+			continue
 		}
+
+		// Regular：直调底层 CTF.redeemPositions(USDC.e, 0, conditionId, [1<<idx])，
+		// 与 v1.10.13 保持一致，Safe 收到 USDC.e（不是 pUSD）。
+		indexSet := new(big.Int).Lsh(big.NewInt(1), uint(pos.OutcomeIndex))
+		data, err := encodeRedeemCTF(usdcE, pos.ConditionID, []*big.Int{indexSet})
+		if err != nil {
+			return nil, fmt.Errorf("encode Regular redeem for position %d: %w", i, err)
+		}
+		regularOps = append(regularOps, callTxn(ctf, data))
 	}
+
+	proxyTxns := make([]map[string]any, 0, len(regularOps)+len(nrGroups))
+	proxyTxns = append(proxyTxns, regularOps...)
+
+	for condHex, g := range nrGroups {
+		amounts := make([]*big.Int, g.maxIdx+1)
+		for i := range amounts {
+			if a, ok := g.amounts[i]; ok {
+				amounts[i] = a
+			} else {
+				amounts[i] = big.NewInt(0)
+			}
+		}
+		data, err := encodeNegRiskRedeem(types.Keccak256(condHex), amounts)
+		if err != nil {
+			return nil, fmt.Errorf("encode NegRisk redeem for %s: %w", condHex, err)
+		}
+		proxyTxns = append(proxyTxns, callTxn(nrCtfAdapter, data))
+	}
+
 	return c.executeGaslessBatch(proxyTxns, "Redeem Positions V2", "redeem-v2")
 }
 
@@ -211,24 +236,32 @@ func encodeRedeemCTF(collateralToken common.Address, conditionID types.Keccak256
 	return data, nil
 }
 
-// encodeWColUnwrap 编码 WrappedCollateral.unwrap(address to, uint256 amount)。
-// 没有访问控制：caller 烧自己的 wcol，underlying USDC.e 转给 to。
-// selector=0x39f47693。
-func encodeWColUnwrap(to common.Address, amount *big.Int) ([]byte, error) {
-	selector, err := hex.DecodeString("39f47693")
-	if err != nil {
-		return nil, fmt.Errorf("decode selector: %w", err)
-	}
+// encodeNegRiskRedeem 编码 NegRiskCtfCollateralAdapter.redeemPositions(bytes32 conditionId, uint256[] amounts)。
+// 短签名（2 参数），与 NegRiskAdapter 同 selector。adapter 内部 NegRiskAdapter→
+// unwrap WCol→wrap pUSD→给 Safe。amounts[i] = outcome i 持有数量（6 decimals）。
+func encodeNegRiskRedeem(conditionID types.Keccak256, amounts []*big.Int) ([]byte, error) {
+	selector := crypto.Keccak256([]byte("redeemPositions(bytes32,uint256[])"))[:4]
+	condHash := common.HexToHash(string(conditionID))
 
 	data := append([]byte{}, selector...)
+	data = append(data, condHash.Bytes()...)
 
-	addrBytes := make([]byte, 32)
-	copy(addrBytes[12:], to.Bytes())
-	data = append(data, addrBytes...)
+	// amounts 动态数组：offset = 0x40（2 个固定参数 * 0x20）
+	offset := big.NewInt(0x40)
+	offsetBytes := make([]byte, 32)
+	offset.FillBytes(offsetBytes)
+	data = append(data, offsetBytes...)
 
-	amountBytes := make([]byte, 32)
-	amount.FillBytes(amountBytes)
-	data = append(data, amountBytes...)
+	arrayLen := big.NewInt(int64(len(amounts)))
+	lenBytes := make([]byte, 32)
+	arrayLen.FillBytes(lenBytes)
+	data = append(data, lenBytes...)
+
+	for _, v := range amounts {
+		elemBytes := make([]byte, 32)
+		v.FillBytes(elemBytes)
+		data = append(data, elemBytes...)
+	}
 
 	return data, nil
 }

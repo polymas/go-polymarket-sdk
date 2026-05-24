@@ -1,9 +1,13 @@
 package web3
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/polymas/go-polymarket-sdk/internal"
@@ -23,6 +27,10 @@ type GaslessClient struct {
 	conditionalABI  *abi.ABI
 	negRiskABI      *abi.ABI
 	proxyFactoryABI *abi.ABI
+	// V2 relayer key 懒加载。首次发请求前 ensureV2RelayerKey 触发 SIWE 派生或读
+	// 本地缓存，成功后注入 localSigner.v2Key 让后续请求走 V2 双头。
+	v2KeyOnce sync.Once
+	v2KeyErr  error
 	// relayer 调用统计
 	relayerCallCount int64 // 使用 atomic 操作，记录总调用次数
 }
@@ -161,6 +169,33 @@ func getNegRiskAdapterABI() (*abi.ABI, error) {
 		return nil, err
 	}
 	return &parsedABI, nil
+}
+
+// ensureV2RelayerKey 懒加载 V2 relayer key 并注入到 localSigner。
+// 进程内仅跑一次（无论成功失败），失败会 log 并降级到旧 POLY_BUILDER_* / L1 路径。
+// 设置环境变量 POLYMARKET_DISABLE_V2_RELAYER_KEY=1 可禁用 V2，强制走旧协议。
+func (c *GaslessClient) ensureV2RelayerKey(ctx context.Context) error {
+	c.v2KeyOnce.Do(func() {
+		if os.Getenv("POLYMARKET_DISABLE_V2_RELAYER_KEY") == "1" {
+			log.Printf("[INFO] V2 relayer key 被环境变量禁用，继续走旧鉴权")
+			return
+		}
+		priv := c.signer.PrivateKey()
+		if priv == nil {
+			c.v2KeyErr = fmt.Errorf("signer has no private key")
+			log.Printf("[WARN] V2 relayer key 获取失败：%v；降级到旧鉴权", c.v2KeyErr)
+			return
+		}
+		k, err := internal.EnsureV2RelayerKey(ctx, priv, "")
+		if err != nil {
+			c.v2KeyErr = err
+			log.Printf("[WARN] V2 relayer key 获取失败：%v；降级到旧鉴权（NegRisk redeem 仍会 401）", err)
+			return
+		}
+		c.localSigner.SetV2Key(k)
+		log.Printf("[OK] V2 relayer key 已注入：%s (%s)", k.Key, k.Address)
+	})
+	return c.v2KeyErr
 }
 
 func getProxyFactoryABI() (*abi.ABI, error) {

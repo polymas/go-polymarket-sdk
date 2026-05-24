@@ -11,12 +11,15 @@ import (
 
 // LocalSigner is a local signing service that replaces the external builder-signing-server
 //
-// It implements the same signing functionality as the external service, supporting:
-// - Level 1 signing: EIP-712 signing with private key (when no builder_creds)
-// - Level 2 signing: HMAC signing with API credentials (when builder_creds provided)
+// 三种鉴权路径（按优先级）：
+//   - V2 RelayerKey（推荐）：注入 v2Key 后所有 /relayer 请求只用 RELAYER_API_KEY +
+//     RELAYER_API_KEY_ADDRESS 两个明文头，对应 polymarket 2026 新 relayer 协议。
+//   - L2 POLY_BUILDER_* HMAC（已弃用）：传 builderCreds 走旧协议，仅作 fallback。
+//   - L1 EIP-712 (POLY_*)：无 creds 时走 CLOB ClobAuth 派生头，给非-relayer 用途。
 type LocalSigner struct {
 	signer       *signing.Signer
 	builderCreds *types.ApiCreds
+	v2Key        *internal.V2RelayerKey
 }
 
 // NewLocalSigner creates a new LocalSigner instance
@@ -87,6 +90,11 @@ func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]s
 		Body:        requestBody,
 	}
 
+	// V2 优先：注入后直接返回明文双头，无 HMAC 无私钥。
+	if ls.v2Key != nil && ls.v2Key.Key != "" {
+		return ls.v2Key.Headers(), nil
+	}
+
 	// Relayer uses POLY_BUILDER_* HMAC headers when creds are present,
 	// otherwise falls back to Level 1 EIP-712 signing with the private key.
 	if ls.builderCreds != nil {
@@ -107,6 +115,12 @@ func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]s
 		return nil, fmt.Errorf("failed to create level 1 headers: %w", err)
 	}
 	return headers, nil
+}
+
+// SetV2Key 注入 V2 relayer key。注入后所有 SignPayload 调用返回 V2 明文双头。
+// 传 nil 解除注入，回到旧 builderCreds / L1 路径。
+func (ls *LocalSigner) SetV2Key(k *internal.V2RelayerKey) {
+	ls.v2Key = k
 }
 
 // SignRequest is a convenience method that directly uses method, path, body parameters for signing
