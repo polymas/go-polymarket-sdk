@@ -99,7 +99,13 @@ func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.
 	}
 
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
-	nrCtfAdapter := common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter)
+	// NegRisk redeem 走 legacy NegRiskAdapter（USDC.e 出口），不走
+	// NegRiskCtfCollateralAdapter（pUSD 出口）。原因：CWIA wallet 通常已有
+	// CTF.setApprovalForAll(NegRiskAdapter,true) 但缺 setApprovalForAll(NegRiskCtfCollateralAdapter,
+	// true)；后者补不了 — DepositWalletFactory.proxy() 有 onlyOperator 修饰，
+	// EOA 无法旁路 relayer，而 relayer 又把 approve adapter 列入 allowlist 拒绝。
+	// 代价：wallet 收 USDC.e 而非 pUSD，调用方可自行后续 wrap。
+	nrAdapter := common.HexToAddress(internal.PolygonNegRiskAdapter)
 	usdcE := common.HexToAddress(internal.PolygonCollateral)
 
 	// NegRisk 按 conditionId 分组 → 同组合并到一笔 redeemPositions(amounts[])。
@@ -172,7 +178,7 @@ func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.
 		if err != nil {
 			return nil, fmt.Errorf("encode NegRisk redeem for %s: %w", condHex, err)
 		}
-		proxyTxns = append(proxyTxns, callTxn(nrCtfAdapter, data))
+		proxyTxns = append(proxyTxns, callTxn(nrAdapter, data))
 	}
 
 	return c.executeGaslessBatch(proxyTxns, "Redeem Positions V2", "redeem-v2")

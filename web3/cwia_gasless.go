@@ -309,8 +309,18 @@ func (c *GaslessClient) buildCWIARelayTransactionBatch(
 		})
 	}
 
+	// V2 协议下 nonce 必须用 relayer 的 GET /nonce?address=EOA&type=WALLET，
+	// 不能用 wallet.nonce() 链上读 — relayer 维护了自己的 nonce 计数器，包括
+	// 已提交未上链的 pending tx；用链上 nonce 会被 relayer 校验失败回 500。
+	// 这是 polymarket/builder-relayer-client 官方 executeDepositWalletBatch 的做法。
+	relayerNonce, err := c.getRelayNonce("WALLET")
+	if err != nil {
+		return nil, fmt.Errorf("get WALLET nonce from relayer: %w", err)
+	}
+	nonceBig := big.NewInt(int64(relayerNonce))
+
 	batch, sig, _, err := c.baseClient.BuildAndSignCWIABatch(
-		context.Background(), wallet, calls, nil, nil,
+		context.Background(), wallet, calls, nonceBig, nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build+sign CWIA batch: %w", err)
