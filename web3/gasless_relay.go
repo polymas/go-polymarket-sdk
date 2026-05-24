@@ -136,7 +136,15 @@ func (c *GaslessClient) executeGaslessBatch(
 		if len(errorMsg) > 200 {
 			errorMsg = errorMsg[:200] + "..."
 		}
-		log.Printf("[ERROR] [Relayer调用 #%d] 批量提交失败: HTTP %d", callCount, resp.StatusCode)
+		bodyForLog := errorMsg
+		if bodyForLog == "" {
+			bodyForLog = "(empty body)"
+		}
+		log.Printf("[ERROR] [Relayer调用 #%d] 批量提交失败: HTTP %d body=%s", callCount, resp.StatusCode, bodyForLog)
+		// 同时打印响应头中可能有用的诊断字段（cf-ray / x-request-id）
+		if rayID := resp.Header.Get("cf-ray"); rayID != "" {
+			log.Printf("[ERROR] [Relayer调用 #%d] cf-ray=%s content-type=%s", callCount, rayID, resp.Header.Get("Content-Type"))
+		}
 		return nil, fmt.Errorf("relay returned error: HTTP %d: %s", resp.StatusCode, errorMsg)
 	}
 
