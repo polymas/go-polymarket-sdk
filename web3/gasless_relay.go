@@ -539,87 +539,66 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 // Function selector: proxy((uint8,address,uint256,bytes)[])
 // Rust uses hardcoded selector: 0x415565b0
 func (c *GaslessClient) encodeProxy(proxyTxns []map[string]interface{}) ([]byte, error) {
-	// Function selector: proxy((uint8,address,uint256,bytes)[])
-	// Rust hardcodes: 0x415565b0 (matching Rust implementation)
-	selector, err := hex.DecodeString("415565b0")
+	// 2026-05-23：发现链上成功提现 tx 用 selector 0x34ee9791（= keccak256("proxy((uint8,address,uint256,bytes)[])")[:4]，
+	// openchain.xyz 已验证），且采用 *标准* Solidity ABI 编码。
+	// 老 SDK 用了 0x415565b0 + 非标准偏移（tuple_offset=0x84、data_offset=0x60、data 不补 32），
+	// 在 RelayHub 解码阶段被当作未知函数，acceptRelayedCall 抛 CanRelayFailed(reason=4)。
+	// 现在改为：selector 0x34ee9791 + 用 go-ethereum abi.Pack 走标准 ABI 编码。
+	const abiJSON = `[{"name":"proxy","type":"function","stateMutability":"nonpayable","inputs":[{"name":"calls","type":"tuple[]","components":[{"name":"typeCode","type":"uint8"},{"name":"to","type":"address"},{"name":"value","type":"uint256"},{"name":"data","type":"bytes"}]}],"outputs":[]}]`
+	parsed, err := abi.JSON(strings.NewReader(abiJSON))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode selector: %w", err)
+		return nil, fmt.Errorf("parse proxy abi: %w", err)
 	}
 
-	var data []byte
-	data = append(data, selector...)
-
-	// Encode array offset (32 bytes) = 0x20
-	arrayOffset := big.NewInt(0x20)
-	offsetBytes := make([]byte, 32)
-	arrayOffset.FillBytes(offsetBytes)
-	data = append(data, offsetBytes...)
-
-	// Encode array length (32 bytes)
-	arrayLen := big.NewInt(int64(len(proxyTxns)))
-	lenBytes := make([]byte, 32)
-	arrayLen.FillBytes(lenBytes)
-	data = append(data, lenBytes...)
-
-	// Encode each transaction
-	// Matching Rust: encode tuple offset first, then tuple data in same loop
-	for i, proxyTxn := range proxyTxns {
-		// Calculate tuple offset: 0x20 * (len + 1) + current data length
-		// Rust: 0x20 * (proxy_txns.len() + 1) as u64 + data.len() as u64
-		tupleOffsetValue := int64(0x20*(len(proxyTxns)+1) + len(data))
-		tupleOffset := big.NewInt(tupleOffsetValue)
-		tupleOffsetBytes := make([]byte, 32)
-		tupleOffset.FillBytes(tupleOffsetBytes)
-		data = append(data, tupleOffsetBytes...)
-		
-		log.Printf("[DEBUG] encodeProxy: Transaction %d, tuple offset: 0x%x (calculated from: 0x%x * %d + %d)", 
-			i, tupleOffsetValue, 0x20, len(proxyTxns)+1, len(data)-32) // -32 because we just added the offset
-		
-		typeCode := uint8(proxyTxn["typeCode"].(int))
-		to := common.HexToAddress(proxyTxn["to"].(string))
-		value := big.NewInt(int64(proxyTxn["value"].(int)))
-		dataHex := proxyTxn["data"].(string)
-		txnData, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode data: %w", err)
+	type proxyCall struct {
+		TypeCode uint8          `json:"typeCode"`
+		To       common.Address `json:"to"`
+		Value    *big.Int       `json:"value"`
+		Data     []byte         `json:"data"`
+	}
+	calls := make([]proxyCall, 0, len(proxyTxns))
+	for i, t := range proxyTxns {
+		tc, ok := t["typeCode"].(int)
+		if !ok {
+			return nil, fmt.Errorf("proxyTxns[%d].typeCode missing or not int", i)
 		}
-		
-		// Debug: log transaction details
-		log.Printf("[DEBUG] encodeProxy: Transaction %d details - typeCode: %d, to: %s, value: %d, dataLen: %d", 
-			i, typeCode, to.Hex(), value.Int64(), len(txnData))
+		toStr, _ := t["to"].(string)
+		if toStr == "" {
+			return nil, fmt.Errorf("proxyTxns[%d].to missing", i)
+		}
+		dataHex, _ := t["data"].(string)
+		bs, err := hex.DecodeString(strings.TrimPrefix(dataHex, "0x"))
+		if err != nil {
+			return nil, fmt.Errorf("proxyTxns[%d].data hex: %w", i, err)
+		}
+		v := big.NewInt(0)
+		switch vv := t["value"].(type) {
+		case int:
+			v = big.NewInt(int64(vv))
+		case int64:
+			v = big.NewInt(vv)
+		case *big.Int:
+			if vv != nil {
+				v = vv
+			}
+		}
+		calls = append(calls, proxyCall{
+			TypeCode: uint8(tc),
+			To:       common.HexToAddress(toStr),
+			Value:    v,
+			Data:     bs,
+		})
 
-		// Encode typeCode (uint8, padded to 32 bytes)
-		typeCodeBytes := make([]byte, 32)
-		typeCodeBytes[31] = typeCode
-		data = append(data, typeCodeBytes...)
-
-		// Encode to (address, padded to 32 bytes)
-		toBytes := make([]byte, 32)
-		copy(toBytes[12:], to.Bytes())
-		data = append(data, toBytes...)
-
-		// Encode value (uint256, 32 bytes)
-		valueBytes := make([]byte, 32)
-		value.FillBytes(valueBytes)
-		data = append(data, valueBytes...)
-
-		// Encode data offset (32 bytes) = 0x60 (relative to tuple start)
-		dataOffset := big.NewInt(0x60)
-		dataOffsetBytes := make([]byte, 32)
-		dataOffset.FillBytes(dataOffsetBytes)
-		data = append(data, dataOffsetBytes...)
-
-		// Encode data length (32 bytes)
-		dataLen := big.NewInt(int64(len(txnData)))
-		dataLenBytes := make([]byte, 32)
-		dataLen.FillBytes(dataLenBytes)
-		data = append(data, dataLenBytes...)
-
-		// Encode data (variable length, no padding in Rust implementation)
-		data = append(data, txnData...)
+		log.Printf("[DEBUG] encodeProxy: call[%d] typeCode=%d to=%s value=%s dataLen=%d",
+			i, tc, common.HexToAddress(toStr).Hex(), v.String(), len(bs))
 	}
 
-	return data, nil
+	packed, err := parsed.Pack("proxy", calls)
+	if err != nil {
+		return nil, fmt.Errorf("abi.Pack proxy: %w", err)
+	}
+	log.Printf("[DEBUG] encodeProxy: selector=0x%x total=%d bytes", packed[:4], len(packed))
+	return packed, nil
 }
 
 // createProxyStructBytes creates raw proxy struct bytes (not hashed)
