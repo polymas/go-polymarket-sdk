@@ -166,17 +166,17 @@ func main() {
 		return
 	}
 
-	// 真正走 GaslessClient 提交
-	apiKey := os.Getenv("POLY_BUILDER_API_KEY")
-	apiSecret := os.Getenv("POLY_BUILDER_SECRET")
-	apiPass := os.Getenv("POLY_BUILDER_PASSPHRASE")
-	if apiKey == "" || apiSecret == "" || apiPass == "" {
-		log.Fatal("提交需要 POLY_BUILDER_API_KEY / POLY_BUILDER_SECRET / POLY_BUILDER_PASSPHRASE")
-	}
-	creds := &types.ApiCreds{
-		Key:        apiKey,
-		Secret:     apiSecret,
-		Passphrase: apiPass,
+	// 真正走 GaslessClient 提交。POLY_BUILDER_* 三元组已弃用；不设则自动铸 V2 RELAYER_API_KEY（仅凭私钥）。
+	var creds *types.ApiCreds
+	if apiKey := os.Getenv("POLY_BUILDER_API_KEY"); apiKey != "" {
+		creds = &types.ApiCreds{
+			Key:        apiKey,
+			Secret:     os.Getenv("POLY_BUILDER_SECRET"),
+			Passphrase: os.Getenv("POLY_BUILDER_PASSPHRASE"),
+		}
+		if creds.Secret == "" || creds.Passphrase == "" {
+			log.Fatalf("设了 POLY_BUILDER_API_KEY 就必须一起设 SECRET 和 PASSPHRASE")
+		}
 	}
 	gc, err := web3.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, creds)
 	if err != nil {

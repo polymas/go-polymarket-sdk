@@ -6,9 +6,9 @@
 //
 // env：
 //
-//	poly_sec / POLY_PRIVATE_KEY              owner 私钥（HMAC 签名要用）
-//	POLY_BUILDER_API_KEY/SECRET/PASSPHRASE   Builder Key 三件套
+//	poly_sec / POLY_PRIVATE_KEY              owner 私钥（自动铸 V2 key 用）
 //	POLY_SIGNATURE_TYPE                      默认 2（Safe）
+//	POLY_BUILDER_API_KEY/SECRET/PASSPHRASE   可选；已弃用的旧 HMAC 三件套，不设则自动铸 V2 key
 package main
 
 import (
@@ -34,13 +34,14 @@ func main() {
 	}
 	sigType := types.SignatureType(getEnvInt("POLY_SIGNATURE_TYPE", int(types.SafeSignatureType)))
 
-	creds := &types.ApiCreds{
-		Key:        os.Getenv("POLY_BUILDER_API_KEY"),
-		Secret:     os.Getenv("POLY_BUILDER_SECRET"),
-		Passphrase: os.Getenv("POLY_BUILDER_PASSPHRASE"),
-	}
-	if creds.Key == "" || creds.Secret == "" || creds.Passphrase == "" {
-		log.Fatalf("Builder API key 三件套不全：POLY_BUILDER_API_KEY/SECRET/PASSPHRASE")
+	// POLY_BUILDER_* 三元组已弃用；不设则 GetRelayerTransaction 自动铸 V2 key（仅凭私钥）。
+	var creds *types.ApiCreds
+	if bk := os.Getenv("POLY_BUILDER_API_KEY"); bk != "" {
+		creds = &types.ApiCreds{
+			Key:        bk,
+			Secret:     os.Getenv("POLY_BUILDER_SECRET"),
+			Passphrase: os.Getenv("POLY_BUILDER_PASSPHRASE"),
+		}
 	}
 
 	gasless, err := web3.NewGaslessClient(pk, sigType, types.Polygon, creds)

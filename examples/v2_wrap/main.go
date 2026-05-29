@@ -3,11 +3,9 @@
 // 必选 env：
 //   poly_sec                    钱包私钥
 //   POLY_V2_WRAP_AMOUNT         要 wrap 的 USDC.e 数量（人类单位，如 20.0）
-//   POLY_BUILDER_API_KEY        Relayer API Key 三元组（前端生成）
-//   POLY_BUILDER_SECRET
-//   POLY_BUILDER_PASSPHRASE
 // 可选 env：
 //   POLY_SIGNATURE_TYPE         默认 2（Safe）
+//   POLY_BUILDER_API_KEY/SECRET/PASSPHRASE  已弃用的旧 HMAC 三元组；不设则自动铸 V2 key
 package main
 
 import (
@@ -36,17 +34,17 @@ func main() {
 		log.Fatalf("POLY_V2_WRAP_AMOUNT 格式错: %v", err)
 	}
 
-	apiKey := os.Getenv("POLY_BUILDER_API_KEY")
-	if apiKey == "" {
-		log.Fatalf("缺少 POLY_BUILDER_API_KEY（前端 Relayer API Keys 生成）")
-	}
-	creds := &types.ApiCreds{
-		Key:        apiKey,
-		Secret:     os.Getenv("POLY_BUILDER_SECRET"),
-		Passphrase: os.Getenv("POLY_BUILDER_PASSPHRASE"),
-	}
-	if creds.Secret == "" || creds.Passphrase == "" {
-		log.Fatalf("POLY_BUILDER_SECRET / POLY_BUILDER_PASSPHRASE 必须和 POLY_BUILDER_API_KEY 一起设")
+	// POLY_BUILDER_* 三元组已弃用；不设则 GaslessClient 自动铸 V2 RELAYER_API_KEY（仅凭私钥）。
+	var creds *types.ApiCreds
+	if apiKey := os.Getenv("POLY_BUILDER_API_KEY"); apiKey != "" {
+		creds = &types.ApiCreds{
+			Key:        apiKey,
+			Secret:     os.Getenv("POLY_BUILDER_SECRET"),
+			Passphrase: os.Getenv("POLY_BUILDER_PASSPHRASE"),
+		}
+		if creds.Secret == "" || creds.Passphrase == "" {
+			log.Fatalf("设了 POLY_BUILDER_API_KEY 就必须一起设 SECRET 和 PASSPHRASE")
+		}
 	}
 
 	fmt.Println("=============================================")
