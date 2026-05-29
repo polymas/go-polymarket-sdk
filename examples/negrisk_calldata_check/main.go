@@ -127,7 +127,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("Sample calldata (binary YES only, size=5):")
 	sample := encodeNegRiskRedeemManual(cases[0].conditionID, cases[0].amounts)
-	fmt.Printf("  to:       0xAdA200001000ef00D07553cEE7006808F895c6F1 (NegRiskCtfCollateralAdapter)\n")
+	fmt.Printf("  to:       0xadA2005600Dec949baf300f4C6120000bDB6eAab (NegRiskCtfCollateralAdapter, 2026-05 迁移后)\n")
 	fmt.Printf("  selector: 0x%x\n", sample[:4])
 	fmt.Printf("  data:     0x%x\n", sample)
 }

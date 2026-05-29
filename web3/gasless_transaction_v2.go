@@ -91,30 +91,32 @@ type RedeemPositionInfo struct {
 // RedeemPositions 在一个 gasless batch 里对多个 position 做 redeem。
 // 结算后才能拿到 collateral；未结算时对 conditionId 调用会 revert。
 //
-// NegRisk 同 conditionId 的多个 outcome 会合并成一个 adapter.redeemPositions 调用
-// （amounts 按 OutcomeIndex 排位，缺位补 0），Regular 每个 outcome 一个 op。
+// 2026-05-29 修正历史：之前以为 gasless relayer 硬封 NegRisk redeem（提交秒拒
+// STATE_FAILED）。真实根因是 **adapter 地址过时**——Polymarket 在 2026-04 之后把 V2
+// adapter 重新部署到新 vanity 地址（见 internal.PolygonNegRiskCtfCollateralAdapter 注释），
+// relayer 白名单随官方 ts-sdk/py-sdk 切到新地址，旧地址链上还活着但不再被放行。
+// 切到新地址后 NegRisk redeem 可正常走 gasless（官方两个 SDK 即如此）。
+//
+// 与官方 ts-sdk/py-sdk 对齐的口径：
+//   - to：Regular→collateralAdapter，NegRisk→negRiskCollateralAdapter（均为新地址）
+//   - calldata：redeemPositions(pUSD, 0, conditionId, [1,2]) 长签名 → adapter 内部
+//     redeem + wrap → Safe 收 **pUSD**
+//   - 前置 CTF.setApprovalForAll(adapter,true)（adapter 要 burn Safe 的 position token）
 func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.TransactionReceipt, error) {
 	if len(positions) == 0 {
 		return nil, fmt.Errorf("no positions to redeem")
 	}
 
+	// 官方 ts-sdk/py-sdk 现行口径（V2）：redeem 走 collateralAdapter（Regular）/
+	// negRiskCollateralAdapter（NegRisk），collateralToken 一律填 pUSD，indexSets=[1,2]
+	// （二元市场两 outcome 一起，未持有的那个余额 0、redeem 0），长签名
+	// redeemPositions(address,bytes32,bytes32,uint256[])。adapter 内部 → CTF redeem →
+	// wrap pUSD → 回 Safe。非 EOA 钱包全程走 gasless relayer。
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
-	// NegRisk redeem 走 legacy NegRiskAdapter（USDC.e 出口），不走
-	// NegRiskCtfCollateralAdapter（pUSD 出口）。原因：CWIA wallet 通常已有
-	// CTF.setApprovalForAll(NegRiskAdapter,true) 但缺 setApprovalForAll(NegRiskCtfCollateralAdapter,
-	// true)；后者补不了 — DepositWalletFactory.proxy() 有 onlyOperator 修饰，
-	// EOA 无法旁路 relayer，而 relayer 又把 approve adapter 列入 allowlist 拒绝。
-	// 代价：wallet 收 USDC.e 而非 pUSD，调用方可自行后续 wrap。
-	nrAdapter := common.HexToAddress(internal.PolygonNegRiskAdapter)
-	usdcE := common.HexToAddress(internal.PolygonCollateral)
-
-	// NegRisk 按 conditionId 分组 → 同组合并到一笔 redeemPositions(amounts[])。
-	type nrGroup struct {
-		amounts map[int]*big.Int // outcomeIndex → intSize
-		maxIdx  int
-	}
-	nrGroups := map[string]*nrGroup{}
-	regularOps := []map[string]any{}
+	pusd := common.HexToAddress(internal.PolygonPUSD)
+	collAdapter := common.HexToAddress(internal.PolygonCtfCollateralAdapter)
+	negRiskAdapter := common.HexToAddress(internal.PolygonNegRiskCtfCollateralAdapter)
+	indexSets := []*big.Int{big.NewInt(1), big.NewInt(2)}
 
 	for i, pos := range positions {
 		if err := pos.ConditionID.Validate(); err != nil {
@@ -129,56 +131,37 @@ func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.
 		if pos.Size <= 0 {
 			return nil, fmt.Errorf("position %d: redeem requires positive Size", i)
 		}
-		intSize, err := toUnits6(pos.Size)
-		if err != nil {
-			return nil, fmt.Errorf("position %d size: %w", i, err)
-		}
-
-		if pos.NegRisk {
-			condHex := string(pos.ConditionID)
-			g, ok := nrGroups[condHex]
-			if !ok {
-				g = &nrGroup{amounts: map[int]*big.Int{}, maxIdx: -1}
-				nrGroups[condHex] = g
-			}
-			if existing, dup := g.amounts[pos.OutcomeIndex]; dup {
-				g.amounts[pos.OutcomeIndex] = new(big.Int).Add(existing, intSize)
-			} else {
-				g.amounts[pos.OutcomeIndex] = intSize
-			}
-			if pos.OutcomeIndex > g.maxIdx {
-				g.maxIdx = pos.OutcomeIndex
-			}
-			continue
-		}
-
-		// Regular：直调底层 CTF.redeemPositions(USDC.e, 0, conditionId, [1<<idx])，
-		// 与 v1.10.13 保持一致，Safe 收到 USDC.e（不是 pUSD）。
-		indexSet := new(big.Int).Lsh(big.NewInt(1), uint(pos.OutcomeIndex))
-		data, err := encodeRedeemCTF(usdcE, pos.ConditionID, []*big.Int{indexSet})
-		if err != nil {
-			return nil, fmt.Errorf("encode Regular redeem for position %d: %w", i, err)
-		}
-		regularOps = append(regularOps, callTxn(ctf, data))
 	}
 
-	proxyTxns := make([]map[string]any, 0, len(regularOps)+len(nrGroups))
-	proxyTxns = append(proxyTxns, regularOps...)
-
-	for condHex, g := range nrGroups {
-		amounts := make([]*big.Int, g.maxIdx+1)
-		for i := range amounts {
-			if a, ok := g.amounts[i]; ok {
-				amounts[i] = a
-			} else {
-				amounts[i] = big.NewInt(0)
-			}
+	// adapter 要 burn Safe 持有的 CTF position token，需 CTF.setApprovalForAll(adapter,true)。
+	// 把用到的 adapter 去重，各前置一笔（幂等：已 true 时链上 no-op），让 redeem 自洽。
+	adapterUsed := map[common.Address]bool{}
+	for _, pos := range positions {
+		if pos.NegRisk {
+			adapterUsed[negRiskAdapter] = true
+		} else {
+			adapterUsed[collAdapter] = true
 		}
-		data, err := encodeNegRiskRedeem(types.Keccak256(condHex), amounts)
+	}
+	proxyTxns := make([]map[string]any, 0, len(adapterUsed)+len(positions))
+	for adapter := range adapterUsed {
+		apprData, err := packSetApprovalForAllWithFlag(adapter, true)
 		if err != nil {
-			return nil, fmt.Errorf("encode NegRisk redeem for %s: %w", condHex, err)
+			return nil, fmt.Errorf("pack setApprovalForAll %s: %w", adapter.Hex(), err)
 		}
-		proxyTxns = append(proxyTxns, callTxn(nrAdapter, data))
+		proxyTxns = append(proxyTxns, callTxn(ctf, apprData))
+	}
+
+	for i, pos := range positions {
+		to := collAdapter
+		if pos.NegRisk {
+			to = negRiskAdapter
+		}
+		data, err := encodeRedeemCTF(pusd, pos.ConditionID, indexSets)
+		if err != nil {
+			return nil, fmt.Errorf("encode redeem for position %d: %w", i, err)
+		}
+		proxyTxns = append(proxyTxns, callTxn(to, data))
 	}
 
 	return c.executeGaslessBatch(proxyTxns, "Redeem Positions V2", "redeem-v2")
@@ -242,32 +225,3 @@ func encodeRedeemCTF(collateralToken common.Address, conditionID types.Keccak256
 	return data, nil
 }
 
-// encodeNegRiskRedeem 编码 NegRiskCtfCollateralAdapter.redeemPositions(bytes32 conditionId, uint256[] amounts)。
-// 短签名（2 参数），与 NegRiskAdapter 同 selector。adapter 内部 NegRiskAdapter→
-// unwrap WCol→wrap pUSD→给 Safe。amounts[i] = outcome i 持有数量（6 decimals）。
-func encodeNegRiskRedeem(conditionID types.Keccak256, amounts []*big.Int) ([]byte, error) {
-	selector := crypto.Keccak256([]byte("redeemPositions(bytes32,uint256[])"))[:4]
-	condHash := common.HexToHash(string(conditionID))
-
-	data := append([]byte{}, selector...)
-	data = append(data, condHash.Bytes()...)
-
-	// amounts 动态数组：offset = 0x40（2 个固定参数 * 0x20）
-	offset := big.NewInt(0x40)
-	offsetBytes := make([]byte, 32)
-	offset.FillBytes(offsetBytes)
-	data = append(data, offsetBytes...)
-
-	arrayLen := big.NewInt(int64(len(amounts)))
-	lenBytes := make([]byte, 32)
-	arrayLen.FillBytes(lenBytes)
-	data = append(data, lenBytes...)
-
-	for _, v := range amounts {
-		elemBytes := make([]byte, 32)
-		v.FillBytes(elemBytes)
-		data = append(data, elemBytes...)
-	}
-
-	return data, nil
-}

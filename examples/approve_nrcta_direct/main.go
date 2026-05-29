@@ -32,8 +32,8 @@ import (
 const (
 	defaultRPC    = "https://rpc-mainnet.matic.quiknode.pro"
 	ctfAddr       = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-	nrCtaAddr     = "0xAdA200001000ef00D07553cEE7006808F895c6F1"
-	ctaAddr       = "0xADa100874d00e3331D00F2007a9c336a65009718"
+	nrCtaAddr     = "0xadA2005600Dec949baf300f4C6120000bDB6eAab" // 2026-05 迁移后新地址（旧 0xAdA200001000…）
+	ctaAddr       = "0xAdA100Db00Ca00073811820692005400218FcE1f" // 2026-05 迁移后新地址（旧 0xADa100874d…）
 	nrAdapterAddr = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
 	pusdAddr      = "0xb24bf6c4d7f54bf996d24ef0c6f0023cf67c4137"
 	factoryAddr   = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"

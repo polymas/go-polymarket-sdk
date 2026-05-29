@@ -57,10 +57,16 @@ const (
 	PolygonCollateralOnramp = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
 	// CollateralOfframp：pUSD → USDC.e unwrap
 	PolygonCollateralOfframp = "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
-	// CtfCollateralAdapter：V2 Exchange 的 pUSD 桥
-	PolygonCtfCollateralAdapter = "0xADa100874d00e3331D00F2007a9c336a65009718"
-	// NegRiskCtfCollateralAdapter：V2 NegRisk Exchange 的 pUSD 桥
-	PolygonNegRiskCtfCollateralAdapter = "0xAdA200001000ef00D07553cEE7006808F895c6F1"
+	// CtfCollateralAdapter：V2 Exchange 的 pUSD 桥。
+	// 2026-05 迁移：Polymarket 把 V2 adapter 重新部署到新 vanity 地址，relayer 白名单
+	// 与官方 ts-sdk/py-sdk 一并切到新地址；旧部署链上仍在但 relayer 不再放行（提交即
+	// STATE_FAILED）。来源：Polymarket/ts-sdk packages/client/src/environments.ts +
+	// Polymarket/py-sdk src/polymarket/environments.py（两个驱动 gasless 的官方 SDK 一致）。
+	// 旧部署（deprecated，勿用）：0xADa100874d00e3331D00F2007a9c336a65009718
+	PolygonCtfCollateralAdapter = "0xAdA100Db00Ca00073811820692005400218FcE1f"
+	// NegRiskCtfCollateralAdapter：V2 NegRisk Exchange 的 pUSD 桥。
+	// 旧部署（deprecated，勿用）：0xAdA200001000ef00D07553cEE7006808F895c6F1
+	PolygonNegRiskCtfCollateralAdapter = "0xadA2005600Dec949baf300f4C6120000bDB6eAab"
 
 	// PolymarketAutoClaimer：Polymarket V2 后端自动 redeem 服务的合约地址。
 	// 用户通过 CTF.setApprovalForAll(PolymarketAutoClaimer, true/false) 开/关自动 claim。
