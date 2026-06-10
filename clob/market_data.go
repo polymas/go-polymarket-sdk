@@ -205,27 +205,21 @@ func (c *marketDataClientImpl) ResolveTickSize(tokenID string, userTickSize *typ
 	return minTickSize, nil
 }
 
-// GetNegRisk 获取代币的负风险状态
+// GetNegRisk 获取代币的负风险状态。
+//
+// 缓存命中时直接返回；未命中时走 baseClient.negRiskForToken 查询（共用
+// baseClient.negRisk 缓存）。仅当查询失败且无缓存时才返回 error——
+// negRiskForToken 内部把失败吞成 false，这里复查缓存以区分 "查到 = false"
+// 与 "查询失败"，保留原有的 error 契约。
 func (c *marketDataClientImpl) GetNegRisk(tokenID string) (bool, error) {
 	if negRisk, ok := c.baseClient.negRisk[tokenID]; ok {
 		return negRisk, nil
 	}
-
-	params := map[string]string{"token_id": tokenID}
-	var result struct {
-		NegRisk bool `json:"neg_risk"`
+	v := c.baseClient.negRiskForToken(tokenID)
+	if _, ok := c.baseClient.negRisk[tokenID]; !ok {
+		return false, fmt.Errorf("failed to get neg risk for token %s", tokenID)
 	}
-
-	resp, err := http.Get[struct {
-		NegRisk bool `json:"neg_risk"`
-	}](c.baseClient.baseURL, internal.GetNegRisk, params)
-	if err != nil {
-		return false, fmt.Errorf("failed to get neg risk: %w", err)
-	}
-	result = *resp
-
-	c.baseClient.negRisk[tokenID] = result.NegRisk
-	return result.NegRisk, nil
+	return v, nil
 }
 
 // GetOrderBook 获取代币的订单簿

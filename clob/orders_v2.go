@@ -253,7 +253,16 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 			orderArgs.Size = 5.0
 		}
 
-		signed, err := c.createSignedOrderV2(orderArgs, defaultTickSize, negRisk, orderTypes[i])
+		// type-3（POLY_1271）签名的 exchange 域取决于市场是否 NegRisk：
+		// 非 retry 时逐 token 查真实状态签对域；retry 时 negRisk 已被强制为
+		// true，作为整批兜底（首次按真实值仍签错的极端情况下再统一改走
+		// NegRisk Exchange 重签）。
+		perOrderNegRisk := negRisk
+		if !isRetryCall {
+			perOrderNegRisk = c.baseClient.negRiskForToken(orderArgs.TokenID)
+		}
+
+		signed, err := c.createSignedOrderV2(orderArgs, defaultTickSize, perOrderNegRisk, orderTypes[i])
 		if err != nil {
 			continue
 		}
@@ -309,7 +318,9 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	// V1 相同的 negRisk 重试流程
 	failedOrders := make([]int, 0)
 	for i, result := range resp {
-		if result.ErrorMsg != "" && strings.Contains(result.ErrorMsg, "invalid signature") {
+		// 签名域选错（含 1271 钱包的 "invalid POLY_1271 signature: ..."）时
+		// 改用 NegRisk Exchange 域重签重试，判据见 signatureRetryNeeded。
+		if signatureRetryNeeded(result.ErrorMsg) {
 			failedOrders = append(failedOrders, i)
 		} else if result.ErrorMsg != "" {
 			internal.LogError("V2 订单 %d 创建失败: %s", i+1, result.ErrorMsg)

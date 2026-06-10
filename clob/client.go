@@ -272,6 +272,30 @@ func (c *baseClient) GetAPICreds() *types.ApiCreds {
 	return c.deriveCreds
 }
 
+// negRiskForToken 查询单个 token 是否属于 NegRisk 市场，带 c.negRisk 缓存。
+//
+// V2 type-3（CWIA / POLY_1271）签名的 verifyingContract 域取决于此：
+// 非 NegRisk → ExchangeV2，NegRisk → NegRiskExchangeV2。批量下单必须逐 token
+// 取真实值，否则 NegRisk 市场的单子会按错误的 exchange 域签名，服务端报
+// "invalid POLY_1271 signature: signature does not match order hash"。
+//
+// 与 marketDataClientImpl.GetNegRisk 共用 baseClient.negRisk 缓存；查不到时
+// 退回 false，由调用方的 negRisk 重试兜底。
+func (c *baseClient) negRiskForToken(tokenID string) bool {
+	if v, ok := c.negRisk[tokenID]; ok {
+		return v
+	}
+	params := map[string]string{"token_id": tokenID}
+	resp, err := http.Get[struct {
+		NegRisk bool `json:"neg_risk"`
+	}](c.baseURL, internal.GetNegRisk, params)
+	if err != nil {
+		return false
+	}
+	c.negRisk[tokenID] = resp.NegRisk
+	return resp.NegRisk
+}
+
 // CreateOrDeriveAPICreds creates or derives API credentials
 func (c *baseClient) CreateOrDeriveAPICreds() (*types.ApiCreds, error) {
 	// Try to create first

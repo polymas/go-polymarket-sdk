@@ -336,7 +336,8 @@ func (c *orderClientImpl) postOrdersBatch(
 	for i, result := range resp {
 		if result.ErrorMsg != "" {
 			// 如果是签名错误，尝试使用negRisk=true重试（正常业务流程，不记录日志）
-			if strings.Contains(result.ErrorMsg, "invalid signature") {
+			// 判据见 signatureRetryNeeded（覆盖 1271 钱包 "invalid POLY_1271 ..."）。
+			if signatureRetryNeeded(result.ErrorMsg) {
 				failedOrders = append(failedOrders, i)
 			} else if strings.Contains(result.ErrorMsg, "the orderbook") && strings.Contains(result.ErrorMsg, "does not exist") {
 				// 订单簿不存在（token进入结算过期），正常情况，不打印详细日志，只统计
