@@ -123,6 +123,11 @@ func (ls *LocalSigner) SetV2Key(k *internal.V2RelayerKey) {
 	ls.v2Key = k
 }
 
+// HasV2Key 报告当前是否已注入可用的 V2 relayer key。
+func (ls *LocalSigner) HasV2Key() bool {
+	return ls.v2Key != nil && ls.v2Key.Key != ""
+}
+
 // SignRequest is a convenience method that directly uses method, path, body parameters for signing
 //
 // Args:

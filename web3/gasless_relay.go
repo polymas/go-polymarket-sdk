@@ -27,8 +27,51 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// executeGaslessBatch executes multiple transactions in a single batch via gasless relay
+// relayRevertRetryDelay 是 relayer 预模拟报 "batch would revert" 后，重建批次
+// 重试前的等待时长（约 2 个 Polygon 块）。预模拟 revert 常见于与他方并发操作
+// 同一钱包（如官方 auto-claim 服务）竞态、或模拟节点状态短暂滞后。
+// var 而非 const：测试中会调短。
+var relayRevertRetryDelay = 5 * time.Second
+
+// executeGaslessBatch executes multiple transactions in a single batch via gasless relay.
+//
+// 对两类可自愈的 relayer 错误自动重试一次（重试会重新取 nonce、重新签名）：
+//   - HTTP 401 invalid authorization：V2 key 失效或获取失败降级到了旧鉴权。
+//     作废 key 强制重新 SIWE 派生后重试。
+//   - HTTP 400 batch would revert：预模拟撞上瞬时状态（竞态/节点滞后），
+//     等 relayRevertRetryDelay 后重试。
 func (c *GaslessClient) executeGaslessBatch(
+	proxyTxns []map[string]interface{},
+	operationName string,
+	metadata string,
+) (*types.TransactionReceipt, error) {
+	receipt, err := c.executeGaslessBatchOnce(proxyTxns, operationName, metadata)
+	if err == nil {
+		return receipt, nil
+	}
+
+	var httpErr *sdkerrors.RelayHTTPError
+	if !errors.As(err, &httpErr) {
+		return receipt, err
+	}
+	switch {
+	case httpErr.Status == http.StatusUnauthorized:
+		log.Printf("[WARN] relayer 401（%s），作废 V2 key 重新派生后重试一次", httpErr.Body)
+		c.invalidateV2RelayerKey()
+		if kerr := c.ensureV2RelayerKey(context.Background()); kerr != nil {
+			return nil, fmt.Errorf("relayer 401 且重新派生 V2 key 失败: %w（原错误: %v）", kerr, err)
+		}
+	case httpErr.Status == http.StatusBadRequest && strings.Contains(httpErr.Body, "would revert"):
+		log.Printf("[WARN] relayer 预模拟 revert，%v 后重建批次重试一次", relayRevertRetryDelay)
+		time.Sleep(relayRevertRetryDelay)
+	default:
+		return receipt, err
+	}
+	return c.executeGaslessBatchOnce(proxyTxns, operationName, metadata)
+}
+
+// executeGaslessBatchOnce 单次构建并提交 gasless batch，不做错误重试。
+func (c *GaslessClient) executeGaslessBatchOnce(
 	proxyTxns []map[string]interface{},
 	operationName string,
 	metadata string,
@@ -145,7 +188,7 @@ func (c *GaslessClient) executeGaslessBatch(
 		if rayID := resp.Header.Get("cf-ray"); rayID != "" {
 			log.Printf("[ERROR] [Relayer调用 #%d] cf-ray=%s content-type=%s", callCount, rayID, resp.Header.Get("Content-Type"))
 		}
-		return nil, fmt.Errorf("relay returned error: HTTP %d: %s", resp.StatusCode, errorMsg)
+		return nil, &sdkerrors.RelayHTTPError{Status: resp.StatusCode, Body: errorMsg}
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&gaslessResp); err != nil {
@@ -721,13 +764,10 @@ func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			// GET /nonce 幂等；传输层错误（timeout、EOF、connection reset 等
+			// 多为代理/keep-alive 瞬断）一律重试，不区分错误类型。
 			lastErr = fmt.Errorf("failed to get nonce (attempt %d/%d): %w", attempt+1, maxRetries, err)
-			// Check if it's a timeout error - if so, retry
-			if ctx.Err() == context.DeadlineExceeded || strings.Contains(err.Error(), "timeout") {
-				continue
-			}
-			// For other errors, return immediately
-			return 0, lastErr
+			continue
 		}
 		defer resp.Body.Close()
 

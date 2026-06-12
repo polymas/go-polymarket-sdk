@@ -8,11 +8,16 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
+
+// v2KeyRetryBackoff 是 V2 relayer key 获取失败后的最小重试间隔。
+// 失败原因多为瞬时网络/代理问题，退避避免每个请求都触发一次 SIWE 全流程。
+const v2KeyRetryBackoff = 30 * time.Second
 
 // GaslessClient 是通过中继进行免gas交易的Web3客户端
 type GaslessClient struct {
@@ -29,8 +34,12 @@ type GaslessClient struct {
 	proxyFactoryABI *abi.ABI
 	// V2 relayer key 懒加载。首次发请求前 ensureV2RelayerKey 触发 SIWE 派生或读
 	// 本地缓存，成功后注入 localSigner.v2Key 让后续请求走 V2 双头。
-	v2KeyOnce sync.Once
-	v2KeyErr  error
+	// 获取失败不会永久降级：每次请求都可触发重试（带 v2KeyRetryBackoff 退避），
+	// /submit 401 时通过 invalidateV2RelayerKey 作废后重新派生。
+	v2KeyMu              sync.Mutex
+	v2KeyLastAttempt     time.Time
+	v2KeyLastErr         error
+	v2KeyDisabledLogOnce sync.Once
 	// relayer 调用统计
 	relayerCallCount int64 // 使用 atomic 操作，记录总调用次数
 }
@@ -172,30 +181,59 @@ func getNegRiskAdapterABI() (*abi.ABI, error) {
 }
 
 // ensureV2RelayerKey 懒加载 V2 relayer key 并注入到 localSigner。
-// 进程内仅跑一次（无论成功失败），失败会 log 并降级到旧 POLY_BUILDER_* / L1 路径。
+// 与旧版（sync.Once，一次失败永久降级到旧鉴权 → relayer 永远 401）不同：
+// 获取失败只影响本次请求，后续请求会在 v2KeyRetryBackoff 退避后自动重试，直到成功注入。
 // 设置环境变量 POLYMARKET_DISABLE_V2_RELAYER_KEY=1 可禁用 V2，强制走旧协议。
 func (c *GaslessClient) ensureV2RelayerKey(ctx context.Context) error {
-	c.v2KeyOnce.Do(func() {
-		if os.Getenv("POLYMARKET_DISABLE_V2_RELAYER_KEY") == "1" {
+	if os.Getenv("POLYMARKET_DISABLE_V2_RELAYER_KEY") == "1" {
+		c.v2KeyDisabledLogOnce.Do(func() {
 			log.Printf("[INFO] V2 relayer key 被环境变量禁用，继续走旧鉴权")
-			return
-		}
-		priv := c.signer.PrivateKey()
-		if priv == nil {
-			c.v2KeyErr = fmt.Errorf("signer has no private key")
-			log.Printf("[WARN] V2 relayer key 获取失败：%v；降级到旧鉴权", c.v2KeyErr)
-			return
-		}
-		k, err := internal.EnsureV2RelayerKey(ctx, priv, "")
-		if err != nil {
-			c.v2KeyErr = err
-			log.Printf("[WARN] V2 relayer key 获取失败：%v；降级到旧鉴权（NegRisk redeem 仍会 401）", err)
-			return
-		}
-		c.localSigner.SetV2Key(k)
-		log.Printf("[OK] V2 relayer key 已注入：%s (%s)", k.Key, k.Address)
-	})
-	return c.v2KeyErr
+		})
+		return nil
+	}
+
+	c.v2KeyMu.Lock()
+	defer c.v2KeyMu.Unlock()
+
+	if c.localSigner.HasV2Key() {
+		return nil
+	}
+	// 退避窗口内不重复打 SIWE，直接返回上次错误。
+	if c.v2KeyLastErr != nil && time.Since(c.v2KeyLastAttempt) < v2KeyRetryBackoff {
+		return c.v2KeyLastErr
+	}
+	c.v2KeyLastAttempt = time.Now()
+
+	priv := c.signer.PrivateKey()
+	if priv == nil {
+		c.v2KeyLastErr = fmt.Errorf("signer has no private key")
+		log.Printf("[WARN] V2 relayer key 获取失败：%v；本次降级到旧鉴权", c.v2KeyLastErr)
+		return c.v2KeyLastErr
+	}
+	k, err := internal.EnsureV2RelayerKey(ctx, priv, "")
+	if err != nil {
+		c.v2KeyLastErr = err
+		log.Printf("[WARN] V2 relayer key 获取失败：%v；本次降级到旧鉴权（relayer 会 401），%v 后允许重试", err, v2KeyRetryBackoff)
+		return c.v2KeyLastErr
+	}
+	c.v2KeyLastErr = nil
+	c.localSigner.SetV2Key(k)
+	log.Printf("[OK] V2 relayer key 已注入：%s (%s)", k.Key, k.Address)
+	return nil
+}
+
+// invalidateV2RelayerKey 作废当前 V2 relayer key（内存注入 + 磁盘缓存），
+// 下次 ensureV2RelayerKey 会立即重新走 SIWE 派生（不受退避窗口限制）。
+// 用于 /submit 返回 401 invalid authorization 时自愈。
+func (c *GaslessClient) invalidateV2RelayerKey() {
+	c.v2KeyMu.Lock()
+	defer c.v2KeyMu.Unlock()
+	c.localSigner.SetV2Key(nil)
+	c.v2KeyLastErr = nil
+	c.v2KeyLastAttempt = time.Time{}
+	if path := internal.DefaultV2KeyCachePath(string(c.baseAddress)); path != "" {
+		_ = os.Remove(path)
+	}
 }
 
 func getProxyFactoryABI() (*abi.ABI, error) {

@@ -191,3 +191,14 @@ func (e *RelayFailedError) Error() string {
 	}
 	return fmt.Sprintf("交易提交失败 (state: %s): %s", e.State, e.Message)
 }
+
+// RelayHTTPError 表示 Gasless Relayer 业务端点（/submit 等）返回非 200 的 HTTP 响应。
+// 上层可通过 errors.As(err, &httpErr) 拿到状态码做针对性处理（401 重新鉴权、429 限流等）。
+type RelayHTTPError struct {
+	Status int    // HTTP 状态码
+	Body   string // 响应体（可能被截断）
+}
+
+func (e *RelayHTTPError) Error() string {
+	return fmt.Sprintf("relay returned error: HTTP %d: %s", e.Status, e.Body)
+}
