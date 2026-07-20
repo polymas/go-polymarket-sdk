@@ -7,14 +7,19 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 const (
-	legacyOwner  = "0x727C86DdAB8e4B048cE5b9319c50011f707ffFAa"
-	legacyWallet = "0xFC60457b6edaEAEaac856365bd38D2871b24C406"
-	wrongBeacon  = "0xA1A41DB17F90220BFe42FA725847257d8ac21D70"
+	legacyOwner        = "0x727C86DdAB8e4B048cE5b9319c50011f707ffFAa"
+	legacyWallet       = "0xFC60457b6edaEAEaac856365bd38D2871b24C406"
+	knownBeaconOwner   = "0xe53a298f46d6cc1e2c5a5B428aC8d0d526C3c827"
+	knownBeaconFactory = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
+	knownBeacon        = "0x7A18EDfe055488A3128f01F563e5B479D92ffc3a"
+	knownBeaconWallet  = "0x9459f742585ed608259352ccac473338131042fd"
+	wrongBeaconWallet  = "0x37747DD591387c1ED529c70BCd6E6816c84A2941"
 )
 
 func depositWalletConfig() (common.Address, common.Address) {
@@ -40,8 +45,38 @@ func TestLegacyUUPSDepositWalletResolution(t *testing.T) {
 	if !strings.EqualFold(got.Hex(), legacyWallet) {
 		t.Fatalf("want legacy UUPS %s, got %s", legacyWallet, got.Hex())
 	}
-	if strings.EqualFold(got.Hex(), wrongBeacon) {
-		t.Fatalf("returned wrong Beacon address %s", got.Hex())
+}
+
+func TestBeaconDepositWalletKnownVector(t *testing.T) {
+	got, err := deriveBeaconDepositWallet(
+		common.HexToAddress(knownBeaconOwner),
+		common.HexToAddress(knownBeaconFactory),
+		common.HexToAddress(knownBeacon),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(got.Hex(), knownBeaconWallet) {
+		t.Fatalf("want Beacon wallet %s, got %s", knownBeaconWallet, got.Hex())
+	}
+	if strings.EqualFold(got.Hex(), wrongBeaconWallet) {
+		t.Fatalf("returned v1.12.4 incorrectly derived address %s", got.Hex())
+	}
+}
+
+func TestSoladyCloneHashAddsImmutableArgsLengthToBeaconPrefix(t *testing.T) {
+	immutableArgs := make([]byte, 64)
+	got := soladyCloneHash(erc1967BeaconPrefix, immutableArgs)
+
+	// 0x40 << 56 overlaps a set bit in the Beacon prefix. Solady uses addition,
+	// so the overlap must carry; bitwise OR produces the v1.12.4 bug.
+	want := crypto.Keccak256Hash(common.FromHex("0x6100923d8160233d3973"), immutableArgs)
+	orHash := crypto.Keccak256Hash(common.FromHex("0x6100523d8160233d3973"), immutableArgs)
+	if got != want {
+		t.Fatalf("want Add-based clone hash %s, got %s", want.Hex(), got.Hex())
+	}
+	if got == orHash {
+		t.Fatalf("clone hash unexpectedly uses OR semantics: %s", got.Hex())
 	}
 }
 

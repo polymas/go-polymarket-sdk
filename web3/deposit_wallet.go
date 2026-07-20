@@ -46,7 +46,8 @@ func depositWalletImmutableArgs(owner, factory common.Address) ([]byte, error) {
 
 func soladyCloneHash(prefixHex string, immutableArgs []byte, parts ...[]byte) common.Hash {
 	prefix := new(big.Int).SetBytes(common.FromHex("0x" + prefixHex))
-	prefix.Or(prefix, new(big.Int).Lsh(big.NewInt(int64(len(immutableArgs))), 56))
+	argLength := new(big.Int).Lsh(big.NewInt(int64(len(immutableArgs))), 56)
+	prefix.Add(prefix, argLength)
 	prefixBytes := make([]byte, 10)
 	prefix.FillBytes(prefixBytes)
 	initCode := append([]byte{}, prefixBytes...)
