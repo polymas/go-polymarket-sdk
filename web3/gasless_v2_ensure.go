@@ -16,9 +16,9 @@ import (
 // 全程幂等：
 //  1. Safe 上有 USDC.e → 自动 wrap 成 pUSD（顺手补 USDC.e→CollateralOnramp 的 approve 如果没到位）
 //     Safe 上没 USDC.e → 跳过 wrap
-//  2. pUSD 对 V2 trading 必备 spender（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter）
+//  2. pUSD 对 V2 trading 必备 spender（V2 Exchange / V2 NegRisk Exchange）
 //     每个未授权的 → 补 approve(MAX)
-//  3. CTF 对 V2 trading 必备 operator（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter）
+//  3. CTF 对 V2 trading 必备 operator（V2 Exchange / V2 NegRisk Exchange）
 //     每个未 isApprovedForAll → setApprovalForAll(true)
 //
 // 注意：CtfCollateralAdapter / NegRiskCtfCollateralAdapter 这两个 adapter 不在 Polymarket
@@ -130,7 +130,6 @@ func pusdSpendersV2() []common.Address {
 	return []common.Address{
 		common.HexToAddress(internal.PolygonExchangeV2),
 		common.HexToAddress(internal.PolygonNegRiskExchangeV2),
-		common.HexToAddress(internal.PolygonNegRiskAdapter),
 	}
 }
 
@@ -138,10 +137,6 @@ func ctfOperatorsV2() []common.Address {
 	return []common.Address{
 		common.HexToAddress(internal.PolygonExchangeV2),
 		common.HexToAddress(internal.PolygonNegRiskExchangeV2),
-		// NegRisk redeem 直调 NegRiskAdapter.redeemPositions(...) 时，adapter 内部
-		// 会 ctf.safeBatchTransferFrom(safe → adapter)，因此 Safe 必须事先把
-		// NegRiskAdapter 设为 ERC1155 operator。
-		common.HexToAddress(internal.PolygonNegRiskAdapter),
 	}
 }
 
@@ -155,8 +150,8 @@ func (c *GaslessClient) readV2State(ctx context.Context, safe common.Address) (*
 	onramp := common.HexToAddress(internal.PolygonCollateralOnramp)
 
 	state := &v2State{
-		pusdAllow: make(map[common.Address]*big.Int, 3),
-		ctfAppr:   make(map[common.Address]bool, 3),
+		pusdAllow: make(map[common.Address]*big.Int, 2),
+		ctfAppr:   make(map[common.Address]bool, 2),
 	}
 	var (
 		wg       sync.WaitGroup

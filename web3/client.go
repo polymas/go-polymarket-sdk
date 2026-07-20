@@ -36,17 +36,18 @@ type Client interface {
 // baseClient 是Polymarket的基础Web3客户端
 // 不允许直接导出，只能通过 NewClient 创建
 type baseClient struct {
-	clients         []*ethclient.Client // 多个 RPC 客户端，支持轮询和故障转移
-	currentIndex    int64              // 当前使用的客户端索引（使用 atomic 操作）
-	clientMu        sync.RWMutex        // 保护 clients 切片的并发访问
-	privateKey      *ecdsa.PrivateKey
-	signer          *signing.Signer
-	signatureType   types.SignatureType
-	chainID         types.ChainID
-	baseAddress     types.EthAddress
-	proxyAddress    types.EthAddress
-	exchangeAddress common.Address
-	exchangeABI     *abi.ABI
+	clients          []*ethclient.Client // 多个 RPC 客户端，支持轮询和故障转移
+	currentIndex     int64               // 当前使用的客户端索引（使用 atomic 操作）
+	clientMu         sync.RWMutex        // 保护 clients 切片的并发访问
+	privateKey       *ecdsa.PrivateKey
+	signer           *signing.Signer
+	signatureType    types.SignatureType
+	chainID          types.ChainID
+	baseAddress      types.EthAddress
+	proxyAddress     types.EthAddress
+	exchangeAddress  common.Address
+	exchangeABI      *abi.ABI
+	depositWalletRPC *depositWalletRPC // test seam; nil uses the configured RPC pool
 }
 
 // NewClient 创建新的基础Web3客户端
@@ -511,57 +512,16 @@ func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAdd
 	return types.EthAddress(proxyAddr.Hex()), nil
 }
 
-// getCWIAProxyAddress 获取给定 EOA 对应的 Polymarket DepositWallet 代理地址。
-//
-// 派生方式：调用 DepositWalletFactory.predictWalletAddress(impl, id)，其中
-//   - impl = factory.implementation()（实时读取，避免硬编码失效）
-//   - id   = bytes32(uint256(uint160(owner)))（Polymarket 后端约定）
-//
-// CREATE2 由工厂内部按 LibClone.predictDeterministicAddressERC1967 计算，
-// 本地复刻收益不大且需要严格匹配 solady 实现，因此这里直接走 RPC（与
-// PolyProxy / Safe 两条路径一致）。
+// getCWIAProxyAddress 按官方双架构算法解析 Deposit Wallet。地址在本地派生；
+// RPC 只用于查询 BEACON() 和确认旧 UUPS 地址是否已经部署。
 func (c *baseClient) getCWIAProxyAddress(owner types.EthAddress) (types.EthAddress, error) {
-	factoryAddr := common.HexToAddress(internal.PolygonDepositWalletFactory)
-	factoryABI, err := getDepositWalletFactoryABI()
+	rpc := depositWalletRPC{beacon: c.depositWalletFactoryBeacon, code: c.codeAtWithRetry}
+	if c.depositWalletRPC != nil {
+		rpc = *c.depositWalletRPC
+	}
+	proxy, err := resolveDepositWallet(context.Background(), common.HexToAddress(string(owner)), common.HexToAddress(internal.PolygonDepositWalletFactory), common.HexToAddress(internal.PolygonDepositWalletImpl), rpc)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse deposit wallet factory ABI: %w", err)
-	}
-
-	// 1) 读取当前 implementation
-	implCall, err := factoryABI.Pack("implementation")
-	if err != nil {
-		return "", fmt.Errorf("failed to pack implementation call: %w", err)
-	}
-	implRes, err := c.callContractWithRetry(context.Background(), ethereum.CallMsg{
-		To: &factoryAddr, Data: implCall,
-	}, nil)
-	var impl common.Address
-	if err == nil {
-		err = factoryABI.UnpackIntoInterface(&impl, "implementation", implRes)
-	}
-	if err != nil || (impl == common.Address{}) {
-		// 兜底：使用已知默认 impl（避免 RPC 暂时不可用导致整个流程阻塞）
-		impl = common.HexToAddress(internal.PolygonDepositWalletImpl)
-	}
-
-	// 2) predictWalletAddress(impl, bytes32(owner))
-	ownerAddr := common.HexToAddress(string(owner))
-	var idArg [32]byte
-	copy(idArg[12:], ownerAddr.Bytes())
-
-	predictCall, err := factoryABI.Pack("predictWalletAddress", impl, idArg)
-	if err != nil {
-		return "", fmt.Errorf("failed to pack predictWalletAddress: %w", err)
-	}
-	res, err := c.callContractWithRetry(context.Background(), ethereum.CallMsg{
-		To: &factoryAddr, Data: predictCall,
-	}, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to call predictWalletAddress: %w", err)
-	}
-	var proxy common.Address
-	if err := factoryABI.UnpackIntoInterface(&proxy, "predictWalletAddress", res); err != nil {
-		return "", fmt.Errorf("failed to unpack predictWalletAddress: %w", err)
+		return "", err
 	}
 	return types.EthAddress(proxy.Hex()), nil
 }

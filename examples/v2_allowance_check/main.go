@@ -35,20 +35,20 @@ const ctfABI = `[
 
 // balRow / allowRow / ctfRow 都是一条要并发查询+稍后按定义顺序打印的探针。
 type balRow struct {
-	label  string
-	dec    int
-	token  common.Address
-	value  *big.Int
-	err    error
+	label string
+	dec   int
+	token common.Address
+	value *big.Int
+	err   error
 }
 
 type allowRow struct {
-	section  string // "USDC.e" / "pUSD"；section 头按首次出现打印一次
-	label    string
-	token    common.Address
-	spender  common.Address
-	value    *big.Int
-	err      error
+	section string // "USDC.e" / "pUSD"；section 头按首次出现打印一次
+	label   string
+	token   common.Address
+	spender common.Address
+	value   *big.Int
+	err     error
 }
 
 type ctfRow struct {
@@ -124,7 +124,8 @@ func main() {
 		{section: "USDC.e", label: "CollateralOnramp     ", token: usdc, spender: onramp},
 		{section: "pUSD", label: "V2 Exchange          ", token: pusd, spender: exV2},
 		{section: "pUSD", label: "V2 NegRisk Exchange  ", token: pusd, spender: exNRV2},
-		{section: "pUSD", label: "NegRiskAdapter       ", token: pusd, spender: nrAdapter},
+		// Legacy/read-only: retained to diagnose stale approvals created before 2026-07-17.
+		{section: "pUSD", label: "NegRiskAdapter(legacy)", token: pusd, spender: nrAdapter},
 		{section: "pUSD", label: "CtfCollateralAdapter ", token: pusd, spender: ctfAdapter},
 		{section: "pUSD", label: "NegRiskCtfCollAdapter", token: pusd, spender: nrCtfAdapter},
 	}

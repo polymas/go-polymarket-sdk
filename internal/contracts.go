@@ -24,13 +24,13 @@ const (
 	PolygonCollateral = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 	// ConditionalTokens 合约地址
 	PolygonConditionalTokens = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-	// NegRiskAdapter 合约地址
+	// PolygonNegRiskAdapter is retired (2026-07-17). It is retained only for
+	// decoding historical transactions/events. Never use it as a V2 call target,
+	// ERC-20 spender, or ERC-1155 operator.
 	PolygonNegRiskAdapter = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
-	// WrappedCollateral：NegRiskAdapter 内部 wrap 出来的 USDC.e ERC20，
+	// Legacy WrappedCollateral：旧 NegRiskAdapter 内部 wrap 出来的 USDC.e ERC20。
 	// NegRisk position token 在 CTF 里的 collateralToken 实际是它（不是 USDC.e）。
-	// 直接走 CTF.redeemPositions(wcol, ...) 可绕开 NegRiskAdapter.redeemPositions
-	// （后者在 relayer 白名单外，会被 STATE_FAILED 拒）。
-	// 来源：eth_call NegRiskAdapter.wcol() = 0x3a3b...02e2。
+	// 仅用于历史 V1 状态/事件解释；V2 写路径不得使用。
 	PolygonNegRiskWrappedCollateral = "0x3A3BD7bb9528E159577F7C2e685CC81A765002E2"
 	// ProxyFactory 合约地址
 	PolygonProxyFactory = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052"
@@ -42,9 +42,11 @@ const (
 	// = 0x58cA…b1eB（与样例匹配）。如未来 Polymarket 升级 impl，本 SDK 会通过
 	// 调用 factory.implementation() 自动获取最新 impl，无需改代码。
 	PolygonDepositWalletFactory = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
-	// 当前默认 DepositWallet 实现合约地址。仅作 RPC 故障时的兜底——派生流程
-	// 优先调用 factory.implementation() 取实时值。
+	// Legacy UUPS DepositWallet implementation. It is part of the deterministic
+	// address formula and must not be replaced by the Beacon implementation.
 	PolygonDepositWalletImpl = "0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB"
+	// Beacon used by new ERC-1967 BeaconProxy Deposit Wallet clones.
+	PolygonDepositWalletBeacon = "0x7A18EDfe055488A3128f01F563e5B479D92ffc3a"
 
 	// V2 Exchange 合约地址（2026-04-28 切换后启用）
 	// 参考：https://docs.polymarket.com/resources/contracts

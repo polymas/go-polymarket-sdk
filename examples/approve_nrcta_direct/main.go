@@ -30,14 +30,13 @@ import (
 )
 
 const (
-	defaultRPC    = "https://rpc-mainnet.matic.quiknode.pro"
-	ctfAddr       = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-	nrCtaAddr     = "0xadA2005600Dec949baf300f4C6120000bDB6eAab" // 2026-05 迁移后新地址（旧 0xAdA200001000…）
-	ctaAddr       = "0xAdA100Db00Ca00073811820692005400218FcE1f" // 2026-05 迁移后新地址（旧 0xADa100874d…）
-	nrAdapterAddr = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
-	pusdAddr      = "0xb24bf6c4d7f54bf996d24ef0c6f0023cf67c4137"
-	factoryAddr   = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
-	chainID       = 137
+	defaultRPC  = "https://rpc-mainnet.matic.quiknode.pro"
+	ctfAddr     = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+	nrCtaAddr   = "0xadA2005600Dec949baf300f4C6120000bDB6eAab" // 2026-05 迁移后新地址（旧 0xAdA200001000…）
+	ctaAddr     = "0xAdA100Db00Ca00073811820692005400218FcE1f" // 2026-05 迁移后新地址（旧 0xADa100874d…）
+	pusdAddr    = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+	factoryAddr = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
+	chainID     = 137
 )
 
 func main() {
@@ -79,13 +78,12 @@ func main() {
 	}
 	fmt.Printf("wallet.nonce(): %d\n", walletNonce)
 
-	// 5 笔 approve calls — 与 ApproveAdaptersV2 同
+	// 4 笔 approve calls — 与 ApproveAdaptersV2 同。旧 NegRiskAdapter 已退役。
 	calls := []signing.CWIACall{
 		packApproveMaxCall(pusdAddr, ctaAddr),
 		packApproveMaxCall(pusdAddr, nrCtaAddr),
 		packSetApprovalForAllCall(ctfAddr, ctaAddr),
 		packSetApprovalForAllCall(ctfAddr, nrCtaAddr),
-		packSetApprovalForAllCall(ctfAddr, nrAdapterAddr),
 	}
 
 	deadline := big.NewInt(time.Now().Add(10 * time.Minute).Unix())
@@ -130,7 +128,7 @@ func main() {
 	if baseFee == nil {
 		baseFee = big.NewInt(50_000_000_000) // 50 gwei fallback
 	}
-	tipCap := big.NewInt(50_000_000_000)                              // 50 gwei tip
+	tipCap := big.NewInt(50_000_000_000) // 50 gwei tip
 	maxFee := new(big.Int).Add(new(big.Int).Mul(baseFee, big.NewInt(2)), tipCap)
 
 	estGas, err := ec.EstimateGas(ctx, ethereumCallMsg(eoa, factory, calldata))

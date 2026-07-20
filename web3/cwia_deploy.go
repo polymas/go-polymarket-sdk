@@ -152,6 +152,12 @@ func (c *GaslessClient) submitGaslessSimple(body interface{}, label string) (*ty
 		state, _ := gaslessResp["state"].(string)
 		log.Printf("[INFO] [Relayer调用 #%d] %s 已入队 (txID=%s, state=%s)，未返回交易 hash",
 			callCount, label, txID, state)
+		if txID == "" {
+			return nil, fmt.Errorf("WALLET-CREATE returned neither transactionHash nor transactionID")
+		}
+		if err := c.waitForRelayerConfirmed(txID); err != nil {
+			return nil, fmt.Errorf("wait WALLET-CREATE confirmation: %w", err)
+		}
 		return nil, nil
 	}
 
@@ -159,6 +165,11 @@ func (c *GaslessClient) submitGaslessSimple(body interface{}, label string) (*ty
 	receipt, err := c.waitForTransactionReceipt(common.HexToHash(txHashStr))
 	if err != nil {
 		return nil, fmt.Errorf("wait for receipt: %w", err)
+	}
+	if txID, _ := gaslessResp["transactionID"].(string); txID != "" {
+		if err := c.waitForRelayerConfirmed(txID); err != nil {
+			return nil, fmt.Errorf("wait WALLET-CREATE confirmation: %w", err)
+		}
 	}
 	return receipt, nil
 }

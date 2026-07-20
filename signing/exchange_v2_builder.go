@@ -30,7 +30,7 @@ type V2OrderData struct {
 	MakerAmount   string              // decimal maker amount
 	TakerAmount   string              // decimal taker amount
 	Side          V2OrderSide         //
-	SignatureType types.SignatureType // 0 EOA / 1 Proxy / 2 Safe
+	SignatureType types.SignatureType // 0 EOA / 1 Proxy / 2 Safe / 3 POLY_1271
 	TimestampMS   int64               // creation time in ms, 0 = now
 	Metadata      [32]byte            // optional bytes32, zero when unused
 	Builder       [32]byte            // builder attribution bytes32, zero = no builder
@@ -62,13 +62,14 @@ type V2SignedOrder struct {
 //
 // chainID:          typically 137 (Polygon mainnet) — use types.Polygon converted to *big.Int.
 // exchangeAddress:  V2 Exchange (internal.PolygonExchangeV2) or V2 NegRisk Exchange
-//                   (internal.PolygonNegRiskExchangeV2) wrapped via common.HexToAddress.
+//
+//	(internal.PolygonNegRiskExchangeV2) wrapped via common.HexToAddress.
 //
 // 签名分支（按 V2OrderData.SignatureType）：
 //   - 0/1/2 (EOA / PolyProxy / Safe)  : 标准 EIP-712 ECDSA，65 字节签名
 //   - 3     (POLY_1271 / CWIA)         : solady ERC-1271 嵌套签名，~326 字节
-//                                        包含 inner_sig || appDomainSep || contents_hash
-//                                        || ORDER_TYPE_STRING || uint16(len)
+//     包含 inner_sig || appDomainSep || contents_hash
+//     || ORDER_TYPE_STRING || uint16(len)
 func BuildSignedV2Order(
 	privateKey *ecdsa.PrivateKey,
 	data *V2OrderData,
@@ -212,6 +213,9 @@ func buildV2Order(d *V2OrderData) (*V2Order, error) {
 	signerAddr := makerAddr
 	if d.Signer != "" {
 		signerAddr = common.HexToAddress(d.Signer)
+	}
+	if d.SignatureType == types.CWIASignatureType && makerAddr != signerAddr {
+		return nil, fmt.Errorf("POLY_1271 requires maker and signer to be the same Deposit Wallet (maker=%s signer=%s)", makerAddr.Hex(), signerAddr.Hex())
 	}
 
 	tokenID, ok := new(big.Int).SetString(d.TokenID, 10)

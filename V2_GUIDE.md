@@ -48,7 +48,7 @@ Polymarket V2（2026-04-28 切换）下，collateral 从 USDC.e 改为 pUSD，�
 只读检查 9 项 V2 trading 前置条件（11 笔 eth_call 并发，~300ms）：
 - USDC.e 余额（>0 视为待 wrap）
 - USDC.e → CollateralOnramp allowance
-- pUSD → 5 个 spender allowance（V2 Exchange / V2 NegRisk Exchange / NegRiskAdapter / CtfCollateralAdapter / NegRiskCtfCollateralAdapter）
+- pUSD → 4 个 spender allowance（V2 Exchange / V2 NegRisk Exchange / CtfCollateralAdapter / NegRiskCtfCollateralAdapter）；旧 NegRiskAdapter 仅供历史只读排查
 - CTF.isApprovedForAll → 4 个 operator（V2 Exchange / V2 NegRisk Exchange / 两个 adapter）
 
 返回 `ready=true` 时 `EnsureV2Ready()` 是 no-op；`false` 时 `missing[]` 列出待修复项，可直接展示给用户。
@@ -57,7 +57,7 @@ Polymarket V2（2026-04-28 切换）下，collateral 从 USDC.e 改为 pUSD，�
 
 幂等"缺啥补啥"：
 1. Safe 有 USDC.e → 精确量 approve `CollateralOnramp` + wrap → pUSD（无 USDC.e 跳过）
-2. pUSD 5 个 spender allowance 缺哪补哪 (`approve(MAX)`)
+2. pUSD 4 个有效 V2 spender allowance 缺哪补哪 (`approve(MAX)`)
 3. CTF 4 个 operator approval 缺哪补哪 (`setApprovalForAll(true)`)
 
 所有需要的 op 打包成**一笔 gasless batch**：

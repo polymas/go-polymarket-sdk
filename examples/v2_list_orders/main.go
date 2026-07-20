@@ -41,7 +41,7 @@ func main() {
 	} else {
 		fmt.Printf("共 %d 个活跃订单\n", len(orders))
 		for i, o := range orders {
-			fmt.Printf("  [%d] id=%s\n      market=%s  asset=%s\n      side=%s price=%s size=%s matched=%s status=%s type=%s\n",
+			fmt.Printf("  [%d] id=%s\n      market=%s  asset=%s\n      side=%s price=%v size=%v matched=%v status=%s type=%s\n",
 				i+1, o.OrderID, o.ConditionID, truncID(o.TokenID), o.Side, o.Price, o.OriginalSize, o.SizeMatched, o.Status, o.OrderType)
 		}
 	}

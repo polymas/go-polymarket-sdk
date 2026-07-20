@@ -128,7 +128,7 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 	} else {
 		log.Printf("[DEBUG] [Relayer调用 #%d] 请求体: %s", callCount, string(bodyJSON))
 	}
-	
+
 	// Debug: log encoded proxy data length and first bytes
 	var bodyMap map[string]interface{}
 	if err := json.Unmarshal(bodyJSON, &bodyMap); err == nil {
@@ -137,7 +137,7 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 			if len(encodedTxnHex) < previewLen {
 				previewLen = len(encodedTxnHex)
 			}
-			log.Printf("[DEBUG] [Relayer调用 #%d] Proxy data length: %d bytes, first %d chars: %s", 
+			log.Printf("[DEBUG] [Relayer调用 #%d] Proxy data length: %d bytes, first %d chars: %s",
 				callCount, len(encodedTxnHex), previewLen, encodedTxnHex[:previewLen])
 		}
 	}
@@ -288,7 +288,39 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 	}
 
 	log.Printf("[OK] [Relayer调用 #%d] 交易已确认，区块号: %d", callCount, receipt.BlockNumber)
+	if transactionID, _ := gaslessResp["transactionID"].(string); transactionID != "" {
+		if err := c.waitForRelayerConfirmed(transactionID); err != nil {
+			return nil, err
+		}
+	}
 	return receipt, nil
+}
+
+// waitForRelayerConfirmed deliberately does not accept STATE_MINED. Deposit
+// Wallet registry updates may lag the chain receipt, and dependent WALLET
+// batches are only safe after the relayer reports STATE_CONFIRMED.
+func (c *GaslessClient) waitForRelayerConfirmed(transactionID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), internal.TransactionWaitTimeout)
+	defer cancel()
+	for {
+		txns, err := c.GetRelayerTransaction(transactionID)
+		if err != nil {
+			return fmt.Errorf("poll relayer transaction %s for STATE_CONFIRMED: %w", transactionID, err)
+		}
+		if len(txns) > 0 {
+			switch txns[0].State {
+			case "STATE_CONFIRMED":
+				return nil
+			case "STATE_FAILED", "STATE_INVALID":
+				return fmt.Errorf("relayer transaction %s reached terminal state %s", transactionID, txns[0].State)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for relayer transaction %s STATE_CONFIRMED: %w", transactionID, ctx.Err())
+		case <-time.After(internal.TransactionDelay):
+		}
+	}
 }
 
 // formatMapAsJSON formats a map as JSON string for logging

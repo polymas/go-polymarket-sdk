@@ -507,8 +507,8 @@ go test -cover ./...
   - `SafeSignatureType` (2)：Gnosis Safe，工厂 `0xaacF…541b`，派生函数 `computeProxyAddress(address)`。
   - `CWIASignatureType` (3)：新版 Polymarket DepositWallet（ERC-7760 / ERC-1967 + immutable args，新注册账号默认走这套）。
     - 工厂：`0x00000000000Fb5C9ADea0298D729A0CB3823Cc07`
-    - 当前 impl：`0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB`（SDK 通过 `factory.implementation()` 实时读取，impl 升级后不需要改代码）
-    - 派生函数：`predictWalletAddress(impl, bytes32(uint160(owner)))`
+    - Legacy UUPS impl：`0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB`；新钱包通过工厂 `BEACON()` 获取 Beacon 地址
+    - 地址解析：本地分别派生 legacy UUPS 与新 BeaconProxy CREATE2 地址；若旧 UUPS 已部署则始终保留旧地址，只有未部署时才采用工厂 `BEACON()` 对应的新地址。
     - 与老两类型并存，老账号不迁移；签名仍走 EIP-1271（Exchange 调用代理 `isValidSignature`）。
     - **链上 gasless（v1.10.0+）**：`signing.SignCWIABatch` + `web3.BuildCWIABatchCalldata` 已对照真实链上 tx 字节级匹配，可直接广播 `DepositWalletFactory.proxy(Batch[],bytes[])`（需 operator 角色）。
     - **走 Polymarket relayer 提交（v1.10.1+）**：`NewGaslessClient(..., CWIASignatureType, ...)` 已可创建；高层方法（SplitPosition / MergePositions / RedeemPositions / SetAutoClaim 等）会自动走 CWIA 分支。`CWIARelayBody` 已对照官方 [py-builder-relayer-client](https://github.com/Polymarket/py-builder-relayer-client) 中 `DepositWalletBatchRequest.to_dict()` 校准，包含 `depositWalletParams` 嵌套结构（depositWallet/deadline/calls）。
