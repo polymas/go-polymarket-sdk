@@ -276,6 +276,8 @@ orderArgs := types.OrderArgs{
     Price:   0.5,
     Size:    10.0,
     Side:    types.OrderSideBUY,
+    // 必填；可来自业务配置、Gamma/WS，或提前调用 clobClient.GetTickSize(tokenID)
+    TickSize: types.TickSize0_01,
 }
 
 // 提交订单
@@ -286,6 +288,21 @@ if err != nil {
 
 fmt.Printf("订单ID: %s\n", response.OrderID)
 ```
+
+批量下单时每笔订单都必须显式携带自己的 `TickSize`，同一批可以不同：
+
+```go
+orders := []types.OrderArgs{
+    {TokenID: "token-a", Price: 0.01, Size: 5, Side: types.OrderSideBUY, TickSize: types.TickSize0_01},
+    {TokenID: "token-b", Price: 0.001, Size: 5, Side: types.OrderSideBUY, TickSize: types.TickSize0_001},
+}
+responses, err := clobClient.CreateAndPostOrders(orders, []types.OrderType{
+    types.OrderTypeGTC,
+    types.OrderTypeGTC,
+})
+```
+
+`TickSize` 只用于 SDK 的本地校验、金额计算和签名，不会作为额外字段发给官方 `/orders`；官方请求格式中没有该字段。业务层可用配置、Gamma/WS 数据，或在非热路径显式调用 `GetTickSize(tokenID)` 准备它。
 
 ### 批量获取市场数据
 

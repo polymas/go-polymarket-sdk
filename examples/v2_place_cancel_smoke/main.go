@@ -57,14 +57,19 @@ func main() {
 		log.Fatalf("GetTime: %v", err)
 	}
 	fmt.Printf("server time: %s (skew %v)\n", t.UTC().Format(time.RFC3339), time.Since(t).Truncate(time.Second))
+	tickSize, err := client.GetTickSize(tokenID)
+	if err != nil {
+		log.Fatalf("GetTickSize: %v", err)
+	}
 
 	// === PostOrder ===
 	fmt.Println("\n[1/4] PostOrder…")
 	resp, err := client.PostOrder(types.OrderArgs{
-		TokenID: tokenID,
-		Price:   price,
-		Size:    size,
-		Side:    types.OrderSideBUY,
+		TokenID:  tokenID,
+		Price:    price,
+		Size:     size,
+		Side:     types.OrderSideBUY,
+		TickSize: tickSize,
 	}, types.OrderTypeGTC)
 	if err != nil {
 		log.Fatalf("❌ PostOrder err: %v", err)

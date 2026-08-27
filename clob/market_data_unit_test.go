@@ -55,11 +55,11 @@ func TestSanitizeBookParams(t *testing.T) {
 		{TokenID: v1, Side: "BUY"},
 		{TokenID: "", Side: "BUY"},
 		{TokenID: "  ", Side: "SELL"},
-		{TokenID: "abc", Side: "BUY"},     // bad format — drop
-		{TokenID: "0xdead", Side: "BUY"},  // hex — drop
-		{TokenID: "0", Side: "BUY"},       // all-zero — drop
-		{TokenID: v1, Side: "BUY"},        // duplicate of first
-		{TokenID: v1, Side: "SELL"},       // same token, different side — keep
+		{TokenID: "abc", Side: "BUY"},          // bad format — drop
+		{TokenID: "0xdead", Side: "BUY"},       // hex — drop
+		{TokenID: "0", Side: "BUY"},            // all-zero — drop
+		{TokenID: v1, Side: "BUY"},             // duplicate of first
+		{TokenID: v1, Side: "SELL"},            // same token, different side — keep
 		{TokenID: " " + v2 + " ", Side: "BUY"}, // trimmed
 	}
 	got := sanitizeBookParams(in)
@@ -102,11 +102,35 @@ func TestPayloadSnippet(t *testing.T) {
 func newReadonlyMarketDataAt(url string) *readonlyMarketDataClientImpl {
 	return &readonlyMarketDataClientImpl{
 		readonlyBaseClient: &readonlyBaseClient{
-			baseURL:   url,
-			tickSizes: map[string]types.TickSize{},
-			negRisk:   map[string]bool{},
-			feeRates:  map[string]int{},
+			baseURL:  url,
+			negRisk:  map[string]bool{},
+			feeRates: map[string]int{},
 		},
+	}
+}
+
+func TestGetTickSizeDoesNotHideCacheFromBusinessLayer(t *testing.T) {
+	var calls atomic.Int32
+	fetch := func(tokenID string) (map[string]interface{}, error) {
+		if tokenID != "123" {
+			t.Fatalf("unexpected token_id: %s", tokenID)
+		}
+		if calls.Add(1) == 1 {
+			return map[string]interface{}{"minimum_tick_size": string(types.TickSize0_01)}, nil
+		}
+		return map[string]interface{}{"minimum_tick_size": string(types.TickSize0_001)}, nil
+	}
+
+	first, err := getTickSizeWithFetcher("123", fetch)
+	if err != nil {
+		t.Fatalf("first GetTickSize: %v", err)
+	}
+	second, err := getTickSizeWithFetcher("123", fetch)
+	if err != nil {
+		t.Fatalf("second GetTickSize: %v", err)
+	}
+	if first != types.TickSize0_01 || second != types.TickSize0_001 || calls.Load() != 2 {
+		t.Fatalf("ticks = %q then %q, calls=%d; want 0.01 then 0.001 with two requests", first, second, calls.Load())
 	}
 }
 
@@ -303,13 +327,13 @@ func TestIsValidTokenIDFormat(t *testing.T) {
 		// uint256 max 是 78 位
 		{strings.Repeat("9", 78), true},
 		{"", false},
-		{"0", false},        // 全 0
-		{"00", false},       // 全 0
-		{"0xdead", false},   // hex
-		{"abc", false},      // 字母
-		{"-123", false},     // 负数
-		{"1.5", false},      // 浮点
-		{"1 2 3", false},    // 含空格
+		{"0", false},                     // 全 0
+		{"00", false},                    // 全 0
+		{"0xdead", false},                // hex
+		{"abc", false},                   // 字母
+		{"-123", false},                  // 负数
+		{"1.5", false},                   // 浮点
+		{"1 2 3", false},                 // 含空格
 		{strings.Repeat("9", 79), false}, // 超过 78 位
 	}
 	for _, tc := range cases {

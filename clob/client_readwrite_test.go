@@ -140,10 +140,11 @@ func TestCreateAndPostOrders(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
 		orderArgs := []types.OrderArgs{
 			{
-				TokenID: config.TestTokenID,
-				Side:    types.OrderSideBUY,
-				Price:   0.5,
-				Size:    10.0,
+				TokenID:  config.TestTokenID,
+				Side:     types.OrderSideBUY,
+				Price:    0.5,
+				Size:     10.0,
+				TickSize: types.TickSize0_001,
 			},
 		}
 		orderTypes := []types.OrderType{types.OrderTypeGTC}
@@ -185,10 +186,11 @@ func TestCreateAndPostOrders(t *testing.T) {
 	t.Run("LengthMismatch", func(t *testing.T) {
 		orderArgs := []types.OrderArgs{
 			{
-				TokenID: config.TestTokenID,
-				Side:    types.OrderSideBUY,
-				Price:   0.5,
-				Size:    10.0,
+				TokenID:  config.TestTokenID,
+				Side:     types.OrderSideBUY,
+				Price:    0.5,
+				Size:     10.0,
+				TickSize: types.TickSize0_001,
 			},
 		}
 		orderTypes := []types.OrderType{types.OrderTypeGTC, types.OrderTypeIOC} // 长度不匹配
@@ -204,10 +206,11 @@ func TestCreateAndPostOrders(t *testing.T) {
 	t.Run("DifferentOrderTypes", func(t *testing.T) {
 		orderArgs := []types.OrderArgs{
 			{
-				TokenID: config.TestTokenID,
-				Side:    types.OrderSideBUY,
-				Price:   0.5,
-				Size:    10.0,
+				TokenID:  config.TestTokenID,
+				Side:     types.OrderSideBUY,
+				Price:    0.5,
+				Size:     10.0,
+				TickSize: types.TickSize0_001,
 			},
 		}
 
@@ -244,10 +247,11 @@ func TestCreateAndPostOrders(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				orderArgs := []types.OrderArgs{
 					{
-						TokenID: config.TestTokenID,
-						Side:    types.OrderSideBUY,
-						Price:   tc.price,
-						Size:    10.0,
+						TokenID:  config.TestTokenID,
+						Side:     types.OrderSideBUY,
+						Price:    tc.price,
+						Size:     10.0,
+						TickSize: types.TickSize0_001,
 					},
 				}
 				orderTypes := []types.OrderType{types.OrderTypeGTC}
@@ -270,10 +274,11 @@ func TestCreateAndPostOrders(t *testing.T) {
 
 		for i := 0; i < 20; i++ {
 			orderArgs[i] = types.OrderArgs{
-				TokenID: config.TestTokenID,
-				Side:    types.OrderSideBUY,
-				Price:   0.5 + float64(i)*0.01, // 不同的价格
-				Size:    10.0,
+				TokenID:  config.TestTokenID,
+				Side:     types.OrderSideBUY,
+				Price:    0.5 + float64(i)*0.01, // 不同的价格
+				Size:     10.0,
+				TickSize: types.TickSize0_001,
 			}
 			orderTypes[i] = types.OrderTypeGTC
 		}
@@ -301,10 +306,11 @@ func TestPostOrder(t *testing.T) {
 	// 注意：这个测试会实际创建订单
 	t.Run("Basic", func(t *testing.T) {
 		orderArgs := types.OrderArgs{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Price:   0.5,
-			Size:    10.0,
+			TokenID:  config.TestTokenID,
+			Side:     types.OrderSideBUY,
+			Price:    0.5,
+			Size:     10.0,
+			TickSize: types.TickSize0_001,
 		}
 
 		response, err := client.PostOrder(orderArgs, types.OrderTypeGTC)
@@ -325,10 +331,11 @@ func TestPostOrder(t *testing.T) {
 	// 测试所有OrderType
 	t.Run("AllOrderTypes", func(t *testing.T) {
 		orderArgs := types.OrderArgs{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Price:   0.5,
-			Size:    10.0,
+			TokenID:  config.TestTokenID,
+			Side:     types.OrderSideBUY,
+			Price:    0.5,
+			Size:     10.0,
+			TickSize: types.TickSize0_001,
 		}
 
 		orderTypes := []types.OrderType{
@@ -367,10 +374,11 @@ func TestPostOrder(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				orderArgs := types.OrderArgs{
-					TokenID: config.TestTokenID,
-					Side:    types.OrderSideBUY,
-					Price:   tc.price,
-					Size:    10.0,
+					TokenID:  config.TestTokenID,
+					Side:     types.OrderSideBUY,
+					Price:    tc.price,
+					Size:     10.0,
+					TickSize: types.TickSize0_001,
 				}
 
 				response, err := client.PostOrder(orderArgs, types.OrderTypeGTC)
@@ -401,10 +409,11 @@ func TestPostOrder(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				orderArgs := types.OrderArgs{
-					TokenID: config.TestTokenID,
-					Side:    types.OrderSideBUY,
-					Price:   0.5,
-					Size:    tc.size,
+					TokenID:  config.TestTokenID,
+					Side:     types.OrderSideBUY,
+					Price:    0.5,
+					Size:     tc.size,
+					TickSize: types.TickSize0_001,
 				}
 
 				response, err := client.PostOrder(orderArgs, types.OrderTypeGTC)
@@ -424,10 +433,11 @@ func TestPostOrder(t *testing.T) {
 	// 测试无效tokenID
 	t.Run("InvalidTokenID", func(t *testing.T) {
 		orderArgs := types.OrderArgs{
-			TokenID: "invalid-token-id",
-			Side:    types.OrderSideBUY,
-			Price:   0.5,
-			Size:    10.0,
+			TokenID:  "invalid-token-id",
+			Side:     types.OrderSideBUY,
+			Price:    0.5,
+			Size:     10.0,
+			TickSize: types.TickSize0_001,
 		}
 
 		response, err := client.PostOrder(orderArgs, types.OrderTypeGTC)

@@ -2,6 +2,7 @@ package clob
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -9,16 +10,35 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// isTickSizeSmaller 检查 tickSize a 是否小于 tickSize b
-// 对应 Python 的 is_tick_size_smaller 函数
-func isTickSizeSmaller(a types.TickSize, b types.TickSize) bool {
-	aFloat, errA := strconv.ParseFloat(string(a), 64)
-	bFloat, errB := strconv.ParseFloat(string(b), 64)
-	if errA != nil || errB != nil {
-		// 如果解析失败，使用字符串比较（fallback）
-		return string(a) < string(b)
+// parseRequiredTickSize 解析业务层显式传入的 tick size。
+// 下单路径只消费该值，不在这里或调用方上层隐式请求 /tick-size。
+func parseRequiredTickSize(tickSize types.TickSize) (float64, error) {
+	raw := strings.TrimSpace(string(tickSize))
+	if raw == "" {
+		return 0, fmt.Errorf("tick_size is required")
 	}
-	return aFloat < bFloat
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed <= 0 || parsed >= 0.5 {
+		return 0, fmt.Errorf("invalid tick_size %q", raw)
+	}
+	return parsed, nil
+}
+
+// validateOrderTickSizes 对一批订单逐笔校验业务层传入的 tick size 和价格范围。
+// 这是纯本地校验，不读取缓存，也不会发起任何市场数据请求。
+func validateOrderTickSizes(orderArgsList []types.OrderArgs) error {
+	for i, orderArgs := range orderArgsList {
+		tickSize, err := parseRequiredTickSize(orderArgs.TickSize)
+		if err != nil {
+			return fmt.Errorf("订单 %d token=%s: %w", i+1, orderArgs.TokenID, err)
+		}
+		if math.IsNaN(orderArgs.Price) || math.IsInf(orderArgs.Price, 0) ||
+			orderArgs.Price < tickSize || orderArgs.Price > 1.0-tickSize {
+			return fmt.Errorf("订单 %d 价格无效: price=%g 必须在范围 [%g, %g] 内（tick_size=%s）",
+				i+1, orderArgs.Price, tickSize, 1.0-tickSize, orderArgs.TickSize)
+		}
+	}
+	return nil
 }
 
 // calculateOrderAmounts calculates maker and taker amounts based on side, size, price, and tick size
@@ -28,8 +48,8 @@ func (c *orderClientImpl) calculateOrderAmounts(
 	price float64,
 	tickSize types.TickSize,
 ) (*big.Int, *big.Int, error) {
-	// Parse tick size
-	tickSizeFloat, err := strconv.ParseFloat(string(tickSize), 64)
+	// Parse caller-supplied tick size. No network lookup occurs in the order path.
+	tickSizeFloat, err := parseRequiredTickSize(tickSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid tick size: %w", err)
 	}

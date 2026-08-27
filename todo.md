@@ -19,7 +19,7 @@
 
 当前 SDK 不是简单的“少几个接口”，而是同时存在以下三种情况：
 
-1. CLOB 已有 V2 路径和较完整的钱包/Relayer 扩展，但默认仍走旧下单路径，批量下单又固定按 `0.001` tick 构造订单。这会直接影响真实资金交易。
+1. CLOB 已统一使用 V2，且下单改为由业务层逐笔显式传入 tick；剩余的非十进制幂价格网格、批次错误语义和市场配置失效机制仍会直接影响真实资金交易。
 2. Data、Gamma、User WS、Sports WS 和 RFQ 中有多处仍使用旧端点或旧字段，部分方法即使 HTTP 成功也会返回关键字段为零值。
 3. Bridge、完整 Rewards、Builder、当前 Combos RFQ、Perps 等官方能力尚未形成 SDK 模块。
 
@@ -49,32 +49,40 @@
 - [x] 初始化日志记录 V2、签名类型、maker/signer 和 V2 exchange domains，不输出凭证或私钥。
 - [x] 删除可写的 `RedeemPositionsV1`、`SplitUSDCV1`、`MergeTokensV1` 及其已过期真实资金测试；保留当前 V2 方法。
 - [x] 为 V2 Split/Merge 补齐纯单元测试与显式开关保护的主网往返测试，覆盖 ABI calldata、Regular/NegRisk adapter 路由、金额精度/非法输入、Relayer payload；Regular 与 NegRisk 均完成真实 Split→Merge，并验证 receipt 与最终 pUSD 余额一致性。
+- [x] `v1.14.0` 发布前再次用 `.env` Safe 钱包对 Regular 与 NegRisk 各执行 `0.01 pUSD` 的真实 Split→Merge；四笔 receipt 全部成功，两次往返的 pUSD 余额均逐单位一致。
 - [x] README 和仓库内已跟踪的 V2 examples 使用默认 `NewClient()`。
 - [x] 外部 `polyworker`、`polyworker-weather` 测试命令移除 `-v1` 分支及 `RedeemPositionInfoV1` 转换，统一调用 `RedeemPositions`；全目录已无三个 `*V1` 方法的 Go 调用。
 - [x] 现有 V2 body、signer、batch retry 测试继续通过，并增加 `WithV2()` 源码兼容测试。
 - [x] 老 Exchange/Factory 地址仅保留给旧 Proxy 地址解析、历史日志解码和诊断，不存在从下单流程回退到 V1 的入口。
 
-### [ ] P0-2：按每个市场的真实 tick size 构造和校验订单
+### [x] P0-2：由业务层显式传入每笔订单的 tick size
 
-当前实现：
+完成于 2026-08-27，发布版本 `v1.14.0`。
 
-- `CreateAndPostOrders` 固定以 `0.001` 做价格范围校验。
-- 当前 V2 批量签名仍固定传入 `0.001`，没有按 token 获取并应用市场 tick。
-- `GetTickSize`、`ResolveTickSize`、`GetNegRisk` 虽然已有具体实现，却没有放进导出的 `MarketDataClient` 接口；`NewClient()` 返回接口后无法调用。
-- tick/neg-risk 缓存没有 TTL、失效机制，也没有消费 `tick_size_change`。
+完成状态：
+
+- `OrderArgs.TickSize` 是下单必填参数；单笔和批量下单都不再使用 SDK 内置默认值。
+- `CreateAndPostOrders` 在任何签名或 HTTP 提交前，逐笔校验 `tick_size` 和对应价格范围。
+- 同一批订单可以携带不同的 tick，并逐笔用于价格舍入、maker/taker amount 计算和签名。
+- 下单热路径不隐式查询 `/tick-size`，是否使用业务默认值、Gamma/WS 数据或动态查询由业务层决定。
+- `GetTickSize` 已加入公开 `MarketDataClient` 接口，业务层需要时可在非热路径显式调用，再把结果写入 `OrderArgs.TickSize`。
+- 增加缺失/非法 tick、混合 tick、价格范围和金额计算单元测试；仓库内已跟踪的下单示例均改为显式传值。
+- 增加显式开关保护的生产 CLOB 挂单→撤单契约测试：PostOnly、价格等于最小 tick、maker notional 硬限制 `<= 0.05 USDC`，并在失败路径兜底撤单。已使用 `.env` 的 Safe 钱包完成一次真实挂单和撤单。
+
+本项不包含非十进制幂 tick 的网格算法，后者由 P0-3 单独修复。
 
 官方基线：订单必须符合市场的 `tick_size`，官方当前可能返回 `0.1`、`0.01`、`0.005`、`0.0025`、`0.001`、`0.0001`；市场运行中 tick 还可能变化。参见 [Get tick size](https://docs.polymarket.com/api-reference/market-data/get-tick-size.md) 和 [Market WS](https://docs.polymarket.com/api-reference/wss/market.md)。
 
 已做真实请求验证：在一个 BTC 5 分钟市场（最小 tick 为 `0.01`）批量提交一个 `0.01` 单和一个 `0.001` 单，服务端返回顶层 HTTP 400：`price 0.001 breaks minimum tick size rule 0.01`，响应没有逐单结果，随后查询该 token 的开放订单为 0。也就是说，至少对 tick 违规，生产端会拒绝整个 HTTP 批次。
 
-建议验收：
+验收结果：
 
-- [ ] 批量签名前按 token 获取真实 tick，并允许调用方显式传入已知 market config 以避免重复网络请求。
-- [ ] 同一批多个 token 时逐单应用各自 tick，不使用批次级固定值。
-- [ ] 把 `GetTickSize`、`ResolveTickSize`、`GetNegRisk` 加入公开接口。
-- [ ] 缓存增加 TTL，并在收到 `tick_size_change` 后立即更新或失效。
-- [ ] 服务端返回 tick 错误时只重取一次市场配置、重新校验；不要盲目重复提交原请求。
-- [ ] 增加真实/录制契约测试：合法 tick 全部成功、一个非法 tick 不会被发送、动态 tick 更新后旧价格会在本地被拒绝。
+- [x] 调用方必须显式传入 tick，批量签名前不增加市场数据网络请求。
+- [x] 同一批多个 token 时逐单应用各自 tick，不使用批次级固定值。
+- [x] 把 `GetTickSize` 加入公开市场数据接口，保留显式动态获取能力。
+- [x] 缺失、非法或价格范围不符合所传 tick 时，整批在本地提交前失败，不会向服务端发送部分订单。
+- [x] `GetTickSize` 每次显式调用都真实查询，不保留隐藏的 SDK tick 缓存；缓存和 `tick_size_change` 策略由业务层管理。
+- `0.005` / `0.0025` 的严格网格和精度验收已转入 P0-3，不属于本项未完成工作。
 
 ### [ ] P0-3：修正 `0.005` / `0.0025` 的价格网格和精度算法
 
@@ -183,7 +191,7 @@
 - [ ] 按官方 Sports event schema 解码全部字段。
 - [ ] 用 mock server 验证 10 秒心跳规则、重连和事件解析。
 
-### [ ] P0-9：补齐 Market WebSocket 事件，接入 tick cache
+### [ ] P0-9：补齐 Market WebSocket 事件，暴露 tick size 变化
 
 当前实现：初始订阅发送大写 `MARKET`，只处理 `book`；心跳使用 JSON 编码的 `"PING"`。
 
@@ -201,7 +209,7 @@
 
 - [ ] 严格按 AsyncAPI 发送初始/动态订阅和纯文本 ping/pong。
 - [ ] 为上述每类事件提供 typed model 和回调/统一 event stream。
-- [ ] `tick_size_change` 原子更新 CLOB market config cache。
+- [ ] 以 typed event 暴露 `tick_size_change`，由业务层原子更新自己的 market config cache。
 - [ ] 支持 initial dump、订阅 level 和 custom feature。
 - [ ] 重连时恢复订阅并处理重复快照/增量事件。
 
@@ -321,7 +329,7 @@
 
 - [ ] 单个与批量共用一个完整 `OrderBookSummary`。
 - [ ] 价格和数量使用精确十进制类型。
-- [ ] 将 `min_order_size/tick_size` 接入下单预校验缓存。
+- [ ] 将 `min_order_size/tick_size` 完整暴露给业务层，用于构造显式的下单参数和预校验配置。
 - [ ] 针对空订单簿、null last trade 和未交易 token 建立测试。
 
 ### [ ] P1-4：补齐单订单查询、撤单过滤与限制校验
@@ -341,14 +349,14 @@
 - [ ] 下单/Relayer 超时必须返回 ambiguous outcome，先对账再决定是否重发。
 - [ ] 日志统一脱敏 API secret、passphrase、私钥、签名和完整鉴权头。
 
-### [ ] P1-6：为 market config 缓存增加并发安全和生命周期
+### [ ] P1-6：为 SDK 内部 negRisk/feeRate 缓存增加并发安全和生命周期
 
-当前 tick/negRisk/feeRate map 没有明显的统一锁、TTL 和失效策略。
+当前 negRisk/feeRate map 没有明显的统一锁、TTL 和失效策略；tick 已改为业务层显式传入，SDK 不再隐藏缓存。
 
 - [ ] 使用并发安全缓存；避免批量签名与 WS 更新产生 data race。
 - [ ] cache entry 带 fetchedAt/source/version。
 - [ ] 支持手动 invalidate、WS invalidate、TTL refresh 和 singleflight。
-- [ ] `go test -race` 覆盖并发批量下单与 WS tick 更新。
+- [ ] `go test -race` 覆盖并发批量下单与缓存更新。
 
 ### [ ] P1-7：使用市场实时 fee rate，而不是依赖调用方或旧默认值
 
@@ -563,7 +571,7 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 
 ### [ ] 第一批：阻断错误交易请求
 
-P0-1 已完成；继续处理 P0-2 至 P0-5、P0-12。P0-2 完成前仍需在业务层按真实 tick/min size 预校验。
+P0-1、P0-2 已完成；继续处理 P0-3 至 P0-5、P0-12。业务层现在必须为每笔订单显式提供 tick size；min size 预校验仍待后续项目处理。
 
 ### [ ] 第二批：修复返回数据和实时连接
 

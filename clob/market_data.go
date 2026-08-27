@@ -95,10 +95,10 @@ func payloadSnippet(body []byte) string {
 // PricesHistoryOptions 为 GET /prices-history 提供的可选参数
 // 参考: https://docs.polymarket.com/developers/CLOB/timeseries
 type PricesHistoryOptions struct {
-	StartTs   *int64  // 仅返回此 Unix 时间戳之后的数据
-	EndTs     *int64  // 仅返回此 Unix 时间戳之前的数据
-	Interval  string  // 聚合间隔: max, all, 1m, 1w, 1d, 6h, 1h
-	Fidelity  *int    // 精度（分钟），默认 1
+	StartTs  *int64 // 仅返回此 Unix 时间戳之后的数据
+	EndTs    *int64 // 仅返回此 Unix 时间戳之前的数据
+	Interval string // 聚合间隔: max, all, 1m, 1w, 1d, 6h, 1h
+	Fidelity *int   // 精度（分钟），默认 1
 }
 
 // PricesHistoryOption 函数选项类型
@@ -132,22 +132,27 @@ func WithPricesHistoryFidelity(minutes int) PricesHistoryOption {
 	}
 }
 
-// GetTickSize 获取代币的tick大小
-func (c *marketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
-	if tickSize, ok := c.baseClient.tickSizes[tokenID]; ok {
-		return tickSize, nil
-	}
+// getTickSize 显式查询代币的 tick 大小，供认证和只读客户端共用。
+// 本方法不隐藏缓存；是否缓存、何时刷新由业务层决定。
+func getTickSize(baseURL string, tokenID string) (types.TickSize, error) {
+	return getTickSizeWithFetcher(tokenID, func(tokenID string) (map[string]interface{}, error) {
+		params := map[string]string{"token_id": tokenID}
+		resp, err := http.Get[map[string]interface{}](baseURL, internal.GetTickSize, params)
+		if err != nil {
+			return nil, err
+		}
+		return *resp, nil
+	})
+}
 
-	params := map[string]string{"token_id": tokenID}
-
-	// API may return minimum_tick_size as number or string, so we need to handle both
-	var rawResponse map[string]interface{}
-	resp, err := http.Get[map[string]interface{}](c.baseClient.baseURL, internal.GetTickSize, params)
+// getTickSizeWithFetcher 保持查询与解析逻辑可测试；每次调用都执行 fetch。
+func getTickSizeWithFetcher(tokenID string, fetch func(string) (map[string]interface{}, error)) (types.TickSize, error) {
+	rawResponse, err := fetch(tokenID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get tick size: %w", err)
 	}
-	rawResponse = *resp
 
+	// API may return minimum_tick_size as number or string, so we need to handle both.
 	// Extract minimum_tick_size and convert to string
 	var tickSizeStr string
 	if val, ok := rawResponse["minimum_tick_size"]; ok {
@@ -169,40 +174,17 @@ func (c *marketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, erro
 		return "", fmt.Errorf("minimum_tick_size not found in response")
 	}
 
-	tickSize := types.TickSize(tickSizeStr)
-	c.baseClient.tickSizes[tokenID] = tickSize
-	return tickSize, nil
+	return types.TickSize(tickSizeStr), nil
 }
 
-// ResolveTickSize 解析并验证 tick size
-// 对应 Python 的 __resolve_tick_size 方法
-// 逻辑：
-// 1. 获取 token 的最小 tick size
-// 2. 如果提供了 userTickSize：
-//   - 检查 userTickSize 是否小于最小 tick size
-//   - 如果小于，返回错误
-//   - 否则使用 userTickSize
-//
-// 3. 如果没有提供 userTickSize，使用从 API 获取的最小 tick size
-func (c *marketDataClientImpl) ResolveTickSize(tokenID string, userTickSize *types.TickSize) (types.TickSize, error) {
-	// 获取该 token 的最小 tick size
-	minTickSize, err := c.GetTickSize(tokenID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get minimum tick size: %w", err)
-	}
+// GetTickSize 显式获取代币的 tick 大小。下单路径不会隐式调用本方法。
+func (c *marketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
+	return getTickSize(c.baseClient.baseURL, tokenID)
+}
 
-	// 如果用户提供了 tick size，验证它是否有效
-	if userTickSize != nil {
-		// 检查用户提供的 tick size 是否小于最小 tick size
-		if isTickSizeSmaller(*userTickSize, minTickSize) {
-			return "", fmt.Errorf("invalid tick size (%s), minimum for the market is %s", string(*userTickSize), string(minTickSize))
-		}
-		// 用户提供的 tick size 有效，使用它
-		return *userTickSize, nil
-	}
-
-	// 用户没有提供 tick size，使用从 API 获取的最小 tick size
-	return minTickSize, nil
+// GetTickSize 显式获取代币的 tick 大小。
+func (c *readonlyMarketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
+	return getTickSize(c.readonlyBaseClient.baseURL, tokenID)
 }
 
 // GetNegRisk 获取代币的负风险状态。
@@ -413,7 +395,7 @@ func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.P
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败: failed to marshal request body: %w", err)
 	}
-	
+
 	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetPrices, bodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
@@ -455,7 +437,7 @@ func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.P
 					req.Side = "SELL"
 				}
 			}
-			
+
 			if found {
 				price, err := strconv.ParseFloat(priceStr, 64)
 				if err != nil {
@@ -784,7 +766,7 @@ func (c *readonlyMarketDataClientImpl) GetPrices(requests []types.BookParams) ([
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败: failed to marshal request body: %w", err)
 	}
-	
+
 	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetPrices, bodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败: %w", err)
@@ -826,7 +808,7 @@ func (c *readonlyMarketDataClientImpl) GetPrices(requests []types.BookParams) ([
 					req.Side = "SELL"
 				}
 			}
-			
+
 			if found {
 				price, err := strconv.ParseFloat(priceStr, 64)
 				if err != nil {
@@ -965,7 +947,7 @@ func (c *readonlyMarketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
 	// API可能返回 fee_rate 或 base_fee 字段
 	var feeRate int
 	var found bool
-	
+
 	// 优先查找 fee_rate
 	if val, ok := rawResponse["fee_rate"]; ok {
 		found = true
@@ -1005,7 +987,7 @@ func (c *readonlyMarketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
 			return 0, fmt.Errorf("unexpected base_fee type: %T", v)
 		}
 	}
-	
+
 	if !found {
 		return 0, fmt.Errorf("fee_rate or base_fee not found in response")
 	}

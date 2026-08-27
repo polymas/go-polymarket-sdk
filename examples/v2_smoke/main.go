@@ -129,12 +129,17 @@ func stepB(client clob.Client, testToken string) {
 		price = 0.01
 	}
 	fmt.Printf("   中间价 %.4f → 下单价 %.4f（远离避免成交）\n", midPrice, price)
+	tickSize, err := client.GetTickSize(testToken)
+	if err != nil {
+		log.Fatalf("❌ B0 GetTickSize 失败: %v", err)
+	}
 
 	resp, err := client.PostOrder(types.OrderArgs{
-		TokenID: testToken,
-		Price:   price,
-		Size:    5.0,
-		Side:    types.OrderSideBUY,
+		TokenID:  testToken,
+		Price:    price,
+		Size:     5.0,
+		Side:     types.OrderSideBUY,
+		TickSize: tickSize,
 	}, types.OrderTypeGTC)
 	if err != nil {
 		log.Fatalf("❌ B1 PostOrder 调用失败: %v", err)

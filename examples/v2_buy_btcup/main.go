@@ -67,12 +67,17 @@ func main() {
 	} else {
 		fmt.Printf("刷新 balance-allowance OK: %+v\n", ba)
 	}
+	tickSize, err := client.GetTickSize(upTokenID)
+	if err != nil {
+		log.Fatalf("❌ GetTickSize 失败: %v", err)
+	}
 
 	resp, err := client.PostOrder(types.OrderArgs{
-		TokenID: upTokenID,
-		Price:   buyPrice,
-		Size:    buySize,
-		Side:    types.OrderSideBUY,
+		TokenID:  upTokenID,
+		Price:    buyPrice,
+		Size:     buySize,
+		Side:     types.OrderSideBUY,
+		TickSize: tickSize,
 	}, types.OrderTypeGTC)
 	if err != nil {
 		log.Fatalf("❌ PostOrder 调用失败: %v", err)

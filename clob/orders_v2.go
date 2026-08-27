@@ -238,7 +238,6 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		return nil, fmt.Errorf("postOrdersBatchV2: batch size cannot exceed 15, got %d", len(orderArgsList))
 	}
 
-	const defaultTickSize types.TickSize = "0.001"
 	negRisk := false
 	if isRetryCall {
 		negRisk = true
@@ -274,7 +273,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 			}
 		}
 
-		signed, err := c.createSignedOrderV2(orderArgs, defaultTickSize, perOrderNegRisk, orderTypes[i])
+		signed, err := c.createSignedOrderV2(orderArgs, orderArgs.TickSize, perOrderNegRisk, orderTypes[i])
 		if err != nil {
 			continue
 		}
@@ -367,7 +366,7 @@ func (c *orderClientImpl) createSignedOrderV2(
 	negRisk bool,
 	_ types.OrderType, // V2 没有 expiration 字段，orderType 只影响提交时的 orderType 字段
 ) (*signing.V2SignedOrder, error) {
-	tickSizeFloat, err := strconv.ParseFloat(string(tickSize), 64)
+	tickSizeFloat, err := parseRequiredTickSize(tickSize)
 	if err != nil {
 		return nil, fmt.Errorf("invalid tick size: %w", err)
 	}

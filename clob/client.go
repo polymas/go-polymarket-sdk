@@ -39,6 +39,9 @@ type MarketDataClient interface {
 	GetSpreads(tokenIDs []string) ([]types.Spread, error)
 	GetLastTradePrice(tokenID string) (*types.LastTradePrice, error)
 	GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error)
+	// GetTickSize 显式查询 token 当前的最小价格步长；SDK 不隐藏缓存。
+	// 下单方法不会隐式调用；业务层可选择默认值或提前调用本方法。
+	GetTickSize(tokenID string) (types.TickSize, error)
 	GetFeeRate(tokenID string) (int, error)
 	GetTime() (time.Time, error)
 }
@@ -93,7 +96,6 @@ type baseClient struct {
 	baseURL       string           // API 基础 URL
 	signatureType types.SignatureType
 	deriveCreds   *types.ApiCreds
-	tickSizes     map[string]types.TickSize
 	negRisk       map[string]bool
 	feeRates      map[string]int
 	web3Client    web3.Client // 保存 Web3Client 引用（可能为nil，用于只读客户端）
@@ -114,10 +116,9 @@ func WithV2() ClientOption {
 
 // readonlyBaseClient 只读客户端的基础结构，不包含认证相关字段
 type readonlyBaseClient struct {
-	baseURL   string
-	tickSizes map[string]types.TickSize
-	negRisk   map[string]bool
-	feeRates  map[string]int
+	baseURL  string
+	negRisk  map[string]bool
+	feeRates map[string]int
 }
 
 // orderClientImpl 订单功能模块实现
@@ -181,10 +182,9 @@ type polymarketClobClient struct {
 func NewReadonlyClient() ReadonlyClient {
 	// 创建只读基础客户端
 	readonlyBase := &readonlyBaseClient{
-		baseURL:   internal.ClobAPIDomain,
-		tickSizes: make(map[string]types.TickSize),
-		negRisk:   make(map[string]bool),
-		feeRates:  make(map[string]int),
+		baseURL:  internal.ClobAPIDomain,
+		negRisk:  make(map[string]bool),
+		feeRates: make(map[string]int),
 	}
 
 	// 创建功能模块
@@ -217,7 +217,6 @@ func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 		proxyAddress:  "", // Will be set in initialization
 		baseURL:       internal.ClobAPIDomain,
 		signatureType: signatureType,
-		tickSizes:     make(map[string]types.TickSize),
 		negRisk:       make(map[string]bool),
 		feeRates:      make(map[string]int),
 		web3Client:    web3Client,

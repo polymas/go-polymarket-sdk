@@ -65,10 +65,8 @@ func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types
 
 // CreateAndPostOrders 创建、签名并提交当前 V2 订单。
 // 如果订单数量超过15个，将自动分批提交，每批最多15个订单
-// 内部统一逻辑：
-//   - tickSize 默认使用 0.001
-//   - negRisk 默认使用 false，如果出现签名错误则使用 true 重试
-//   - 统一检查所有订单的 price 是否符合条件
+// 每笔 OrderArgs 必须显式携带 TickSize；SDK 不在下单热路径请求 /tick-size。
+// 同一批订单可以使用不同 tick size，并逐笔完成价格范围校验和金额计算。
 //
 // 返回契约：成功路径下返回的切片长度恒等于 len(orderArgsList) 且同序；被
 // SDK 自动剥离（如 "orderbook X does not exist"）或批次失败的位置会回填
@@ -86,13 +84,8 @@ func (c *orderClientImpl) CreateAndPostOrders(
 		return nil, fmt.Errorf("orderArgsList and orderTypes must have the same length")
 	}
 
-	// 统一检查所有订单的 price 是否符合条件（使用 tickSize=0.001）
-	const defaultTickSize = 0.001
-	for i, orderArgs := range orderArgsList {
-		if orderArgs.Price < defaultTickSize || orderArgs.Price > 1.0-defaultTickSize {
-			return nil, fmt.Errorf("订单 %d 价格无效: price=%.3f 必须在范围 [%.3f, %.3f] 内",
-				i+1, orderArgs.Price, defaultTickSize, 1.0-defaultTickSize)
-		}
+	if err := validateOrderTickSizes(orderArgsList); err != nil {
+		return nil, err
 	}
 
 	const maxBatchSize = 15 // 每批最多15个订单

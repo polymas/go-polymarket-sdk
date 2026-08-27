@@ -173,27 +173,34 @@ const (
 
 // OrderArgs 表示创建订单的参数。
 //
-// 可选 V2 字段（零值即当前默认行为，向后兼容）：
+// V2 必填字段：
+//
+//   - TickSize : 该 token 当前的最小价格步长。SDK 不在下单热路径查询；
+//     调用方可使用自己的默认值、Gamma/WS 数据或显式调用市场数据接口获取。
+//
+// 可选 V2 字段（零值即当前默认行为）：
 //
 //   - Expiration : GTD 订单过期 unix 秒；0 表示 GTC（不过期）
 //   - PostOnly   : 只做 maker；下单瞬间会被 match 则拒单（不上单）
 //   - DeferExec  : 静默入态机但不立即撮合；做市商批量预提交场景使用
 //
-// 仅 V2 路径（postOrdersBatchV2 / WithV2 客户端）会读这些字段；V1 路径忽略。
+// 当前订单路径统一使用这些 V2 字段。
 type OrderArgs struct {
-	TokenID    string    `json:"token_id"`
-	Price      float64   `json:"price"`
-	Size       float64   `json:"size"`
-	Side       OrderSide `json:"side"`
-	FeeRateBps *int      `json:"fee_rate_bps,omitempty"`
-	Expiration int64     `json:"expiration,omitempty"` // unix 秒；0 = GTC
-	PostOnly   bool      `json:"post_only,omitempty"`
-	DeferExec  bool      `json:"defer_exec,omitempty"`
+	TokenID string    `json:"token_id"`
+	Price   float64   `json:"price"`
+	Size    float64   `json:"size"`
+	Side    OrderSide `json:"side"`
+	// TickSize 是 SDK 构造/校验签名所需的本地输入；官方 /orders body 没有该字段。
+	TickSize   TickSize `json:"tick_size"`
+	FeeRateBps *int     `json:"fee_rate_bps,omitempty"`
+	Expiration int64    `json:"expiration,omitempty"` // unix 秒；0 = GTC
+	PostOnly   bool     `json:"post_only,omitempty"`
+	DeferExec  bool     `json:"defer_exec,omitempty"`
 
 	// NegRisk 可选携带该 token 的 NegRisk 状态，用于 V2 type-3（POLY_1271）
 	// 签名选 exchange 域。上游若已从 gamma /markets 或 clob 市场数据拿到该状态
 	// （二者都带 negRisk 字段），直接传进来即可让批量下单零网络开销地签对域；
-	// 留 nil（未知）则由 SDK 现查 GET /neg-risk 兜底。仅 V2 路径消费此字段。
+	// 留 nil（未知）则由 SDK 现查 GET /neg-risk 兜底。
 	NegRisk *bool `json:"neg_risk,omitempty"`
 }
 
@@ -405,6 +412,23 @@ type ClobMarket struct {
 
 // TickSize 表示tick大小值
 type TickSize string
+
+// Polymarket 当前支持的价格步长。
+// Go 没有封闭枚举；业务代码应优先使用这些常量，避免散落字符串魔数。
+const (
+	TickSize0_1    TickSize = "0.1"
+	TickSize0_01   TickSize = "0.01"
+	TickSize0_005  TickSize = "0.005"
+	TickSize0_0025 TickSize = "0.0025"
+	TickSize0_001  TickSize = "0.001"
+	TickSize0_0001 TickSize = "0.0001"
+)
+
+// TickSizeFromFloat 把业务层的浮点配置转换为 OrderArgs 使用的十进制 tick size。
+// 合法性仍由下单前校验负责；本函数只避免各业务重复编写 FormatFloat。
+func TickSizeFromFloat(value float64) TickSize {
+	return TickSize(strconv.FormatFloat(value, 'f', -1, 64))
+}
 
 // RewardRate 表示奖励费率
 type RewardRate struct {
