@@ -242,10 +242,10 @@ go test -parallel 4 ./...
 | `TestUserClientReconnectRestoresMarkets` | ✅ PASS | 重连恢复 ConditionID 过滤 |
 | `TestUserClientValidationAndAllMarkets` | ✅ PASS | 凭证校验和全市场订阅 |
 | `TestUserClientLive`          | ✅ PASS | `-tags=live`，真实只读连接跨越心跳周期 |
-| `TestSportsSetOnSportsUpdate` | ✅ PASS | 已通过 |
-| `TestSportsStart`             | ✅ PASS | 已通过 |
-| `TestSportsStop`              | ✅ PASS | 已通过 |
-| `TestSportsIsRunning`         | ✅ PASS | 已通过 |
+| `TestSportsClientProtocolAndEvent` | ✅ PASS | 无订阅包、纯文本 ping/pong 和完整事件 |
+| `TestSportsClientReconnectsWithoutSubscription` | ✅ PASS | 重连后仍不发送订阅包 |
+| `TestSportsClientCanRestart` | ✅ PASS | 无竞态停止和重启 |
+| `TestSportsClientLive`       | ✅ PASS | `-tags=live`，真实连接跨越两个服务端 ping 周期 |
 
 ### RTDS包测试状态
 

@@ -238,6 +238,15 @@ User Channel 使用独立 `websocket.UserClient`，构造时传入 CLOB `types.A
 | `Stop`               | 停止连接                      | -          | -       |
 | `IsRunning`          | 检查是否运行中                | -          | `bool`  |
 
+Sports Channel 使用 `websocket.SportsClient`，连接后直接接收全部比赛更新，不需要鉴权或订阅报文：
+
+| 方法                | 描述                     | 参数       | 返回值  |
+| ------------------- | ------------------------ | ---------- | ------- |
+| `SetOnSportsUpdate` | 设置 `SportResult` 更新回调 | `callback` | -       |
+| `Start`             | 启动公开比分连接           | -          | `error` |
+| `Stop`              | 停止连接                 | -          | -       |
+| `IsRunning`         | 检查是否运行中           | -          | `bool`  |
+
 ### RTDS 客户端接口
 
 | 方法               | 描述                          | 参数            | 返回值  |

@@ -790,20 +790,6 @@ type Sport struct {
 	Leagues []string `json:"leagues"`
 }
 
-// SportsEvent 表示体育事件
-type SportsEvent struct {
-	EventID   int       `json:"event_id"`
-	SportID   int       `json:"sport_id"`
-	League    string    `json:"league"`
-	HomeTeam  string    `json:"home_team"`
-	AwayTeam  string    `json:"away_team"`
-	StartTime time.Time `json:"start_time"`
-	Status    string    `json:"status"`
-	Score     string    `json:"score,omitempty"`
-	Markets   []string  `json:"markets,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 type SeriesSummary struct {
 	ID               string   `json:"id"`
 	Title            *string  `json:"title"`

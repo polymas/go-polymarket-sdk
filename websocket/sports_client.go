@@ -6,74 +6,104 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/polymas/go-polymarket-sdk/internal"
-	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-const (
-	wsSportsURL = "wss://ws-subscriptions-clob.polymarket.com/ws/sports"
-)
+const wsSportsURL = "wss://sports-api.polymarket.com/ws"
 
-// SportsClient 定义 Sports WebSocket 客户端的接口
+// SportResult is a real-time match result from the public Sports Channel.
+// Only Slug is required by the protocol; omitted optional fields keep their
+// zero value. Timestamp strings are preserved exactly as sent by Polymarket.
+type SportResult struct {
+	Slug              string `json:"slug"`
+	Live              bool   `json:"live"`
+	Ended             bool   `json:"ended"`
+	Score             string `json:"score"`
+	Period            string `json:"period"`
+	Elapsed           string `json:"elapsed"`
+	LastUpdate        string `json:"last_update"`
+	FinishedTimestamp string `json:"finished_timestamp"`
+	Turn              string `json:"turn"`
+}
+
+// SportsClient receives public match updates. The channel needs neither
+// authentication nor a subscription message.
 type SportsClient interface {
-	SetOnSportsUpdate(callback func(event *types.SportsEvent))
+	SetOnSportsUpdate(callback func(result *SportResult))
 	Start() error
 	Stop()
 	IsRunning() bool
 }
 
-// sportsWebSocketClient 处理体育市场订阅的 WebSocket 连接
 type sportsWebSocketClient struct {
-	conn            *websocket.Conn
-	connMutex       sync.RWMutex
-	onSportsUpdate  func(event *types.SportsEvent)
-	reconnectDelay  time.Duration
-	stopChan        chan struct{}
-	stopOnce        sync.Once
-	running         bool
-	runningMutex    sync.RWMutex
-	lastConnected   time.Time
-	disconnectedAt  *time.Time
-	disconnectMutex sync.RWMutex
+	url            string
+	reconnectDelay time.Duration
+
+	conn       *websocket.Conn
+	connMutex  sync.RWMutex
+	writeMutex sync.Mutex
+
+	onSportsUpdate func(result *SportResult)
+	callbackMutex  sync.RWMutex
+
+	stopChan     chan struct{}
+	stopOnce     sync.Once
+	running      bool
+	runningMutex sync.RWMutex
 }
 
-// NewSportsClient 创建新的 Sports WebSocket 客户端
+// NewSportsClient creates a public Sports Channel client.
 func NewSportsClient(reconnectDelay time.Duration) SportsClient {
+	return newSportsClient(wsSportsURL, reconnectDelay)
+}
+
+func newSportsClient(url string, reconnectDelay time.Duration) *sportsWebSocketClient {
 	return &sportsWebSocketClient{
+		url:            url,
 		reconnectDelay: reconnectDelay,
 		stopChan:       make(chan struct{}),
 	}
 }
 
-// SetOnSportsUpdate 设置体育事件更新的回调函数
-func (s *sportsWebSocketClient) SetOnSportsUpdate(callback func(event *types.SportsEvent)) {
+func (s *sportsWebSocketClient) SetOnSportsUpdate(callback func(result *SportResult)) {
+	s.callbackMutex.Lock()
 	s.onSportsUpdate = callback
+	s.callbackMutex.Unlock()
 }
 
-// Start 启动 Sports WebSocket 连接
 func (s *sportsWebSocketClient) Start() error {
 	s.runningMutex.Lock()
 	if s.running {
 		s.runningMutex.Unlock()
 		return fmt.Errorf("Sports WebSocket client already running")
 	}
-
 	s.stopChan = make(chan struct{})
 	s.stopOnce = sync.Once{}
 	s.running = true
+	stop := s.stopChan
 	s.runningMutex.Unlock()
 
-	go s.run()
+	conn, err := s.connect()
+	if err != nil {
+		s.runningMutex.Lock()
+		s.running = false
+		s.runningMutex.Unlock()
+		return err
+	}
+	if channelClosed(stop) {
+		s.clearConn(conn)
+		_ = conn.Close()
+		return fmt.Errorf("Sports WebSocket client stopped during Start")
+	}
+
+	go s.run(conn, stop)
 	return nil
 }
 
-// Stop 停止 Sports WebSocket 客户端
 func (s *sportsWebSocketClient) Stop() {
 	s.runningMutex.Lock()
 	if !s.running {
@@ -81,83 +111,57 @@ func (s *sportsWebSocketClient) Stop() {
 		return
 	}
 	s.running = false
+	stop := s.stopChan
 	s.runningMutex.Unlock()
 
-	s.stopOnce.Do(func() {
-		close(s.stopChan)
-	})
-
-	s.connMutex.Lock()
-	if s.conn != nil {
-		s.conn.Close()
+	s.stopOnce.Do(func() { close(stop) })
+	if conn := s.currentConn(); conn != nil {
+		_ = conn.Close()
 	}
-	s.connMutex.Unlock()
 }
 
-// IsRunning 返回客户端是否正在运行
 func (s *sportsWebSocketClient) IsRunning() bool {
 	s.runningMutex.RLock()
 	defer s.runningMutex.RUnlock()
 	return s.running
 }
 
-// run 运行主循环
-func (s *sportsWebSocketClient) run() {
+func (s *sportsWebSocketClient) run(conn *websocket.Conn, stop <-chan struct{}) {
 	for {
-		select {
-		case <-s.stopChan:
-			return
-		default:
-			now := time.Now()
-			s.disconnectMutex.Lock()
-			if s.disconnectedAt == nil {
-				s.disconnectedAt = &now
-			}
-			s.disconnectMutex.Unlock()
+		_ = s.listen(conn, stop)
+		s.clearConn(conn)
+		_ = conn.Close()
 
-			if err := s.connectAndListen(); err != nil {
-				time.Sleep(s.reconnectDelay)
-			} else {
-				s.disconnectMutex.Lock()
-				s.disconnectedAt = nil
-				s.lastConnected = time.Now()
-				s.disconnectMutex.Unlock()
+		if channelClosed(stop) {
+			return
+		}
+		for {
+			if !waitForReconnect(stop, s.reconnectDelay) {
+				return
 			}
+			nextConn, err := s.connect()
+			if err != nil {
+				continue
+			}
+			if channelClosed(stop) {
+				_ = nextConn.Close()
+				return
+			}
+			conn = nextConn
+			break
 		}
 	}
 }
 
-// connectAndListen 连接并监听消息
-func (s *sportsWebSocketClient) connectAndListen() error {
+func (s *sportsWebSocketClient) connect() (*websocket.Conn, error) {
 	netDialer := &net.Dialer{
 		Timeout:   internal.WebSocketDialTimeout,
-		DualStack: false,
 		KeepAlive: internal.WebSocketKeepAlive,
 	}
-
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: false,
-	}
-
-	var proxyURL *url.URL
-	if proxyEnv := os.Getenv("HTTPS_PROXY"); proxyEnv != "" {
-		if proxyEnv == "" {
-			proxyEnv = os.Getenv("HTTP_PROXY")
-		}
-		if proxyEnv != "" {
-			proxyURL, _ = url.Parse(proxyEnv)
-		}
-	}
-
 	dialer := websocket.Dialer{
 		HandshakeTimeout: internal.WebSocketHandshakeTimeout,
-		TLSClientConfig:  tlsConfig,
-		Proxy: func(req *http.Request) (*url.URL, error) {
-			if proxyURL != nil {
-				return proxyURL, nil
-			}
-			return http.ProxyFromEnvironment(req)
-		},
+		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12},
+		Proxy:            http.ProxyFromEnvironment,
 		NetDial: func(network, addr string) (net.Conn, error) {
 			if network == "tcp" {
 				network = "tcp4"
@@ -166,126 +170,87 @@ func (s *sportsWebSocketClient) connectAndListen() error {
 		},
 	}
 
-	conn, _, err := dialer.Dial(wsSportsURL, nil)
+	conn, _, err := dialer.Dial(s.url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return nil, fmt.Errorf("connect Sports Channel: %w", err)
 	}
-
 	s.connMutex.Lock()
 	s.conn = conn
 	s.connMutex.Unlock()
+	return conn, nil
+}
 
-	// Send subscription message
-	subMsg := map[string]interface{}{
-		"type": "SPORTS",
-	}
-	if err := conn.WriteJSON(subMsg); err != nil {
-		return fmt.Errorf("failed to send subscription: %w", err)
-	}
-
-	// Start heartbeat
-	heartbeatStop := make(chan struct{})
-	go s.heartbeat(conn, heartbeatStop)
-	defer close(heartbeatStop)
-
-	// Listen for messages
+func (s *sportsWebSocketClient) listen(conn *websocket.Conn, stop <-chan struct{}) error {
 	for {
-		select {
-		case <-s.stopChan:
+		messageType, message, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if messageType != websocket.TextMessage {
+			continue
+		}
+		if string(message) == "ping" {
+			if err := s.writePong(conn); err != nil {
+				return err
+			}
+			continue
+		}
+		if channelClosed(stop) {
 			return nil
-		default:
-			messageType, messageBytes, err := conn.ReadMessage()
-			if err != nil {
-				now := time.Now()
-				s.disconnectMutex.Lock()
-				if s.disconnectedAt == nil {
-					s.disconnectedAt = &now
-				}
-				s.disconnectMutex.Unlock()
-				return fmt.Errorf("failed to read message: %w", err)
-			}
+		}
 
-			if messageType != websocket.TextMessage {
-				continue
-			}
-
-			messageStr := string(messageBytes)
-			if messageStr == "PONG" {
-				continue
-			}
-
-			var rawMsg interface{}
-			if err := json.Unmarshal(messageBytes, &rawMsg); err != nil {
-				continue
-			}
-
-			var msgList []interface{}
-			switch v := rawMsg.(type) {
-			case []interface{}:
-				msgList = v
-			case map[string]interface{}:
-				msgList = []interface{}{v}
-			default:
-				continue
-			}
-
-			for _, rawData := range msgList {
-				msg, ok := rawData.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				if msgStr, ok := msg["type"].(string); ok && msgStr == "PONG" {
-					continue
-				}
-
-				// Handle sports updates
-				if eventType, ok := msg["event_type"].(string); ok && eventType == "sports" {
-					s.handleSportsUpdate(msg)
-				}
-			}
+		var result SportResult
+		if err := json.Unmarshal(message, &result); err != nil || result.Slug == "" {
+			continue
+		}
+		s.callbackMutex.RLock()
+		callback := s.onSportsUpdate
+		s.callbackMutex.RUnlock()
+		if callback != nil {
+			callback(&result)
 		}
 	}
 }
 
-// heartbeat 发送定期 PING 消息
-func (s *sportsWebSocketClient) heartbeat(conn *websocket.Conn, stop chan struct{}) {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
+func (s *sportsWebSocketClient) writePong(conn *websocket.Conn) error {
+	s.writeMutex.Lock()
+	defer s.writeMutex.Unlock()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("pong")); err != nil {
+		return fmt.Errorf("send Sports Channel pong: %w", err)
+	}
+	return nil
+}
 
-	for {
-		select {
-		case <-stop:
-			return
-		case <-ticker.C:
-			if err := conn.WriteJSON("PING"); err != nil {
-				now := time.Now()
-				s.disconnectMutex.Lock()
-				if s.disconnectedAt == nil {
-					s.disconnectedAt = &now
-				}
-				s.disconnectMutex.Unlock()
-				return
-			}
-		}
+func (s *sportsWebSocketClient) currentConn() *websocket.Conn {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	return s.conn
+}
+
+func (s *sportsWebSocketClient) clearConn(conn *websocket.Conn) {
+	s.connMutex.Lock()
+	if s.conn == conn {
+		s.conn = nil
+	}
+	s.connMutex.Unlock()
+}
+
+func channelClosed(channel <-chan struct{}) bool {
+	select {
+	case <-channel:
+		return true
+	default:
+		return false
 	}
 }
 
-// handleSportsUpdate 处理体育事件更新
-func (s *sportsWebSocketClient) handleSportsUpdate(msg map[string]interface{}) {
-	if s.onSportsUpdate == nil {
-		return
+func waitForReconnect(stop <-chan struct{}, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-stop:
+		return false
+	case <-timer.C:
+		return true
 	}
-
-	eventJSON, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-
-	var event types.SportsEvent
-	if err := json.Unmarshal(eventJSON, &event); err != nil {
-		return
-	}
-
-	s.onSportsUpdate(&event)
 }

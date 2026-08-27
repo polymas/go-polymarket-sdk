@@ -176,22 +176,23 @@
 - [x] 每 10 秒发送纯文本 `PING`，处理服务端纯文本 `PONG`。
 - [x] 本地 mock server 覆盖鉴权报文、动态订阅、心跳、事件和重连；`.env` 真实只读监听跨越心跳周期通过。
 
-### [ ] P0-8：修正 Sports WebSocket 地址、握手和心跳方向
+### [x] P0-8：修正 Sports WebSocket 地址、握手和心跳方向
 
-当前实现：
+修复前：
 
 - 连接 `wss://ws-subscriptions-clob.polymarket.com/ws/sports`。
 - 连接后发送 `{"type":"SPORTS"}`，客户端主动定时发 JSON `"PING"`。
 - 仅在 payload 包含 `event_type == "sports"` 时处理。
 
-官方基线：[Sports Channel](https://docs.polymarket.com/api-reference/wss/sports.md) 地址为 `wss://sports-api.polymarket.com/ws`，无需订阅报文；服务端每 5 秒发送纯文本 `ping`，客户端须在 10 秒内回复纯文本 `pong`；比赛更新本身没有上述 `event_type` 包装。
+官方基线：[Sports Channel](https://docs.polymarket.com/api-reference/wss/sports) 地址为 `wss://sports-api.polymarket.com/ws`，无需订阅报文；服务端每 5 秒发送纯文本 `ping`，客户端须在 10 秒内回复纯文本 `pong`；比赛更新本身没有上述 `event_type` 包装。
 
-建议验收：
+完成：
 
-- [ ] 更换 URL，删除 SPORTS 订阅包。
-- [ ] 收到服务端纯文本 `ping` 后回复纯文本 `pong`，不要使用 `WriteJSON("PING")`。
-- [ ] 按官方 Sports event schema 解码全部字段。
-- [ ] 用 mock server 验证 10 秒心跳规则、重连和事件解析。
+- [x] 更换为 `wss://sports-api.polymarket.com/ws`，删除 SPORTS 订阅包。
+- [x] 收到服务端纯文本 `ping` 后立即回复纯文本 `pong`，不再主动发送 JSON heartbeat。
+- [x] 新建官方 `SportResult` 模型，覆盖 slug/live/ended/score/period/elapsed/last_update/finished_timestamp/turn。
+- [x] mock server 验证无订阅包、ping/pong、重连和事件解析；race 通过。
+- [x] 官方生产 Sports Channel 真实只读连接跨越两个 ping 周期保持稳定。
 
 ### [ ] P0-9：补齐 Market WebSocket 事件，暴露 tick size 变化
 

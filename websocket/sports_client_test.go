@@ -1,153 +1,171 @@
 package websocket
 
 import (
-	"sync"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/polymas/go-polymarket-sdk/test"
-	"github.com/polymas/go-polymarket-sdk/types"
+	"github.com/gorilla/websocket"
 )
 
-func TestSportsSetOnSportsUpdate(t *testing.T) {
-	client := NewSportsClient(test.DefaultReconnectDelay)
+func TestSportsClientProtocolAndEvent(t *testing.T) {
+	t.Parallel()
 
-	// 基本功能测试
-	t.Run("Basic", func(t *testing.T) {
-		called := false
-		client.SetOnSportsUpdate(func(event *types.SportsEvent) {
-			called = true
-		})
-		// 设置回调不应该出错
-		if !called {
-			t.Logf("SetOnSportsUpdate succeeded (callback will be called on message)")
+	serverErrors := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
 		}
-	})
+		defer conn.Close()
 
-	// 测试nil回调
-	t.Run("NilCallback", func(t *testing.T) {
-		client.SetOnSportsUpdate(nil)
-		// 设置nil回调不应该panic
-		t.Logf("SetOnSportsUpdate with nil callback succeeded")
-	})
+		if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
+			return
+		}
+		messageType, message, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		if messageType != websocket.TextMessage || string(message) != "pong" {
+			serverErrors <- "first client message was not plain text pong: " + string(message)
+			return
+		}
+
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{
+			"slug":"sea-sf-2025-02-03","live":true,"ended":false,
+			"score":"14-7","period":"Q2","elapsed":"08:45",
+			"last_update":"2025-02-03T20:15:30.123Z",
+			"finished_timestamp":"","turn":"sea"
+		}`))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := newSportsClient(strings.Replace(server.URL, "http://", "ws://", 1), 10*time.Millisecond)
+	defer client.Stop()
+	results := make(chan *SportResult, 1)
+	client.SetOnSportsUpdate(func(result *SportResult) { results <- result })
+
+	if err := client.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	select {
+	case message := <-serverErrors:
+		t.Fatal(message)
+	case result := <-results:
+		if result.Slug != "sea-sf-2025-02-03" || !result.Live || result.Ended ||
+			result.Score != "14-7" || result.Period != "Q2" || result.Elapsed != "08:45" ||
+			result.LastUpdate != "2025-02-03T20:15:30.123Z" || result.Turn != "sea" {
+			t.Fatalf("SportResult = %#v", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Sports result")
+	}
+
+	if err := client.Start(); err == nil {
+		t.Fatal("duplicate Start() succeeded")
+	}
 }
 
-func TestSportsStart(t *testing.T) {
-	client := NewSportsClient(test.DefaultReconnectDelay)
+func TestSportsClientReconnectsWithoutSubscription(t *testing.T) {
+	t.Parallel()
 
-	// 基本功能测试
-	t.Run("Basic", func(t *testing.T) {
-		// 设置回调
-		var receivedUpdate bool
-		var mu sync.Mutex
-		client.SetOnSportsUpdate(func(event *types.SportsEvent) {
-			mu.Lock()
-			receivedUpdate = true
-			mu.Unlock()
-			t.Logf("Received sports update: %+v", event)
-		})
-
-		err := client.Start()
+	var connections atomic.Int32
+	serverErrors := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Fatalf("Start failed: %v", err)
+			return
 		}
+		defer conn.Close()
+		connectionNumber := connections.Add(1)
 
-		// 等待一段时间以接收消息
-		time.Sleep(5 * time.Second)
-
-		// 检查是否运行
-		if !client.IsRunning() {
-			t.Error("Client should be running after Start")
+		if err := conn.WriteMessage(websocket.TextMessage, []byte("ping")); err != nil {
+			return
 		}
-
-		// 停止客户端
-		client.Stop()
-
-		// 等待停止完成
-		time.Sleep(1 * time.Second)
-
-		if client.IsRunning() {
-			t.Error("Client should not be running after Stop")
-		}
-
-		mu.Lock()
-		hasUpdate := receivedUpdate
-		mu.Unlock()
-
-		if !hasUpdate {
-			t.Logf("No updates received (may be expected if no sports events)")
-		}
-	})
-
-	// 测试重复启动
-	t.Run("DuplicateStart", func(t *testing.T) {
-		err := client.Start()
+		_, message, err := conn.ReadMessage()
 		if err != nil {
-			t.Fatalf("First Start failed: %v", err)
+			return
 		}
-		defer client.Stop()
-
-		time.Sleep(1 * time.Second)
-
-		// 尝试再次启动
-		err = client.Start()
-		if err != nil {
-			t.Logf("Duplicate Start returned error (expected): %v", err)
-		} else {
-			t.Error("Expected error for duplicate Start")
+		if string(message) != "pong" {
+			serverErrors <- "unexpected client message: " + string(message)
+			return
 		}
-	})
+		if connectionNumber == 1 {
+			return
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{
+			"slug":"ars-che-2025-02-03","live":false,"ended":true,
+			"score":"2-1","period":"FT","elapsed":"",
+			"last_update":"2025-02-03T22:00:00.000Z",
+			"finished_timestamp":"2025-02-03T21:55:00.000Z"
+		}`))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := newSportsClient(strings.Replace(server.URL, "http://", "ws://", 1), 10*time.Millisecond)
+	defer client.Stop()
+	results := make(chan *SportResult, 1)
+	client.SetOnSportsUpdate(func(result *SportResult) { results <- result })
+	if err := client.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	select {
+	case message := <-serverErrors:
+		t.Fatal(message)
+	case result := <-results:
+		if result.Slug != "ars-che-2025-02-03" || !result.Ended || result.Period != "FT" ||
+			result.FinishedTimestamp != "2025-02-03T21:55:00.000Z" {
+			t.Fatalf("SportResult after reconnect = %#v", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Sports result after reconnect")
+	}
+	if connections.Load() < 2 {
+		t.Fatalf("connections = %d, want at least 2", connections.Load())
+	}
 }
 
-func TestSportsStop(t *testing.T) {
-	client := NewSportsClient(test.DefaultReconnectDelay)
+func TestSportsClientCanRestart(t *testing.T) {
+	t.Parallel()
 
-	// 基本功能测试
-	t.Run("Basic", func(t *testing.T) {
-		err := client.Start()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Fatalf("Start failed: %v", err)
+			return
 		}
-
-		// 等待连接建立
-		time.Sleep(2 * time.Second)
-
-		// 停止客户端
-		client.Stop()
-
-		// 等待停止完成
-		time.Sleep(1 * time.Second)
-
-		if client.IsRunning() {
-			t.Error("Client should not be running after Stop")
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
 		}
-	})
-}
+	}))
+	defer server.Close()
 
-func TestSportsIsRunning(t *testing.T) {
-	client := NewSportsClient(test.DefaultReconnectDelay)
-
-	// 初始状态应该是未运行
-	t.Run("InitialState", func(t *testing.T) {
-		if client.IsRunning() {
-			t.Error("Client should not be running initially")
-		}
-	})
-
-	// 启动后应该是运行状态
-	t.Run("AfterStart", func(t *testing.T) {
-		err := client.Start()
-		if err != nil {
-			t.Fatalf("Start failed: %v", err)
-		}
-
-		time.Sleep(2 * time.Second)
-
-		if !client.IsRunning() {
-			t.Error("Client should be running after Start")
-		}
-
-		client.Stop()
-		time.Sleep(1 * time.Second)
-	})
+	client := newSportsClient(strings.Replace(server.URL, "http://", "ws://", 1), 10*time.Millisecond)
+	if err := client.Start(); err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+	client.Stop()
+	if client.IsRunning() {
+		t.Fatal("client is running after Stop()")
+	}
+	if err := client.Start(); err != nil {
+		t.Fatalf("second Start() error = %v", err)
+	}
+	client.Stop()
 }
