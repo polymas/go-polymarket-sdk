@@ -66,7 +66,7 @@ func main() {
     }
     defer web3Client.Close()
 
-    // 2. 创建 CLOB 客户端（需要 Web3 客户端）
+    // 2. 创建 CLOB 客户端（默认使用当前 V2 订单协议）
     clobClient, err := clob.NewClient(web3Client)
     if err != nil {
         log.Fatal(err)
@@ -91,6 +91,10 @@ func main() {
     fmt.Printf("市场: %+v\n", market)
 }
 ```
+
+`clob.NewClient` 只使用当前 V2 订单协议。`clob.WithV2()` 仅为旧代码源码兼容
+保留，新代码无需传入。生产 CLOB 已不再支持 V1 签名订单，因此 SDK 不提供
+V1 回退选项。
 
 ### 更多示例
 

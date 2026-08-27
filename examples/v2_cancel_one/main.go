@@ -33,7 +33,7 @@ func main() {
 	}
 	defer w3.Close()
 
-	client, err := clob.NewClient(w3, clob.WithV2())
+	client, err := clob.NewClient(w3)
 	if err != nil {
 		log.Fatalf("V2 CLOB client: %v", err)
 	}

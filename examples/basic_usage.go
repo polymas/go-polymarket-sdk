@@ -51,7 +51,7 @@ func main() {
 
 	fmt.Printf("Web3 客户端地址: %s\n", web3Client.GetBaseAddress())
 
-	// 2. 创建完整 CLOB 客户端（需要 Web3 客户端）
+	// 2. 创建完整 CLOB 客户端（默认使用当前 V2 订单协议）
 	clobClient, err := clob.NewClient(web3Client)
 	if err != nil {
 		log.Fatalf("创建 CLOB 客户端失败: %v", err)

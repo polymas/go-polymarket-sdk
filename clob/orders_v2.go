@@ -16,10 +16,8 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// orderedOrderV2 匹配 V2 Order 的 JSON 提交格式，字段顺序对齐 V2 EIP-712 typehash。
-// 注意：服务端确切字段名和 salt/signatureType 的数值/字符串选择，官方 V2 POST /order 文档
-// 未正式公开。下面按 V1 惯例推断（salt/signatureType 为整数，其它数值量为十进制字符串）。
-// 联调时如遇 422，先看这里的键名。
+// orderedOrderV2 匹配当前 V2 Order 的 JSON 提交格式，字段顺序对齐 V2
+// EIP-712 typehash 和官方 V2 SDK 的 order_to_json_v2 输出。
 // orderedOrderV2 字段顺序对照 py-clob-client-v2/order_utils/model/order_data_v2.py
 // 中的 order_to_json_v2() 输出顺序锁定（HMAC 签名敏感）：
 //
@@ -32,13 +30,13 @@ type orderedOrderV2 struct {
 	TokenId       string `json:"tokenId"`
 	MakerAmount   string `json:"makerAmount"`
 	TakerAmount   string `json:"takerAmount"`
-	Side          string `json:"side"`         // "BUY" / "SELL"
-	Expiration    string `json:"expiration"`   // unix 秒字符串；GTC 订单为 "0"
+	Side          string `json:"side"`       // "BUY" / "SELL"
+	Expiration    string `json:"expiration"` // unix 秒字符串；GTC 订单为 "0"
 	SignatureType int    `json:"signatureType"`
-	Timestamp     string `json:"timestamp"`    // 毫秒整数的字符串形式
-	Metadata      string `json:"metadata"`     // 0x + 64 hex
-	Builder       string `json:"builder"`      // 0x + 64 hex
-	Signature     string `json:"signature"`    // 0x + 130 hex
+	Timestamp     string `json:"timestamp"` // 毫秒整数的字符串形式
+	Metadata      string `json:"metadata"`  // 0x + 64 hex
+	Builder       string `json:"builder"`   // 0x + 64 hex
+	Signature     string `json:"signature"` // 0x + 130 hex
 }
 
 // orderRequestV2 是单笔订单的提交载荷。字段顺序与官方 to_dict 保持一致。
@@ -75,7 +73,7 @@ const postOrdersBatchV2DropMaxRetries = 3
 // 做语义判断，不必字符串匹配 ErrorMsg。
 const OrderStrippedStatus = "stripped"
 
-// postOrdersBatchV2 对应 V1 的 postOrdersBatch，走 V2 签名路径。
+// postOrdersBatchV2 提交当前 V2 批量订单。
 //
 // 重试机制（两层独立）：
 //
@@ -248,18 +246,32 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 
 	requestBody := make([]orderRequestV2, 0, len(orderArgsList))
 
+	// 非重试路径：并发预取本批中未传入、未缓存的 token 的 NegRisk 状态，把签名
+	// 循环里逐个串行 GET /neg-risk 压成约 1 次往返的墙钟时间。重试路径强制 true，
+	// 无需预取。
+	if !isRetryCall {
+		c.baseClient.prefetchNegRisk(orderArgsList)
+	}
+
 	for i, orderArgs := range orderArgsList {
 		if orderArgs.Size < 5.0 {
 			orderArgs.Size = 5.0
 		}
 
 		// type-3（POLY_1271）签名的 exchange 域取决于市场是否 NegRisk：
-		// 非 retry 时逐 token 查真实状态签对域；retry 时 negRisk 已被强制为
-		// true，作为整批兜底（首次按真实值仍签错的极端情况下再统一改走
-		// NegRisk Exchange 重签）。
+		// 非 retry 时按真实状态签对域；retry 时 negRisk 已被强制为 true，作为
+		// 整批兜底（首次按真实值仍签错的极端情况下再统一改走 NegRisk Exchange
+		// 重签）。真实状态优先取调用方传入的 orderArgs.NegRisk（上游多半已从
+		// gamma/clob 市场数据拿到，零网络开销）；未传（nil）才现查 GET /neg-risk。
 		perOrderNegRisk := negRisk
 		if !isRetryCall {
-			perOrderNegRisk = c.baseClient.negRiskForToken(orderArgs.TokenID)
+			if orderArgs.NegRisk != nil {
+				perOrderNegRisk = *orderArgs.NegRisk
+				// 顺手把权威值喂进缓存，惠及后续 GetNegRisk / 重试路径。
+				c.baseClient.negRisk[orderArgs.TokenID] = perOrderNegRisk
+			} else {
+				perOrderNegRisk = c.baseClient.negRiskForToken(orderArgs.TokenID)
+			}
 		}
 
 		signed, err := c.createSignedOrderV2(orderArgs, defaultTickSize, perOrderNegRisk, orderTypes[i])
@@ -315,7 +327,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		return []types.OrderPostResponse{}, nil
 	}
 
-	// V1 相同的 negRisk 重试流程
+	// 对可能签错 exchange 域的订单执行一次 NegRisk 重签重试。
 	failedOrders := make([]int, 0)
 	for i, result := range resp {
 		// 签名域选错（含 1271 钱包的 "invalid POLY_1271 signature: ..."）时
@@ -373,7 +385,7 @@ func (c *orderClientImpl) createSignedOrderV2(
 	signerAddr := baseAddr
 	switch c.baseClient.signatureType {
 	case types.ProxySignatureType, types.SafeSignatureType:
-		// V1 风格：maker = proxy（资金来源），signer = EOA（API key 持有者）
+		// Proxy/Safe：maker = proxy（资金来源），signer = EOA（API key 持有者）
 		makerAddr = string(c.baseClient.proxyAddress)
 	case types.CWIASignatureType:
 		// V2 POLY_1271 (=3) 语义：合约钱包通过 EIP-1271 验证签名，

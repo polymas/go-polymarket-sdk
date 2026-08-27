@@ -16,7 +16,7 @@ import "strings"
 // "POLY_1271" 与 "does not match order hash" 两个特征，覆盖 1271 钱包错误串，
 // 同时保留对 EOA/Proxy/Safe 老式 "invalid signature" 的兼容。
 //
-// V1（orders.go）与 V2（orders_v2.go）两条下单路径共用此判据。
+// V2 批量下单的签名错误重试使用此判据。
 func signatureRetryNeeded(errorMsg string) bool {
 	if errorMsg == "" {
 		return false

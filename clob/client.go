@@ -2,15 +2,18 @@ package clob
 
 import (
 	"fmt"
-	"math/big"
+	"sync"
 	"time"
 
-	"github.com/polymarket/go-order-utils/pkg/builder"
 	"github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
 )
+
+// negRiskPrefetchConcurrency 限制并发预取 GET /neg-risk 的 goroutine 数，
+// 既压缩墙钟时间又不至于把 CLOB 网关打挂（批量上限 15，8 路足够）。
+const negRiskPrefetchConcurrency = 8
 
 // OrderClient 订单相关操作的轻量接口
 type OrderClient interface {
@@ -93,22 +96,20 @@ type baseClient struct {
 	tickSizes     map[string]types.TickSize
 	negRisk       map[string]bool
 	feeRates      map[string]int
-	orderBuilder  *builder.ExchangeOrderBuilderImpl
 	web3Client    web3.Client // 保存 Web3Client 引用（可能为nil，用于只读客户端）
-	useV2         bool        // 打开后订单走 V2 签名 + V2 CLOB host（2026-04-28 切换日前联调）
 }
 
 // ClientOption 客户端构造选项
 type ClientOption func(*baseClient)
 
-// WithV2 切换客户端到 V2 签名路径。
-// 2026-04-28 切换日后 ClobAPIDomain (clob.polymarket.com) 自身即为 V2，
-// clob-v2.polymarket.com 已 301 重定向回主域，沿用旧域会让 POST 被降级成 GET 报 405。
-// 因此这里只切签名路径，host 保持默认 ClobAPIDomain。
+// WithV2 显式选择当前 V2 订单协议。
+//
+// V2 已是 NewClient 的默认值；保留该 option 仅用于源码兼容以及让调用方可以
+// 显式表达意图。host 始终使用 ClobAPIDomain。
+//
+// Deprecated: V2 is the default; omit this option.
 func WithV2() ClientOption {
-	return func(c *baseClient) {
-		c.useV2 = true
-	}
+	return func(*baseClient) {}
 }
 
 // readonlyBaseClient 只读客户端的基础结构，不包含认证相关字段
@@ -203,17 +204,12 @@ func NewReadonlyClient() ReadonlyClient {
 // 在初始化时自动调用 createOrDeriveAPICreds 获取 API 凭证
 // 返回 Client 接口，不允许直接访问实现类型
 //
-// opts: 可选配置，如 WithV2() 切到 V2 签名 + V2 CLOB host。
+// 只使用当前 V2 订单协议。生产 CLOB 不再兼容 V1；WithV2() 仅为源码兼容
+// 保留，已经不再需要。
 func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 	// 从 web3.Client 获取所需信息
 	signatureType := web3Client.GetSignatureType()
 	address := web3Client.GetBaseAddress()
-
-	// Create order builder
-	chainIDBig := big.NewInt(int64(web3Client.GetChainID()))
-	orderBuilder := builder.NewExchangeOrderBuilderImpl(chainIDBig, func() int64 {
-		return time.Now().UnixNano()
-	})
 
 	// 创建基础客户端
 	base := &baseClient{
@@ -224,11 +220,10 @@ func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 		tickSizes:     make(map[string]types.TickSize),
 		negRisk:       make(map[string]bool),
 		feeRates:      make(map[string]int),
-		orderBuilder:  orderBuilder,
 		web3Client:    web3Client,
 	}
 
-	// 应用可选配置（如 WithV2）
+	// 应用可选配置；后传入的 option 覆盖前面的设置。
 	for _, opt := range opts {
 		opt(base)
 	}
@@ -246,6 +241,15 @@ func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 		return nil, fmt.Errorf("failed to get proxy address: %w", err)
 	}
 	base.proxyAddress = proxyAddr
+
+	internal.LogInfo(
+		"CLOB client initialized: protocol=V2 signature_type=%d signer=%s maker=%s exchange_domains=%s,%s",
+		base.signatureType,
+		base.address,
+		base.proxyAddress,
+		internal.PolygonExchangeV2,
+		internal.PolygonNegRiskExchangeV2,
+	)
 
 	// 创建功能模块
 	orderClient := &orderClientImpl{baseClient: base}
@@ -294,6 +298,75 @@ func (c *baseClient) negRiskForToken(tokenID string) bool {
 	}
 	c.negRisk[tokenID] = resp.NegRisk
 	return resp.NegRisk
+}
+
+// negRiskFetchList 计算一批订单里"NegRisk 状态未知、需要现查"的去重 tokenID
+// 列表：跳过调用方已传入 NegRisk 的、以及缓存已命中的，按首次出现顺序去重。
+// 抽成纯函数便于离线单测（见 prefetch_negrisk_test.go）。
+func (c *baseClient) negRiskFetchList(orderArgsList []types.OrderArgs) []string {
+	need := make([]string, 0, len(orderArgsList))
+	seen := make(map[string]struct{}, len(orderArgsList))
+	for i := range orderArgsList {
+		if orderArgsList[i].NegRisk != nil {
+			continue // 调用方已传入真实值，签名循环直接用
+		}
+		id := orderArgsList[i].TokenID
+		if _, ok := c.negRisk[id]; ok {
+			continue // 缓存已命中
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		need = append(need, id)
+	}
+	return need
+}
+
+// prefetchNegRisk 并发预取一批订单中"NegRisk 状态未知"的 token，填充
+// baseClient.negRisk 缓存，避免签名循环里逐个串行 GET /neg-risk。
+//
+// 只处理 orderArgs.NegRisk == nil（调用方未传入）且缓存未命中的去重 token；
+// 已传入或已缓存的跳过。≤1 个待查时不起 goroutine，留给签名循环里的
+// negRiskForToken 串行兜底即可。
+//
+// 并发安全：每个 goroutine 只写自己的本地结果槽，不触碰共享的 c.negRisk；
+// 待全部返回后由调用方所在的单 goroutine 合并进缓存，不引入新的 data race。
+func (c *baseClient) prefetchNegRisk(orderArgsList []types.OrderArgs) {
+	need := c.negRiskFetchList(orderArgsList)
+	if len(need) <= 1 {
+		return // 0 或 1 个，串行查即可，不值得起 goroutine
+	}
+
+	type result struct {
+		val bool
+		ok  bool
+	}
+	out := make([]result, len(need))
+	sem := make(chan struct{}, negRiskPrefetchConcurrency)
+	var wg sync.WaitGroup
+	for i, id := range need {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			resp, err := http.Get[struct {
+				NegRisk bool `json:"neg_risk"`
+			}](c.baseURL, internal.GetNegRisk, map[string]string{"token_id": id})
+			if err != nil {
+				return // ok 默认 false → 不写缓存，签名循环里再 negRiskForToken 兜底
+			}
+			out[i] = result{val: resp.NegRisk, ok: true}
+		}(i, id)
+	}
+	wg.Wait()
+
+	for i, r := range out {
+		if r.ok {
+			c.negRisk[need[i]] = r.val
+		}
+	}
 }
 
 // CreateOrDeriveAPICreds creates or derives API credentials

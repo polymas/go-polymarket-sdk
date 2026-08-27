@@ -186,9 +186,15 @@ type OrderArgs struct {
 	Size       float64   `json:"size"`
 	Side       OrderSide `json:"side"`
 	FeeRateBps *int      `json:"fee_rate_bps,omitempty"`
-	Expiration int64     `json:"expiration,omitempty"`  // unix 秒；0 = GTC
+	Expiration int64     `json:"expiration,omitempty"` // unix 秒；0 = GTC
 	PostOnly   bool      `json:"post_only,omitempty"`
 	DeferExec  bool      `json:"defer_exec,omitempty"`
+
+	// NegRisk 可选携带该 token 的 NegRisk 状态，用于 V2 type-3（POLY_1271）
+	// 签名选 exchange 域。上游若已从 gamma /markets 或 clob 市场数据拿到该状态
+	// （二者都带 negRisk 字段），直接传进来即可让批量下单零网络开销地签对域；
+	// 留 nil（未知）则由 SDK 现查 GET /neg-risk 兜底。仅 V2 路径消费此字段。
+	NegRisk *bool `json:"neg_risk,omitempty"`
 }
 
 // MarketOrderArgs 表示创建市价单的参数
@@ -543,8 +549,8 @@ type RFQQuote struct {
 
 // RFQAcceptResponse 表示接受报价的响应
 type RFQAcceptResponse struct {
-	QuoteID  string    `json:"quote_id"`
-	OrderID  Keccak256 `json:"order_id,omitempty"`
-	Status   string    `json:"status"`
+	QuoteID    string    `json:"quote_id"`
+	OrderID    Keccak256 `json:"order_id,omitempty"`
+	Status     string    `json:"status"`
 	AcceptedAt time.Time `json:"accepted_at"`
 }

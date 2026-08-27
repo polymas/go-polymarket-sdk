@@ -2,7 +2,9 @@ package web3
 
 import (
 	"fmt"
+	"math"
 	"math/big"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -34,7 +36,7 @@ func (c *GaslessClient) SplitPosition(amount float64, conditionID types.Keccak25
 		return nil, err
 	}
 
-	data, err := c.encodeSplit(conditionID, intAmount) // 长签名 & collateralToken=USDC.e 与 V1 一样
+	data, err := c.encodeSplit(conditionID, intAmount) // CTF 长签名，collateralToken=USDC.e
 	if err != nil {
 		return nil, fmt.Errorf("encode split V2: %w", err)
 	}
@@ -167,16 +169,34 @@ func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.
 	return c.executeGaslessBatch(proxyTxns, "Redeem Positions V2", "redeem-v2")
 }
 
-// toUnits6 把 float 金额转成 6 decimals uint256，负数或零会报错。
+// toUnits6 把 float 金额按其十进制表示精确转换成 6 decimals uint256。
+// 不允许静默截断超过 6 位的小数，也拒绝非有限值及 uint256 溢出。
 func toUnits6(amount float64) (*big.Int, error) {
-	amountFloat := big.NewFloat(amount)
-	multiplier := big.NewFloat(1e6)
-	result := new(big.Float).Mul(amountFloat, multiplier)
-	intAmount, _ := result.Int(nil)
-	if intAmount == nil || intAmount.Sign() <= 0 {
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive, got %f", amount)
 	}
-	return intAmount, nil
+
+	// FormatFloat(..., 'f', -1, 64) 保留能往返 float64 的最短十进制表示，
+	// 再由 big.Rat 做精确十进制运算，避免 1.000001*1e6 因二进制浮点
+	// 变成 1000000.999999... 后被错误截断。
+	decimal := strconv.FormatFloat(amount, 'f', -1, 64)
+	amountRat, ok := new(big.Rat).SetString(decimal)
+	if !ok {
+		return nil, fmt.Errorf("invalid amount %q", decimal)
+	}
+	scaled := new(big.Rat).Mul(amountRat, big.NewRat(1_000_000, 1))
+	if !scaled.IsInt() {
+		return nil, fmt.Errorf("amount supports at most 6 decimal places, got %s", decimal)
+	}
+
+	units := new(big.Int).Set(scaled.Num())
+	if units.Sign() <= 0 {
+		return nil, fmt.Errorf("amount must be at least 0.000001, got %s", decimal)
+	}
+	if units.BitLen() > 256 {
+		return nil, fmt.Errorf("amount exceeds uint256: %s", decimal)
+	}
+	return units, nil
 }
 
 // adapterAddrV2 按 negRisk 返回对应 CtfCollateralAdapter 地址（split/merge 走 adapter）。
@@ -224,4 +244,3 @@ func encodeRedeemCTF(collateralToken common.Address, conditionID types.Keccak256
 
 	return data, nil
 }
-

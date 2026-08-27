@@ -218,7 +218,8 @@ func (c *GaslessClient) ensureV2RelayerKey(ctx context.Context) error {
 	}
 	c.v2KeyLastErr = nil
 	c.localSigner.SetV2Key(k)
-	log.Printf("[OK] V2 relayer key 已注入：%s (%s)", k.Key, k.Address)
+	// Relayer API key 属于凭证，只记录关联地址，绝不把 key 写入日志。
+	log.Printf("[OK] V2 relayer key 已注入：address=%s", k.Address)
 	return nil
 }
 

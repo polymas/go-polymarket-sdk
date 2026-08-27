@@ -45,7 +45,7 @@ func main() {
 	defer web3Client.Close()
 	fmt.Printf("EOA 地址: %s\n", web3Client.GetBaseAddress())
 
-	client, err := clob.NewClient(web3Client, clob.WithV2())
+	client, err := clob.NewClient(web3Client)
 	if err != nil {
 		log.Fatalf("❌ V2 CLOB 客户端失败（API Key 派生失败）: %v", err)
 	}

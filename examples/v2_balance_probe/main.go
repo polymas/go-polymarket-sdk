@@ -27,22 +27,8 @@ func main() {
 	}
 	defer w3.Close()
 
-	fmt.Println("── V1 CLOB ──")
-	v1, err := clob.NewClient(w3)
-	if err != nil {
-		log.Fatalf("V1 client: %v", err)
-	}
-	baV1, err := v1.GetBalanceAllowance()
-	if err != nil {
-		fmt.Printf("GetBalanceAllowance err: %v\n", err)
-	} else {
-		fmt.Printf("%+v\n", baV1)
-	}
-	usdcV1, _ := v1.GetUSDCBalance()
-	fmt.Printf("GetUSDCBalance: %.6f\n", usdcV1)
-
-	fmt.Println("\n── V2 CLOB ──")
-	v2, err := clob.NewClient(w3, clob.WithV2())
+	fmt.Println("── V2 CLOB ──")
+	v2, err := clob.NewClient(w3)
 	if err != nil {
 		log.Fatalf("V2 client: %v", err)
 	}

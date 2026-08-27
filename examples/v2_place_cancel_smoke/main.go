@@ -47,7 +47,7 @@ func main() {
 	defer w3.Close()
 	fmt.Printf("EOA: %s\n", w3.GetBaseAddress())
 
-	client, err := clob.NewClient(w3, clob.WithV2())
+	client, err := clob.NewClient(w3)
 	if err != nil {
 		log.Fatalf("clob V2 client: %v", err)
 	}

@@ -1,19 +1,23 @@
 // v2_smoke 在 clob-v2.polymarket.com 上跑最小联调验证。
 //
 // 必选环境变量：
-//   poly_sec                  钱包私钥（0x 前缀可选；兼容旧名 POLY_PRIVATE_KEY）
+//
+//	poly_sec                  钱包私钥（0x 前缀可选；兼容旧名 POLY_PRIVATE_KEY）
 //
 // 可选环境变量：
-//   POLY_SIGNATURE_TYPE       0=EOA, 1=Proxy (默认), 2=Safe
-//   POLY_V2_TEST_TOKEN        用于 order book / midpoint / 下单的 tokenID（十进制 uint256 字符串）
-//   POLY_V2_SMOKE_POST=1      打开后执行 Step B（post 小额订单并立刻 cancel，会消耗 gas / 风险）
+//
+//	POLY_SIGNATURE_TYPE       0=EOA, 1=Proxy (默认), 2=Safe
+//	POLY_V2_TEST_TOKEN        用于 order book / midpoint / 下单的 tokenID（十进制 uint256 字符串）
+//	POLY_V2_SMOKE_POST=1      打开后执行 Step B（post 小额订单并立刻 cancel，会消耗 gas / 风险）
 //
 // 运行方式：
-//   go run ./examples/v2_smoke
+//
+//	go run ./examples/v2_smoke
 //
 // 验证成功的标志：
-//   Step A 全部 ✅
-//   Step B（如果启用）最后一行 "✅ POST + CANCEL round-trip 成功"
+//
+//	Step A 全部 ✅
+//	Step B（如果启用）最后一行 "✅ POST + CANCEL round-trip 成功"
 package main
 
 import (
@@ -50,7 +54,7 @@ func main() {
 	defer web3Client.Close()
 	fmt.Printf("钱包地址: %s\n\n", web3Client.GetBaseAddress())
 
-	client, err := clob.NewClient(web3Client, clob.WithV2())
+	client, err := clob.NewClient(web3Client)
 	if err != nil {
 		log.Fatalf("❌ 创建 V2 CLOB 客户端失败（API Key 派生可能失败）: %v", err)
 	}
