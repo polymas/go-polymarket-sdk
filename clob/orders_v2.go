@@ -3,11 +3,11 @@ package clob
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/polymas/go-polymarket-sdk/http"
@@ -48,152 +48,131 @@ type orderRequestV2 struct {
 	PostOnly  bool           `json:"postOnly"`
 }
 
-// dropOrderbookNotFoundRegex 匹配 CLOB v2 批量端点的 top-level 错误：
-//
-//	HTTP 400: {"error":"the orderbook 12345 does not exist"}
-//
-// 捕获组取出 tokenId（十进制 uint256 字符串）。
-//
-// 实测（2026-05-07，POST /orders 带 3 个不同的坏 token）：CLOB 只报响应里
-// 出现的**第一个**坏 token，整批 400。所以多个坏 token 必须迭代清——每轮
-// 重试只能干掉一个。这里仍用 FindAll 提取，是为了防御后端将来改成一次返回
-// 多个 token 的情况（届时一轮就能清干净，省重试次数）。
+// dropOrderbookNotFoundRegex 匹配 CLOB v2 批量端点的顶层 400。实测中
+// CLOB 只报原始 HTTP 子批的第一个坏 token，并拒绝整批。
 var dropOrderbookNotFoundRegex = regexp.MustCompile(`orderbook\s+(\d+)\s+does\s+not\s+exist`)
+var topLevelHTTP4xxRegex = regexp.MustCompile(`^HTTP 4\d\d:`)
 
-// postOrdersBatchV2DropMaxRetries 是 "orderbook X does not exist" 自动剥离重试
-// 的最大次数。每轮把响应里报告的所有坏 token 剥掉；按当前 CLOB 行为（一次
-// 只报一个），3 次重试最多能清掉 3 个不同的坏 token。批量大小上限 15，超过
-// 这个数说明上游 list 大量无效，停手让人工介入。
-const postOrdersBatchV2DropMaxRetries = 3
+const (
+	// OrderMarketClosedStatus 是已确认的关闭市场终态，不代表交易所已接单。
+	OrderMarketClosedStatus = "market_closed"
+	// OrderNotSubmittedStatus 表示订单确定未提交。
+	OrderNotSubmittedStatus = "not_submitted"
+	// OrderUnknownStatus 表示请求可能已发出，但服务端结果不确定。
+	OrderUnknownStatus = "unknown"
+	// OrderServerRejectedStatus 是 HTTP 200 响应中的逐单业务拒绝。
+	OrderServerRejectedStatus = "server_rejected"
 
-// OrderStrippedStatus 标识被 SDK 自动剥离的合成失败响应。当批量提交因
-// "orderbook X does not exist" 触发剥离重试时，被剥离的订单不会出现在 CLOB
-// 响应里，SDK 会在对应原始下标位置回填一条 OrderPostResponse{Status: this}，
-// 以保证返回数组与入参等长同序。业务侧可用 r.Status == OrderStrippedStatus
-// 做语义判断，不必字符串匹配 ErrorMsg。
-const OrderStrippedStatus = "stripped"
+	// Deprecated: use OrderMarketClosedStatus. Closed markets are no longer retried.
+	OrderStrippedStatus = OrderMarketClosedStatus
+)
 
-// postOrdersBatchV2 提交当前 V2 批量订单。
-//
-// 重试机制（两层独立）：
-//
-//  1. **bad-token 重试（外层 / HTTP 400）**：CLOB 在 top-level 校验时发现某个
-//     tokenId 没有对应 orderbook（已结算 / 已下架 / 错误抓取），返回 400 拒掉
-//     整批。本函数自动从批内剥离该 token 的所有订单并重发，最多 3 次。
-//
-//  2. **negRisk 重试（内层 / HTTP 200 + per-order）**：单个订单返回
-//     "invalid signature" 时改用 V2 NegRisk Exchange 重新签名+重发。
-//
-// 两层正交：bad-token 是请求级，negRisk 是订单级。
-//
-// **返回契约**：成功路径下返回的切片长度恒等于 len(orderArgsList)，且与入参
-// 同序。被剥离的位置回填 OrderPostResponse{Status: OrderStrippedStatus,
-// ErrorMsg: "orderbook X does not exist (stripped by SDK retry)"}，调用方可
-// 直接 `for i, r := range results { ... orderArgsList[i] ... }` 按下标对齐。
-// 失败路径（重试上限耗尽 / 非 bad-token 错误）保持 nil + error，不做长度补齐。
+type batchNotSubmittedError struct{ err error }
+
+func (e *batchNotSubmittedError) Error() string { return e.err.Error() }
+func (e *batchNotSubmittedError) Unwrap() error { return e.err }
+
+func newBatchNotSubmittedError(format string, args ...interface{}) error {
+	return &batchNotSubmittedError{err: fmt.Errorf(format, args...)}
+}
+
+// postOrdersBatchV2 始终返回与输入等长、同序的结果。
+// orderbook 不存在时不重试：该 token 标记 market_closed，同一
+// 原始 HTTP 子批的其他订单标记 not_submitted。
 func (c *orderClientImpl) postOrdersBatchV2(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
-	return runV2BatchWithStrip(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
+	return resolveV2BatchAttempt(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
 		return c.postOrdersBatchV2Once(a, t, isRetry...)
 	})
 }
 
-// runV2BatchWithStrip 实现 bad-token 自动剥离重试 + 等长结果回填。抽出来是
-// 为了让纯逻辑（索引簿记、stripped 合成响应、retry 上限语义）能脱离
-// orderClientImpl 单测——见 orders_v2_strip_test.go。
-func runV2BatchWithStrip(
+func resolveV2BatchAttempt(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 	postFn func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error),
 ) ([]types.OrderPostResponse, error) {
 	n := len(orderArgsList)
-	args := append([]types.OrderArgs(nil), orderArgsList...)
-	otypes := append([]types.OrderType(nil), orderTypes...)
-	// originalIndex[i] = 当前 args[i] 在原始 orderArgsList 中的下标
-	originalIndex := make([]int, n)
-	for i := range originalIndex {
-		originalIndex[i] = i
+	resp, err := postFn(orderArgsList, orderTypes)
+	if err == nil {
+		return normalizeV2BatchResponses(resp, n)
 	}
-	// 被剥离订单的原始下标 → tokenID，用于回填合成 stripped 响应
-	strippedAt := make(map[int]string, 0)
-
-	buildFinal := func(resp []types.OrderPostResponse) []types.OrderPostResponse {
-		final := make([]types.OrderPostResponse, n)
-		for j, r := range resp {
-			if j >= len(originalIndex) {
-				break
-			}
-			final[originalIndex[j]] = r
+	if len(resp) > 0 {
+		aligned, alignErr := normalizeV2BatchResponses(resp, n)
+		if alignErr != nil {
+			return aligned, fmt.Errorf("%v; %w", alignErr, err)
 		}
-		for origIdx, tokenID := range strippedAt {
-			final[origIdx] = types.OrderPostResponse{
-				Status:   OrderStrippedStatus,
-				ErrorMsg: fmt.Sprintf("orderbook %s does not exist (stripped by SDK retry)", tokenID),
-			}
-		}
-		return final
+		return aligned, err
 	}
 
-	for attempt := 0; ; attempt++ {
-		resp, err := postFn(args, otypes)
-		if err == nil {
-			return buildFinal(resp), nil
-		}
-		if attempt >= postOrdersBatchV2DropMaxRetries {
-			return nil, fmt.Errorf("V2 batch order: 已剥离 %d 个不存在的 orderbook 但批内仍有更多坏 token（达到 %d 次上限），上游 list 可能严重过期，请人工排查: %w",
-				attempt, postOrdersBatchV2DropMaxRetries, err)
-		}
-		badTokens := extractBadOrderbookTokensFromErr(err)
-		if len(badTokens) == 0 {
-			// 非 "orderbook X does not exist" 的错误：直接透传，不重试
-			return nil, err
-		}
-		// 把响应里报告的所有坏 token 一并剥离（防御 CLOB 后端改成多 token 响应）
+	badTokens := extractBadOrderbookTokensFromErr(err)
+	if len(badTokens) > 0 {
 		badSet := make(map[string]struct{}, len(badTokens))
-		for _, t := range badTokens {
-			badSet[t] = struct{}{}
+		for _, tokenID := range badTokens {
+			badSet[tokenID] = struct{}{}
 		}
-		newArgs := make([]types.OrderArgs, 0, len(args))
-		newTypes := make([]types.OrderType, 0, len(otypes))
-		newIdx := make([]int, 0, len(args))
-		droppedPerToken := make(map[string]int, len(badTokens))
-		for i, a := range args {
-			if _, bad := badSet[a.TokenID]; bad {
-				droppedPerToken[a.TokenID]++
-				strippedAt[originalIndex[i]] = a.TokenID
+		results := makeBatchStatusResults(n, OrderNotSubmittedStatus, "original HTTP batch was rejected because an orderbook does not exist")
+		allClosed := true
+		matched := 0
+		for i, orderArgs := range orderArgsList {
+			if _, closed := badSet[orderArgs.TokenID]; closed {
+				results[i] = marketClosedOrderResult(orderArgs.TokenID)
+				matched++
 				continue
 			}
-			newArgs = append(newArgs, a)
-			newTypes = append(newTypes, otypes[i])
-			newIdx = append(newIdx, originalIndex[i])
+			allClosed = false
 		}
-		totalDropped := 0
-		for _, c := range droppedPerToken {
-			totalDropped += c
+		if matched == 0 {
+			return makeBatchStatusResults(n, OrderUnknownStatus, err.Error()), fmt.Errorf("CLOB reported closed orderbook(s) %v that are not present in the submitted batch: %w", badTokens, err)
 		}
-		if totalDropped == 0 {
-			// CLOB 报告的 token 不在我们这批里——无法处理，避免死循环
-			return nil, fmt.Errorf("V2 batch: CLOB reports bad orderbook(s) %v but no matching order in batch: %w",
-				badTokens, err)
+		if allClosed {
+			return results, nil
 		}
-		// 日志：列出每个被剥离的 token + 笔数，便于排查上游 list 来源问题
-		var summary []string
-		for t, c := range droppedPerToken {
-			summary = append(summary, fmt.Sprintf("%s×%d", t, c))
+		return results, fmt.Errorf("CLOB rejected the original HTTP batch because orderbook(s) %v do not exist; other orders were not submitted: %w", badTokens, err)
+	}
+
+	status := OrderUnknownStatus
+	message := "batch submission outcome is unknown: " + err.Error()
+	var notSubmittedErr *batchNotSubmittedError
+	if errors.As(err, &notSubmittedErr) || topLevelHTTP4xxRegex.MatchString(err.Error()) {
+		status = OrderNotSubmittedStatus
+		message = err.Error()
+	}
+	return makeBatchStatusResults(n, status, message), err
+}
+
+func normalizeV2BatchResponses(resp []types.OrderPostResponse, expected int) ([]types.OrderPostResponse, error) {
+	results := makeBatchStatusResults(expected, OrderUnknownStatus, "CLOB response did not include a result for this order")
+	limit := len(resp)
+	if limit > expected {
+		limit = expected
+	}
+	for i := 0; i < limit; i++ {
+		results[i] = resp[i]
+		if results[i].ErrorMsg != "" && results[i].Status == "" {
+			results[i].Status = OrderServerRejectedStatus
 		}
-		internal.LogError("V2 batch: 剥离不存在的 orderbook [%s]，剩余 %d 笔重试 (attempt %d/%d)",
-			strings.Join(summary, ", "), len(newArgs), attempt+1, postOrdersBatchV2DropMaxRetries)
-		args = newArgs
-		otypes = newTypes
-		originalIndex = newIdx
-		if len(args) == 0 {
-			// 全部被剥离：直接构造 final 即可（resp 为空切片，buildFinal
-			// 会把所有原始下标都填成 stripped）
-			return buildFinal(nil), nil
-		}
+	}
+	if len(resp) != expected {
+		return results, fmt.Errorf("CLOB batch response count mismatch: got %d, want %d", len(resp), expected)
+	}
+	return results, nil
+}
+
+func makeBatchStatusResults(count int, status, message string) []types.OrderPostResponse {
+	results := make([]types.OrderPostResponse, count)
+	for i := range results {
+		results[i] = types.OrderPostResponse{Status: status, ErrorMsg: message}
+	}
+	return results
+}
+
+func marketClosedOrderResult(tokenID string) types.OrderPostResponse {
+	return types.OrderPostResponse{
+		Status:   OrderMarketClosedStatus,
+		ErrorMsg: fmt.Sprintf("orderbook %s does not exist; market treated as closed", tokenID),
 	}
 }
 
@@ -223,8 +202,8 @@ func extractBadOrderbookTokensFromErr(err error) []string {
 	return out
 }
 
-// postOrdersBatchV2Once 是 postOrdersBatchV2 的单次提交逻辑（不含 bad-token
-// 重试）。负责 negRisk 内部重试 + 真正的 HTTP POST。
+// postOrdersBatchV2Once 是 postOrdersBatchV2 的单次 HTTP 提交逻辑。
+// 负责 negRisk 内部重试 + 真正的 HTTP POST。
 func (c *orderClientImpl) postOrdersBatchV2Once(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
@@ -235,7 +214,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		return []types.OrderPostResponse{}, nil
 	}
 	if len(orderArgsList) > 15 {
-		return nil, fmt.Errorf("postOrdersBatchV2: batch size cannot exceed 15, got %d", len(orderArgsList))
+		return nil, newBatchNotSubmittedError("postOrdersBatchV2: batch size cannot exceed 15, got %d", len(orderArgsList))
 	}
 
 	negRisk := false
@@ -271,7 +250,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 
 		signed, err := c.createSignedOrderV2(orderArgs, orderArgs.TickSize, perOrderNegRisk, orderTypes[i])
 		if err != nil {
-			continue
+			return nil, newBatchNotSubmittedError("订单 %d token=%s 本地构造/签名失败: %w", i+1, orderArgs.TokenID, err)
 		}
 
 		requestBody = append(requestBody, orderRequestV2{
@@ -284,12 +263,12 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	}
 
 	if len(requestBody) == 0 {
-		return []types.OrderPostResponse{}, fmt.Errorf("no valid orders to post")
+		return nil, newBatchNotSubmittedError("no valid orders to post")
 	}
 
 	bodyJSON, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		return nil, newBatchNotSubmittedError("failed to marshal request body: %w", err)
 	}
 	// 匹配 Python json.dumps 的空格格式（HMAC 签名要求同一字节序列）
 	bodyJSONStr := string(bodyJSON)
@@ -304,7 +283,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	}
 	headers, err := internal.CreateLevel2HeadersWithBody(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create headers: %w", err)
+		return nil, newBatchNotSubmittedError("failed to create headers: %w", err)
 	}
 
 	responseBody, err := http.PostRaw(c.baseClient.baseURL, internal.PostOrders, bodyJSON, http.WithHeaders(headers))
@@ -318,10 +297,6 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 			return nil, fmt.Errorf("failed to parse response: %w", err)
 		}
 	}
-	if len(resp) == 0 {
-		return []types.OrderPostResponse{}, nil
-	}
-
 	// 对可能签错 exchange 域的订单执行一次 NegRisk 重签重试。
 	failedOrders := make([]int, 0)
 	for i, result := range resp {
@@ -345,7 +320,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 			internal.LogError("V2 重试订单失败: %v", err)
 		} else {
 			for j, idx := range failedOrders {
-				if j < len(retryResults) && retryResults[j].ErrorMsg == "" {
+				if j < len(retryResults) && (retryResults[j].ErrorMsg == "" || retryResults[j].Status == OrderMarketClosedStatus) {
 					resp[idx] = retryResults[j]
 				}
 			}

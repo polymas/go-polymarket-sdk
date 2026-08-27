@@ -1,0 +1,223 @@
+package clob
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/polymas/go-polymarket-sdk/types"
+)
+
+func fakeBadOrderbookErr(tokenID string) error {
+	return fmt.Errorf("HTTP 400: the orderbook %s does not exist", tokenID)
+}
+
+func TestResolveV2BatchClosedMarketIsTerminalWithoutRetry(t *testing.T) {
+	const tokenID = "111"
+	args := []types.OrderArgs{{TokenID: tokenID}, {TokenID: tokenID}}
+	typesList := []types.OrderType{types.OrderTypeGTC, types.OrderTypeGTC}
+	calls := 0
+
+	results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+		calls++
+		return nil, fakeBadOrderbookErr(tokenID)
+	})
+	if err != nil {
+		t.Fatalf("closed-only batch should be a handled terminal result: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("post called %d times, want exactly once", calls)
+	}
+	if len(results) != len(args) {
+		t.Fatalf("len(results) = %d, want %d", len(results), len(args))
+	}
+	for i, result := range results {
+		if result.Status != OrderMarketClosedStatus || !strings.Contains(result.ErrorMsg, tokenID) {
+			t.Fatalf("result[%d] = %+v, want market_closed", i, result)
+		}
+	}
+}
+
+func TestResolveV2BatchMixedClosedMarketDoesNotRetrySiblings(t *testing.T) {
+	const (
+		closedToken = "111"
+		otherToken  = "222"
+	)
+	args := []types.OrderArgs{{TokenID: closedToken}, {TokenID: otherToken}, {TokenID: closedToken}}
+	typesList := []types.OrderType{types.OrderTypeGTC, types.OrderTypeGTC, types.OrderTypeGTC}
+	calls := 0
+
+	results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+		calls++
+		return nil, fakeBadOrderbookErr(closedToken)
+	})
+	if err == nil || !strings.Contains(err.Error(), "other orders were not submitted") {
+		t.Fatalf("mixed closed batch error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("post called %d times, want no retry", calls)
+	}
+	if results[0].Status != OrderMarketClosedStatus || results[2].Status != OrderMarketClosedStatus {
+		t.Fatalf("closed token results = %+v", results)
+	}
+	if results[1].Status != OrderNotSubmittedStatus {
+		t.Fatalf("sibling result = %+v, want not_submitted", results[1])
+	}
+}
+
+func TestResolveV2BatchClassifiesRequestLevelErrors(t *testing.T) {
+	args := []types.OrderArgs{{TokenID: "111"}, {TokenID: "222"}}
+	typesList := []types.OrderType{types.OrderTypeGTC, types.OrderTypeGTC}
+
+	t.Run("top-level 4xx is not submitted", func(t *testing.T) {
+		results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+			return nil, fmt.Errorf("HTTP 401: Unauthorized/Invalid api key")
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		for _, result := range results {
+			if result.Status != OrderNotSubmittedStatus {
+				t.Fatalf("result = %+v, want not_submitted", result)
+			}
+		}
+	})
+
+	t.Run("transport error is unknown", func(t *testing.T) {
+		results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+			return nil, fmt.Errorf("request failed: timeout")
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		for _, result := range results {
+			if result.Status != OrderUnknownStatus {
+				t.Fatalf("result = %+v, want unknown", result)
+			}
+		}
+	})
+
+	t.Run("local build error is not submitted", func(t *testing.T) {
+		results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+			return nil, newBatchNotSubmittedError("local signing failed")
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		for _, result := range results {
+			if result.Status != OrderNotSubmittedStatus {
+				t.Fatalf("result = %+v, want not_submitted", result)
+			}
+		}
+	})
+}
+
+func TestNormalizeV2BatchResponsesRequiresExactAlignment(t *testing.T) {
+	results, err := normalizeV2BatchResponses([]types.OrderPostResponse{
+		{OrderID: "order-1", Status: "live"},
+		{ErrorMsg: "not enough balance / allowance"},
+	}, 3)
+	if err == nil || !strings.Contains(err.Error(), "got 2, want 3") {
+		t.Fatalf("count mismatch error = %v", err)
+	}
+	if len(results) != 3 || results[0].OrderID != "order-1" {
+		t.Fatalf("aligned results = %+v", results)
+	}
+	if results[1].Status != OrderServerRejectedStatus {
+		t.Fatalf("per-order rejection = %+v", results[1])
+	}
+	if results[2].Status != OrderUnknownStatus {
+		t.Fatalf("missing response = %+v", results[2])
+	}
+}
+
+func TestNormalizeV2BatchResponsesKeepsPerOrderRejection(t *testing.T) {
+	results, err := normalizeV2BatchResponses([]types.OrderPostResponse{
+		{OrderID: "order-1", Status: "live"},
+		{ErrorMsg: "not enough balance / allowance"},
+	}, 2)
+	if err != nil {
+		t.Fatalf("mixed per-order response returned batch error: %v", err)
+	}
+	if results[0].Status != "live" || results[1].Status != OrderServerRejectedStatus {
+		t.Fatalf("results = %+v", results)
+	}
+}
+
+func TestRunOrderBatchesStopsAfterFailureAndPreservesIndexes(t *testing.T) {
+	args := make([]types.OrderArgs, 32)
+	typesList := make([]types.OrderType, 32)
+	for i := range args {
+		args[i].TokenID = fmt.Sprintf("%d", i+1)
+		typesList[i] = types.OrderTypeGTC
+	}
+	calls := 0
+	results, err := runOrderBatches(args, typesList, 15, func(batch []types.OrderArgs, _ []types.OrderType, _ ...bool) ([]types.OrderPostResponse, error) {
+		calls++
+		if calls == 1 {
+			out := make([]types.OrderPostResponse, len(batch))
+			for i := range out {
+				out[i] = types.OrderPostResponse{OrderID: types.Keccak256("ok-" + batch[i].TokenID), Status: "live"}
+			}
+			return out, nil
+		}
+		return makeBatchStatusResults(len(batch), OrderUnknownStatus, "timeout"), fmt.Errorf("request failed: timeout")
+	})
+	if err == nil || calls != 2 {
+		t.Fatalf("err=%v calls=%d, want failure after two calls", err, calls)
+	}
+	if len(results) != len(args) {
+		t.Fatalf("len(results) = %d, want %d", len(results), len(args))
+	}
+	for i := 0; i < 15; i++ {
+		if results[i].Status != "live" {
+			t.Fatalf("result[%d] = %+v, want live", i, results[i])
+		}
+	}
+	for i := 15; i < 30; i++ {
+		if results[i].Status != OrderUnknownStatus {
+			t.Fatalf("result[%d] = %+v, want unknown", i, results[i])
+		}
+	}
+	for i := 30; i < 32; i++ {
+		if results[i].Status != OrderNotSubmittedStatus {
+			t.Fatalf("result[%d] = %+v, want not_submitted", i, results[i])
+		}
+	}
+}
+
+func TestRunOrderBatchesDoesNotResubmitKnownClosedToken(t *testing.T) {
+	const tokenID = "111"
+	args := make([]types.OrderArgs, 20)
+	typesList := make([]types.OrderType, 20)
+	for i := range args {
+		args[i].TokenID = tokenID
+		typesList[i] = types.OrderTypeGTC
+	}
+	calls := 0
+	results, err := runOrderBatches(args, typesList, 15, func(batch []types.OrderArgs, _ []types.OrderType, _ ...bool) ([]types.OrderPostResponse, error) {
+		calls++
+		return resolveV2BatchAttempt(batch, typesList[:len(batch)], func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+			return nil, fakeBadOrderbookErr(tokenID)
+		})
+	})
+	if err != nil {
+		t.Fatalf("runOrderBatches: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("post called %d times, want one request for known closed token", calls)
+	}
+	for i, result := range results {
+		if result.Status != OrderMarketClosedStatus {
+			t.Fatalf("result[%d] = %+v, want market_closed", i, result)
+		}
+	}
+}
+
+func TestExtractBadOrderbookTokensFromErr(t *testing.T) {
+	err := fmt.Errorf("HTTP 400: the orderbook 111 does not exist; the orderbook 222 does not exist; the orderbook 111 does not exist")
+	tokens := extractBadOrderbookTokensFromErr(err)
+	if len(tokens) != 2 || tokens[0] != "111" || tokens[1] != "222" {
+		t.Fatalf("tokens = %v", tokens)
+	}
+}

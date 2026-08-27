@@ -112,23 +112,22 @@
 
 官方市场数据可以提供动态 `min_order_size`；本项根据业务取舍有意保留默认值 5。如后续确实存在非 5 的目标市场，再单独评审是否由业务层显式传入最小值，不在 SDK 热路径隐式查询。
 
-### [ ] P0-5：保证批量请求逐单对齐，不能静默丢掉签名失败的订单
+### [x] P0-5：保证批量请求逐单对齐，不能静默丢掉签名失败的订单
 
-当前实现：
+完成于 2026-08-27，发布版本 `v1.17.0`。
 
-- V1/V2 构建某个 signed order 失败时直接 `continue`，该订单从请求体中消失。
-- 方法注释承诺返回结果与输入等长、同序，但本地签名失败会破坏请求/响应下标语义。
-- 超过 15 单后自动切批；某一子批 HTTP 失败会被转换成合成 `OrderPostResponse`，最终返回 `nil` error，调用方可能误以为函数整体成功。
+完成状态：
 
-官方基线：`POST /orders` 单次最多 15 单；正常业务拒绝可在逐单响应中体现，但请求级验证失败可以直接返回非 2xx。参见 [CLOB OpenAPI](https://docs.polymarket.com/api-spec/clob-openapi.yaml) 和 [Error Codes](https://docs.polymarket.com/resources/error-codes.md)。
-
-建议验收：
-
-- [ ] 任一订单在本地构造/签名失败时，默认整个本地调用不发网络请求并返回 indexed error。
-- [ ] 如要支持“只发送合法订单”，必须用显式选项，并返回 `inputIndex`，不能靠数组下标猜测。
-- [ ] 定义 `BatchOrderResult`：输入索引、本地校验结果、是否已发送、HTTP 状态、orderID、服务端 error、状态是否未知。
-- [ ] 跨多个 15 单子批时，返回结构化 `PartialBatchError`；不能用 `nil` error 隐藏 HTTP 失败。
-- [ ] 为 tick 违规、余额不足、签名错误、market closed、post-only crossing、网关超时分别做测试。
+- [x] 删除 signed order 构建/签名失败时的 `continue`；当前 HTTP 子批不会发送缺单的请求体，并返回带订单索引和 tokenID 的错误。
+- [x] 在任何切批/签名前预校验全部 tokenID，与已有 tick/price/size 预校验一起避免确定性输入错误造成部分提交。
+- [x] 一旦开始提交，返回切片始终与输入等长同序；缺失或多余的服务端响应会返回对齐结果和非空 error，不再靠下标猜测。
+- [x] 保留简洁的 `OrderPostResponse` API，不引入过度设计的 `BatchOrderResult`/`PartialBatchError`；用 `market_closed` / `not_submitted` / `unknown` / `server_rejected` 四个明确状态表达边界。
+- [x] `orderbook does not exist` 不再剥离后重试。`market_closed` 仅表示“业务已正确处理、无需重试”，不代表交易所已接单或订单已创建。
+- [x] 同一 HTTP 子批全部是已关闭 token 时返回 `market_closed` + `nil` error；混有其他 token 时，其他位置为 `not_submitted` 并返回非空 error。
+- [x] 跨 15 单切批时，首个失败子批终止后续提交；之前结果保留，当前子批按错误语义对齐，后续位置为 `not_submitted`，同时返回非空 error。
+- [x] HTTP 200 的逐单业务拒绝保留在各自结果中，不升级为整批 error；传输超时等无法确认服务端结果的场景标记为 `unknown`，由业务层先对账而非盲目重试。
+- [x] 单元测试覆盖关闭订单簿终态、混合关闭 token、顶层 4xx、传输超时、本地签名错误、HTTP 200 逐单拒绝、响应数量错位和跨 15 单中止。
+- [x] 已用 `.env` Safe 钱包完成生产回归：PostOnly、最大 `0.05 USDC` 名义金额的正常订单成功挂出并撤销，确认本次错误语义修改未破坏成功路径。
 
 ### [ ] P0-6：修正 Data API 的 Trade、Activity、Value 模型
 
@@ -534,11 +533,12 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 - CLOB OpenAPI 某些枚举位置仍只列 `0/1/2`。
 - 当前 SDK 已实现 type 3 的大量路径。建议保留，通过当前钱包文档、官方 SDK 和真实请求做 golden/integration test，并给官方文档差异留注释。
 
-### [ ] D-2：批量下单的“逐单失败”与请求级失败边界
+### [x] D-2：批量下单的“逐单失败”与请求级失败边界
 
 - 官方下单说明强调批量结果可逐单成功/失败。
 - 真实 tick 违规请求却返回顶层 HTTP 400 且整批未创建订单。
 - 客户端应按两层模型处理：先本地完成请求级 schema/tick 校验；发送后同时支持顶层错误和逐单结果，绝不能假设任何错误都只影响一单。
+- 已在 P0-5 / `v1.17.0` 落地：顶层错误按请求级处理，HTTP 200 逐单错误保持逐单语义，返回结果全程与输入对齐。
 
 ### [ ] D-3：订单状态枚举/大小写
 
@@ -567,7 +567,7 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 
 ### [ ] 第一批：阻断错误交易请求
 
-P0-1 至 P0-4 已完成；继续处理 P0-5、P0-12。业务层现在必须为每笔订单显式提供 tick size，非网格价格或 size 小于默认值 5 都会在整批提交前失败。
+P0-1 至 P0-5 已完成；继续处理 P0-12。业务层现在必须为每笔订单显式提供 tick size，非网格价格或 size 小于默认值 5 都会在整批提交前失败；批量返回会区分已关闭、确定未提交、结果未知和逐单业务拒绝。
 
 ### [ ] 第二批：修复返回数据和实时连接
 

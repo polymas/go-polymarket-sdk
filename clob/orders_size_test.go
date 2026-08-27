@@ -56,3 +56,20 @@ func TestCreateAndPostOrdersRejectsUndersizedOrderBeforeSubmission(t *testing.T)
 		t.Fatalf("CreateAndPostOrders() error = %v, want indexed minimum-size error", err)
 	}
 }
+
+func TestValidateOrderTokenIDsRejectsInvalidItemBeforeBatching(t *testing.T) {
+	err := validateOrderTokenIDs([]types.OrderArgs{
+		{TokenID: "1"},
+		{TokenID: "not-a-token"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "订单 2 token=not-a-token") {
+		t.Fatalf("validateOrderTokenIDs() error = %v", err)
+	}
+}
+
+func TestValidateOrderTokenIDsAcceptsUint256(t *testing.T) {
+	const maxUint256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+	if err := validateOrderTokenIDs([]types.OrderArgs{{TokenID: maxUint256}}); err != nil {
+		t.Fatalf("max uint256 token rejected: %v", err)
+	}
+}

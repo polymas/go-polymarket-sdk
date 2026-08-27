@@ -304,6 +304,15 @@ responses, err := clobClient.CreateAndPostOrders(orders, []types.OrderType{
 
 `TickSize` 只用于 SDK 的本地校验、金额计算和签名，不会作为额外字段发给官方 `/orders`；官方请求格式中没有该字段。业务层可用配置、Gamma/WS 数据，或在非热路径显式调用 `GetTickSize(tokenID)` 准备它。`Price` 必须是对应 `TickSize` 的整数倍；非网格价格会在整批签名和提交前报错，SDK 不会自动舍入到其他价格。SDK 保留默认最小 `Size=5`；传入更小数量时整批会在签名前报错，不会静默改成 5，也不会在下单热路径查询市场配置。
 
+`CreateAndPostOrders` 的单个 HTTP 子批最多 15 单；输入更多时 SDK 会切批。一旦开始提交，返回结果始终与输入等长同序：
+
+- `market_closed`：已确认 `orderbook does not exist`，是“业务已正确处理、无需重试”的终态；不代表交易所已接单，也没有创建订单。
+- `not_submitted`：可确定未提交，例如本地签名失败、顶层 HTTP 4xx，或同一子批被关闭订单簿拒绝时的其他订单。
+- `unknown`：请求可能已发出，但因超时/网络错误无法确认服务端结果；应先查单对账，不要盲目重试。
+- `server_rejected`：HTTP 200 中的逐单业务拒绝，例如余额/授权不足；其他订单仍可以成功。
+
+如果一个子批全部是同一个已关闭 token，返回 `market_closed` 且 `error=nil`。如果子批混有其他 token，SDK 不会拆掉关闭 token 后重发；它会返回对齐结果和非空 error。跨 15 单切批时，首个失败子批会终止后续提交，后续位置标记为 `not_submitted`。
+
 ### 批量获取市场数据
 
 ```go

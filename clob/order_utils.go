@@ -112,6 +112,19 @@ func validateOrderSizes(orderArgsList []types.OrderArgs) error {
 	return nil
 }
 
+// validateOrderTokenIDs 在切批和签名前校验 tokenID，避免后续子批构造
+// EIP-712 订单时才发现错误，造成前面子批已提交的局面。
+func validateOrderTokenIDs(orderArgsList []types.OrderArgs) error {
+	for i, orderArgs := range orderArgsList {
+		tokenID, ok := new(big.Int).SetString(orderArgs.TokenID, 10)
+		if !ok || tokenID.Sign() <= 0 || tokenID.BitLen() > 256 {
+			return fmt.Errorf("订单 %d token=%s: tokenID 必须是有效的 uint256 十进制整数",
+				i+1, orderArgs.TokenID)
+		}
+	}
+	return nil
+}
+
 // calculateOrderAmounts calculates maker and taker amounts based on side, size, price, and tick size
 func (c *orderClientImpl) calculateOrderAmounts(
 	side types.OrderSide,

@@ -69,10 +69,10 @@ func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types
 // 同一批订单可以使用不同 tick size，并逐笔完成价格范围校验和金额计算。
 // Size 必须不小于默认值 5；SDK 只报错，不会自动改大订单数量。
 //
-// 返回契约：成功路径下返回的切片长度恒等于 len(orderArgsList) 且同序；被
-// SDK 自动剥离（如 "orderbook X does not exist"）或批次失败的位置会回填
-// Status=OrderStrippedStatus 或 ErrorMsg 非空的合成响应。调用方可安全地
-// 通过下标 results[i] 与 orderArgsList[i] 对齐。失败路径仍返回 nil + error。
+// 返回契约：本地预校验失败时返回 nil + error，且不提交订单。
+// 一旦开始提交，results 恒与 orderArgsList 等长同序；即使某个 HTTP
+// 子批失败，也会用 market_closed / not_submitted / unknown 明确每个位置。
+// HTTP 200 的逐单业务拒绝保留在 results 中，不转换为整批 error。
 func (c *orderClientImpl) CreateAndPostOrders(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
@@ -91,17 +91,28 @@ func (c *orderClientImpl) CreateAndPostOrders(
 	if err := validateOrderSizes(orderArgsList); err != nil {
 		return nil, err
 	}
-
-	const maxBatchSize = 15 // 每批最多15个订单
-
-	// 如果订单数量不超过15个，直接提交
-	if len(orderArgsList) <= maxBatchSize {
-		return c.postOrdersBatchV2(orderArgsList, orderTypes)
+	if err := validateOrderTokenIDs(orderArgsList); err != nil {
+		return nil, err
 	}
 
-	// 分批提交
-	allResults := make([]types.OrderPostResponse, 0, len(orderArgsList))
+	const maxBatchSize = 15 // 每批最多15个订单
+	return runOrderBatches(orderArgsList, orderTypes, maxBatchSize, c.postOrdersBatchV2)
+}
+
+// runOrderBatches 把逻辑批次切成最多 maxBatchSize 的 HTTP 子批。一个子批
+// 失败后立即停止：之前子批的结果原样保留，之后订单明确为
+// not_submitted。已确认关闭的 token 在后续子批直接回填 market_closed，
+// 不会再次请求 CLOB。
+func runOrderBatches(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	maxBatchSize int,
+	postFn func([]types.OrderArgs, []types.OrderType, ...bool) ([]types.OrderPostResponse, error),
+) ([]types.OrderPostResponse, error) {
+	allResults := makeBatchStatusResults(len(orderArgsList), OrderNotSubmittedStatus, "order was not attempted")
 	totalBatches := (len(orderArgsList) + maxBatchSize - 1) / maxBatchSize
+	closedTokens := make(map[string]struct{})
+
 	for i := 0; i < len(orderArgsList); i += maxBatchSize {
 		end := i + maxBatchSize
 		if end > len(orderArgsList) {
@@ -109,27 +120,50 @@ func (c *orderClientImpl) CreateAndPostOrders(
 		}
 
 		batchNum := (i / maxBatchSize) + 1
-		batchOrderArgs := orderArgsList[i:end]
-		batchOrderTypes := orderTypes[i:end]
-
-		internal.LogDebug("提交订单批次 %d/%d (订单 %d-%d，共 %d 个订单)", batchNum, totalBatches, i+1, end, len(batchOrderArgs))
-		batchStart := time.Now()
-
-		batchResults, err := c.postOrdersBatchV2(batchOrderArgs, batchOrderTypes)
-		batchDuration := time.Since(batchStart)
-		if err != nil {
-			// 如果某批失败，记录错误但继续处理下一批
-			internal.LogError("批次 %d/%d (订单 %d-%d) 提交失败 (耗时: %v): %v", batchNum, totalBatches, i+1, end, batchDuration, err)
-			// 为失败的批次创建错误响应
-			for j := 0; j < len(batchOrderArgs); j++ {
-				allResults = append(allResults, types.OrderPostResponse{
-					ErrorMsg: fmt.Sprintf("批次提交失败: %v", err),
-				})
+		batchOrderArgs := make([]types.OrderArgs, 0, end-i)
+		batchOrderTypes := make([]types.OrderType, 0, end-i)
+		batchIndexes := make([]int, 0, end-i)
+		for idx := i; idx < end; idx++ {
+			if _, closed := closedTokens[orderArgsList[idx].TokenID]; closed {
+				allResults[idx] = marketClosedOrderResult(orderArgsList[idx].TokenID)
+				continue
 			}
+			batchOrderArgs = append(batchOrderArgs, orderArgsList[idx])
+			batchOrderTypes = append(batchOrderTypes, orderTypes[idx])
+			batchIndexes = append(batchIndexes, idx)
+		}
+		if len(batchOrderArgs) == 0 {
 			continue
 		}
 
-		allResults = append(allResults, batchResults...)
+		internal.LogDebug("提交订单批次 %d/%d (原始订单 %d-%d，实际提交 %d 笔)", batchNum, totalBatches, i+1, end, len(batchOrderArgs))
+		batchStart := time.Now()
+
+		batchResults, err := postFn(batchOrderArgs, batchOrderTypes)
+		batchDuration := time.Since(batchStart)
+		if len(batchResults) != len(batchOrderArgs) {
+			var alignErr error
+			batchResults, alignErr = normalizeV2BatchResponses(batchResults, len(batchOrderArgs))
+			if err == nil {
+				err = alignErr
+			}
+		}
+		for j, result := range batchResults {
+			if j >= len(batchIndexes) {
+				break
+			}
+			origIdx := batchIndexes[j]
+			allResults[origIdx] = result
+			if result.Status == OrderMarketClosedStatus {
+				closedTokens[orderArgsList[origIdx].TokenID] = struct{}{}
+			}
+		}
+
+		if err != nil {
+			internal.LogError("批次 %d/%d (订单 %d-%d) 提交失败 (耗时: %v): %v", batchNum, totalBatches, i+1, end, batchDuration, err)
+			return allResults, fmt.Errorf("批次 %d/%d（原始订单 %d-%d）提交失败: %w", batchNum, totalBatches, i+1, end, err)
+		}
+
 		if batchDuration > 5*time.Second {
 			internal.LogWarn("批次 %d/%d 耗时过长: %v，可能发生阻塞", batchNum, totalBatches, batchDuration)
 		} else {
