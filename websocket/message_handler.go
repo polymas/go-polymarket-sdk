@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,46 +8,6 @@ import (
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
-
-// handleOrderUpdate handles order status update messages
-func (w *webSocketClient) handleOrderUpdate(msg map[string]interface{}) {
-	if w.onOrderUpdate == nil {
-		return
-	}
-
-	// Parse order from message
-	orderJSON, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-
-	var order types.OpenOrder
-	if err := json.Unmarshal(orderJSON, &order); err != nil {
-		return
-	}
-
-	w.onOrderUpdate(&order)
-}
-
-// handleTradeUpdate handles trade update messages
-func (w *webSocketClient) handleTradeUpdate(msg map[string]interface{}) {
-	if w.onTradeUpdate == nil {
-		return
-	}
-
-	// Parse trade from message
-	tradeJSON, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-
-	var trade types.PolygonTrade
-	if err := json.Unmarshal(tradeJSON, &trade); err != nil {
-		return
-	}
-
-	w.onTradeUpdate(&trade)
-}
 
 // handleBookUpdate handles order book update messages
 func (w *webSocketClient) handleBookUpdate(msg map[string]interface{}) {

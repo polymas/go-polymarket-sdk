@@ -213,20 +213,30 @@ V1 回退选项。
 
 ### WebSocket 客户端接口
 
+Market Channel 使用 `websocket.Client`，不需要鉴权：
+
 | 方法                 | 描述               | 参数       | 返回值  |
 | -------------------- | ------------------ | ---------- | ------- |
 | `SetOnBookUpdate`    | 设置订单簿更新回调 | `callback` | -       |
-| `SetOnOrderUpdate`   | 设置订单更新回调   | `callback` | -       |
-| `SetOnTradeUpdate`   | 设置交易更新回调   | `callback` | -       |
-| `SetAuth`            | 设置认证信息       | `auth`     | -       |
 | `Start`              | 启动连接           | `assetIDs` | `error` |
 | `Stop`               | 停止连接           | -          | -       |
 | `IsRunning`          | 检查是否运行中     | -          | `bool`  |
 | `UpdateSubscription` | 更新订阅           | `assetIDs` | `error` |
 | `SubscribeAssets`    | 订阅资产           | `assetIDs` | `error` |
 | `UnsubscribeAssets`  | 取消订阅资产       | `assetIDs` | `error` |
-| `StartUserChannel`   | 启动用户频道       | -          | `error` |
-| `StopUserChannel`    | 停止用户频道       | -          | -       |
+
+User Channel 使用独立 `websocket.UserClient`，构造时传入 CLOB `types.ApiCreds`：
+动态订阅/退订需要 `Start` 时传入显式 ConditionID；`Start(nil)` 的全市场模式不支持动态改为局部过滤。
+
+| 方法                 | 描述                          | 参数       | 返回值  |
+| -------------------- | ----------------------------- | ---------- | ------- |
+| `SetOnOrderUpdate`   | 设置订单生命周期事件回调        | `callback` | -       |
+| `SetOnTradeUpdate`   | 设置交易生命周期事件回调        | `callback` | -       |
+| `Start`              | 启动连接；空 markets 监听全部市场 | `markets`  | `error` |
+| `SubscribeMarkets`   | 动态订阅 ConditionID         | `markets`  | `error` |
+| `UnsubscribeMarkets` | 动态退订 ConditionID         | `markets`  | `error` |
+| `Stop`               | 停止连接                      | -          | -       |
+| `IsRunning`          | 检查是否运行中                | -          | `bool`  |
 
 ### RTDS 客户端接口
 
@@ -338,19 +348,19 @@ for _, book := range books {
 ### WebSocket 实时数据订阅
 
 ```go
-import "github.com/polymas/go-polymarket-sdk/websocket"
+import (
+    "time"
 
-// 创建 WebSocket 客户端
-wsClient := websocket.NewClient()
+    "github.com/polymas/go-polymarket-sdk/websocket"
+)
+
+// 公开 Market Channel
+wsClient := websocket.NewClient(time.Second)
 
 // 设置回调函数
 wsClient.SetOnBookUpdate(func(assetID string, snapshot *types.BookSnapshot) {
     fmt.Printf("订单簿更新: %s - Bid: %.4f, Ask: %.4f\n", 
         assetID, snapshot.BestBid.Price, snapshot.BestAsk.Price)
-})
-
-wsClient.SetOnOrderUpdate(func(order *types.OpenOrder) {
-    fmt.Printf("订单更新: %s - Status: %s\n", order.ID, order.Status)
 })
 
 // 启动连接
@@ -362,6 +372,19 @@ if err != nil {
 
 // 保持运行...
 defer wsClient.Stop()
+
+// 鉴权 User Channel；creds 可来自 clobClient.GetAPICreds()
+userClient := websocket.NewUserClient(*clobClient.GetAPICreds(), time.Second)
+userClient.SetOnOrderUpdate(func(event *websocket.UserOrderEvent) {
+    fmt.Printf("订单更新: %s - Status: %s\n", event.ID, event.Status)
+})
+userClient.SetOnTradeUpdate(func(event *websocket.UserTradeEvent) {
+    fmt.Printf("交易更新: %s - Status: %s\n", event.ID, event.Status)
+})
+if err := userClient.Start(nil); err != nil { // nil 表示监听账户全部市场
+    log.Fatal(err)
+}
+defer userClient.Stop()
 ```
 
 ### 获取市场信息

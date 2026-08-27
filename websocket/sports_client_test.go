@@ -32,23 +32,6 @@ func TestSportsSetOnSportsUpdate(t *testing.T) {
 	})
 }
 
-func TestSportsSetAuth(t *testing.T) {
-	client := NewSportsClient(test.DefaultReconnectDelay)
-
-	// 基本功能测试
-	t.Run("Basic", func(t *testing.T) {
-		auth := &WebSocketAuth{
-			Address:   "0x1234567890123456789012345678901234567890",
-			Signature: "0xsignature",
-			Timestamp: "1234567890",
-			Nonce:     "0",
-		}
-		client.SetAuth(auth)
-		// 设置认证不应该出错
-		t.Logf("SetAuth succeeded")
-	})
-}
-
 func TestSportsStart(t *testing.T) {
 	client := NewSportsClient(test.DefaultReconnectDelay)
 

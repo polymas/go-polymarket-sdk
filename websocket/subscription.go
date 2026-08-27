@@ -2,8 +2,6 @@ package websocket
 
 import (
 	"fmt"
-	"sync"
-	"time"
 )
 
 // UpdateSubscription 使用新的资产ID更新订阅
@@ -21,9 +19,6 @@ func (w *webSocketClient) UpdateSubscription(assetIDs []string) error {
 		subMsg := map[string]interface{}{
 			"assets_ids": assetIDs,
 			"type":       "MARKET",
-		}
-		if w.auth != nil {
-			subMsg["auth"] = w.auth
 		}
 		// 订阅更新日志已移除
 		return conn.WriteJSON(subMsg)
@@ -52,9 +47,6 @@ func (w *webSocketClient) SubscribeAssets(assetIDs []string) error {
 	subMsg := map[string]interface{}{
 		"assets_ids": assetIDs,
 		"operation":  "subscribe",
-	}
-	if w.auth != nil {
-		subMsg["auth"] = w.auth
 	}
 
 	// 动态订阅日志已移除
@@ -92,66 +84,7 @@ func (w *webSocketClient) UnsubscribeAssets(assetIDs []string) error {
 		"assets_ids": assetIDs,
 		"operation":  "unsubscribe",
 	}
-	if w.auth != nil {
-		unsubMsg["auth"] = w.auth
-	}
 
 	// 动态取消订阅日志已移除
 	return conn.WriteJSON(unsubMsg)
-}
-
-// StartUserChannel 启动 USER 频道 WebSocket 连接（需要认证）
-func (w *webSocketClient) StartUserChannel() error {
-	if w.auth == nil {
-		return fmt.Errorf("authentication required for USER channel")
-	}
-
-	w.userRunningMutex.Lock()
-	if w.userRunning {
-		w.userRunningMutex.Unlock()
-		return fmt.Errorf("USER channel already running")
-	}
-
-	w.userStopChan = make(chan struct{})
-	w.userStopOnce = sync.Once{}
-	w.userRunning = true
-	w.userRunningMutex.Unlock()
-
-	go w.runUserChannel()
-	return nil
-}
-
-// StopUserChannel 停止 USER 频道
-func (w *webSocketClient) StopUserChannel() {
-	w.userRunningMutex.Lock()
-	if !w.userRunning {
-		w.userRunningMutex.Unlock()
-		return
-	}
-	w.userRunning = false
-	w.userRunningMutex.Unlock()
-
-	w.userStopOnce.Do(func() {
-		close(w.userStopChan)
-	})
-
-	w.userConnMutex.Lock()
-	if w.userConn != nil {
-		w.userConn.Close()
-	}
-	w.userConnMutex.Unlock()
-}
-
-// runUserChannel 运行 USER 频道的主循环
-func (w *webSocketClient) runUserChannel() {
-	for {
-		select {
-		case <-w.userStopChan:
-			return
-		default:
-			if err := w.connectAndListenUserChannel(); err != nil {
-				time.Sleep(w.reconnectDelay)
-			}
-		}
-	}
 }

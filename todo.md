@@ -157,9 +157,9 @@
 - [x] 用官方 schema 与生产只读响应制作 JSON golden tests，断言关键字段非零且可回序列化；真实请求验证 `/trades`、`/activity`、`/value` 字段与模型一致。
 - [x] `GetTrades` 的 limit 上限由错误的 500 修正为官方 10000，保留官方 `takerOnly=true` 默认值，并支持 `start/end` 时间窗口；查询 1000 条不再被 SDK 擅自截断。
 
-### [ ] P0-7：重做 User WebSocket 鉴权和订阅报文
+### [x] P0-7：重做 User WebSocket 鉴权和订阅报文
 
-当前实现：
+修复前：
 
 - `WebSocketAuth` 是 `address/signature/timestamp/nonce`。
 - 初始类型发送大写 `USER`。
@@ -167,13 +167,14 @@
 
 官方基线：[User Channel](https://docs.polymarket.com/api-reference/wss/user.md) 要求 auth 为 `apiKey/secret/passphrase`，初始 `type` 为小写 `user`，可选 `markets` 过滤并支持动态订阅。
 
-建议验收：
+完成：
 
-- [ ] 用独立的 `UserWSAuth`，字段严格匹配官方 schema；不要复用 L1 签名模型。
-- [ ] 初始订阅和动态订阅使用官方小写 type/operation/markets 结构。
-- [ ] 完整解析 order placement/update/cancellation 与 trade 状态事件。
-- [ ] 重连后自动恢复 auth 和市场过滤器；回调中提供原始 event ID/状态用于去重。
-- [ ] 增加本地 mock server 协议测试和真实只读监听测试。
+- [x] Market 与 User Client 拆分；User 鉴权直接复用已有 `types.ApiCreds`，它严格对应 `apiKey/secret/passphrase`，不再定义重复凭证类型或复用 L1 签名模型。
+- [x] 初始订阅和动态订阅使用官方小写 type/operation/markets 结构，markets 使用 `types.ConditionID`。
+- [x] 完整解析 order placement/update/cancellation、trade 状态和 maker orders；金额及时间字段保留官方字符串精度。
+- [x] 重连后自动恢复 auth 和市场过滤器；回调保留原始 event ID/状态供业务去重。
+- [x] 每 10 秒发送纯文本 `PING`，处理服务端纯文本 `PONG`。
+- [x] 本地 mock server 覆盖鉴权报文、动态订阅、心跳、事件和重连；`.env` 真实只读监听跨越心跳周期通过。
 
 ### [ ] P0-8：修正 Sports WebSocket 地址、握手和心跳方向
 

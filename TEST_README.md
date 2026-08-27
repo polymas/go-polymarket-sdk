@@ -238,11 +238,11 @@ go test -parallel 4 ./...
 | 测试函数                      | 状态   | 说明   |
 | ----------------------------- | ------ | ------ |
 | `TestSetOnBookUpdate`         | ✅ PASS | 已通过 |
-| `TestSetOnOrderUpdate`        | ✅ PASS | 已通过 |
-| `TestSetOnTradeUpdate`        | ✅ PASS | 已通过 |
-| `TestSetAuth`                 | ✅ PASS | 已通过 |
+| `TestUserClientProtocolEventsAndHeartbeat` | ✅ PASS | 鉴权、事件、动态订阅和纯文本心跳 |
+| `TestUserClientReconnectRestoresMarkets` | ✅ PASS | 重连恢复 ConditionID 过滤 |
+| `TestUserClientValidationAndAllMarkets` | ✅ PASS | 凭证校验和全市场订阅 |
+| `TestUserClientLive`          | ✅ PASS | `-tags=live`，真实只读连接跨越心跳周期 |
 | `TestSportsSetOnSportsUpdate` | ✅ PASS | 已通过 |
-| `TestSportsSetAuth`           | ✅ PASS | 已通过 |
 | `TestSportsStart`             | ✅ PASS | 已通过 |
 | `TestSportsStop`              | ✅ PASS | 已通过 |
 | `TestSportsIsRunning`         | ✅ PASS | 已通过 |

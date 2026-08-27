@@ -23,7 +23,6 @@ const (
 // SportsClient 定义 Sports WebSocket 客户端的接口
 type SportsClient interface {
 	SetOnSportsUpdate(callback func(event *types.SportsEvent))
-	SetAuth(auth *WebSocketAuth)
 	Start() error
 	Stop()
 	IsRunning() bool
@@ -39,7 +38,6 @@ type sportsWebSocketClient struct {
 	stopOnce        sync.Once
 	running         bool
 	runningMutex    sync.RWMutex
-	auth            *WebSocketAuth
 	lastConnected   time.Time
 	disconnectedAt  *time.Time
 	disconnectMutex sync.RWMutex
@@ -56,11 +54,6 @@ func NewSportsClient(reconnectDelay time.Duration) SportsClient {
 // SetOnSportsUpdate 设置体育事件更新的回调函数
 func (s *sportsWebSocketClient) SetOnSportsUpdate(callback func(event *types.SportsEvent)) {
 	s.onSportsUpdate = callback
-}
-
-// SetAuth 设置认证信息
-func (s *sportsWebSocketClient) SetAuth(auth *WebSocketAuth) {
-	s.auth = auth
 }
 
 // Start 启动 Sports WebSocket 连接
@@ -186,10 +179,6 @@ func (s *sportsWebSocketClient) connectAndListen() error {
 	subMsg := map[string]interface{}{
 		"type": "SPORTS",
 	}
-	if s.auth != nil {
-		subMsg["auth"] = s.auth
-	}
-
 	if err := conn.WriteJSON(subMsg); err != nil {
 		return fmt.Errorf("failed to send subscription: %w", err)
 	}

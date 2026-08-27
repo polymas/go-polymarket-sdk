@@ -198,11 +198,6 @@ func (w *webSocketClient) connectAndListen() error {
 			"type":       "MARKET",
 		}
 
-		// Add auth field if provided (optional for MARKET channel, required for USER channel)
-		if w.auth != nil {
-			subMsg["auth"] = w.auth
-		}
-
 		if err := conn.WriteJSON(subMsg); err != nil {
 			return fmt.Errorf("failed to send subscription: %w", err)
 		}
@@ -281,128 +276,6 @@ func (w *webSocketClient) connectAndListen() error {
 	}
 }
 
-// connectAndListenUserChannel 连接并监听 USER 频道
-func (w *webSocketClient) connectAndListenUserChannel() error {
-	netDialer := &net.Dialer{
-		Timeout:   internal.WebSocketDialTimeout,
-		DualStack: false,
-		KeepAlive: internal.WebSocketKeepAlive,
-	}
-
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: false,
-	}
-
-	var proxyURL *url.URL
-	if proxyEnv := os.Getenv("HTTPS_PROXY"); proxyEnv != "" {
-		if proxyEnv == "" {
-			proxyEnv = os.Getenv("HTTP_PROXY")
-		}
-		if proxyEnv != "" {
-			proxyURL, _ = url.Parse(proxyEnv)
-		}
-	}
-
-	dialer := websocket.Dialer{
-		HandshakeTimeout: internal.WebSocketHandshakeTimeout,
-		TLSClientConfig:  tlsConfig,
-		Proxy: func(req *http.Request) (*url.URL, error) {
-			if proxyURL != nil {
-				return proxyURL, nil
-			}
-			return http.ProxyFromEnvironment(req)
-		},
-		NetDial: func(network, addr string) (net.Conn, error) {
-			if network == "tcp" {
-				network = "tcp4"
-			}
-			return netDialer.Dial(network, addr)
-		},
-	}
-
-	conn, _, err := dialer.Dial(wsUserURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to connect to USER channel: %w", err)
-	}
-
-	w.userConnMutex.Lock()
-	w.userConn = conn
-	w.userConnMutex.Unlock()
-
-	// Send authentication and subscription message
-	subMsg := map[string]interface{}{
-		"type": "USER",
-		"auth": w.auth,
-	}
-
-	if err := conn.WriteJSON(subMsg); err != nil {
-		return fmt.Errorf("failed to send USER channel subscription: %w", err)
-	}
-
-	// Start heartbeat
-	heartbeatStop := make(chan struct{})
-	go w.heartbeatUserChannel(conn, heartbeatStop)
-	defer close(heartbeatStop)
-
-	// Listen for messages
-	for {
-		select {
-		case <-w.userStopChan:
-			return nil
-		default:
-			messageType, messageBytes, err := conn.ReadMessage()
-			if err != nil {
-				return fmt.Errorf("failed to read USER channel message: %w", err)
-			}
-
-			if messageType != websocket.TextMessage {
-				continue
-			}
-
-			messageStr := string(messageBytes)
-			if messageStr == "PONG" {
-				continue
-			}
-
-			var rawMsg interface{}
-			if err := json.Unmarshal(messageBytes, &rawMsg); err != nil {
-				continue
-			}
-
-			var msgList []interface{}
-			switch v := rawMsg.(type) {
-			case []interface{}:
-				msgList = v
-			case map[string]interface{}:
-				msgList = []interface{}{v}
-			default:
-				continue
-			}
-
-			for _, rawData := range msgList {
-				msg, ok := rawData.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				if msgStr, ok := msg["type"].(string); ok && msgStr == "PONG" {
-					continue
-				}
-
-				// Handle order updates
-				if eventType, ok := msg["event_type"].(string); ok {
-					switch eventType {
-					case "order":
-						w.handleOrderUpdate(msg)
-					case "trade":
-						w.handleTradeUpdate(msg)
-					}
-				}
-			}
-		}
-	}
-}
-
 // heartbeat sends periodic PING messages
 func (w *webSocketClient) heartbeat(conn *websocket.Conn, stop chan struct{}) {
 	ticker := time.NewTicker(15 * time.Second)
@@ -421,23 +294,6 @@ func (w *webSocketClient) heartbeat(conn *websocket.Conn, stop chan struct{}) {
 					w.disconnectedAt = &now
 				}
 				w.disconnectMutex.Unlock()
-				return
-			}
-		}
-	}
-}
-
-// heartbeatUserChannel sends periodic PING messages for USER channel
-func (w *webSocketClient) heartbeatUserChannel(conn *websocket.Conn, stop chan struct{}) {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-stop:
-			return
-		case <-ticker.C:
-			if err := conn.WriteJSON("PING"); err != nil {
 				return
 			}
 		}
