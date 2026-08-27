@@ -16,7 +16,8 @@ type Client interface {
 	GetPositions(user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error)
 	GetTrades(limit int, offset int, options ...GetTradesOption) ([]types.Trade, error)
 	GetActivity(user types.EthAddress, limit int, offset int, options ...GetActivityOption) ([]types.Activity, error)
-	GetValue(user types.EthAddress, conditionIDs interface{}) (*types.ValueResponse, error)
+	GetValue(user types.EthAddress, conditionIDs interface{}) ([]types.ValueResponse, error)
+	GetTotalValue(user types.EthAddress, conditionIDs interface{}) (float64, error)
 }
 
 // polymarketDataClient 处理数据API操作
@@ -243,7 +244,7 @@ func WithTradesSide(side types.OrderSide) GetTradesOption {
 // limit 和 offset 是必要参数，其他参数通过选项函数传入
 func (c *polymarketDataClient) GetTrades(limit int, offset int, options ...GetTradesOption) ([]types.Trade, error) {
 	// 初始化默认选项
-	opts := &GetTradesOptions{}
+	opts := &GetTradesOptions{TakerOnly: true}
 
 	// 应用所有选项
 	for _, option := range options {
@@ -251,7 +252,7 @@ func (c *polymarketDataClient) GetTrades(limit int, offset int, options ...GetTr
 	}
 
 	params := map[string]string{
-		"limit":     strconv.Itoa(min(limit, 500)),
+		"limit":     strconv.Itoa(min(limit, 10000)),
 		"offset":    strconv.Itoa(offset),
 		"takerOnly": strconv.FormatBool(opts.TakerOnly),
 	}
@@ -299,14 +300,15 @@ func (c *polymarketDataClient) GetTrades(limit int, offset int, options ...GetTr
 
 // GetActivityOptions 包含 GetActivity 的所有可选参数
 type GetActivityOptions struct {
-	ConditionID   interface{}
-	EventID       interface{}
-	ActivityType  interface{} // string, []string, or nil
-	Start         *time.Time
-	End           *time.Time
-	Side          *types.OrderSide
-	SortBy        string
-	SortDirection string
+	ConditionID                interface{}
+	EventID                    interface{}
+	ActivityType               interface{} // string, []string, ActivityType, []ActivityType, or nil
+	ExcludeDepositsWithdrawals *bool
+	Start                      *time.Time
+	End                        *time.Time
+	Side                       *types.OrderSide
+	SortBy                     string
+	SortDirection              string
 }
 
 // GetActivityOption 函数选项类型
@@ -330,6 +332,14 @@ func WithActivityEventID(eventID interface{}) GetActivityOption {
 func WithActivityType(activityType interface{}) GetActivityOption {
 	return func(opts *GetActivityOptions) {
 		opts.ActivityType = activityType
+	}
+}
+
+// WithActivityExcludeDepositsWithdrawals 控制是否排除充值和提现活动。
+// 官方默认值为 true；查询 DEPOSIT/WITHDRAWAL 时应显式传 false。
+func WithActivityExcludeDepositsWithdrawals(exclude bool) GetActivityOption {
+	return func(opts *GetActivityOptions) {
+		opts.ExcludeDepositsWithdrawals = &exclude
 	}
 }
 
@@ -404,7 +414,18 @@ func (c *polymarketDataClient) GetActivity(user types.EthAddress, limit int, off
 			params["type"] = v
 		case []string:
 			params["type"] = strings.Join(v, ",")
+		case types.ActivityType:
+			params["type"] = string(v)
+		case []types.ActivityType:
+			values := make([]string, len(v))
+			for i, activityType := range v {
+				values[i] = string(activityType)
+			}
+			params["type"] = strings.Join(values, ",")
 		}
+	}
+	if opts.ExcludeDepositsWithdrawals != nil {
+		params["excludeDepositsWithdrawals"] = strconv.FormatBool(*opts.ExcludeDepositsWithdrawals)
 	}
 
 	if opts.Start != nil {
@@ -430,7 +451,7 @@ func (c *polymarketDataClient) GetActivity(user types.EthAddress, limit int, off
 func (c *polymarketDataClient) GetValue(
 	user types.EthAddress,
 	conditionIDs interface{}, // nil, string, or []string
-) (*types.ValueResponse, error) {
+) ([]types.ValueResponse, error) {
 	params := map[string]string{
 		"user": string(user),
 	}
@@ -440,28 +461,36 @@ func (c *polymarketDataClient) GetValue(
 		case string:
 			params["market"] = v
 		case []string:
-			marketStr := ""
-			for i, id := range v {
-				if i > 0 {
-					marketStr += ","
-				}
-				marketStr += id
-			}
-			params["market"] = marketStr
+			params["market"] = strings.Join(v, ",")
 		}
 	}
 
-	var responses []types.ValueResponse
-	resp, err := http.Get[[]types.ValueResponse](c.baseURL, "/value", params)
+	responses, err := http.GetSlice[types.ValueResponse](c.baseURL, "/value", params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get value: %w", err)
 	}
-	if resp != nil && len(*resp) > 0 {
-		responses = *resp
-		return &responses[0], nil
-	}
+	return responses, nil
+}
 
-	return nil, fmt.Errorf("no value response")
+// GetTotalValue 获取 /value 响应中所有条目的价值合计。
+// 当前官方通常返回一条聚合值；求和可完整处理未来或其他筛选下的多条响应。
+func (c *polymarketDataClient) GetTotalValue(
+	user types.EthAddress,
+	conditionIDs interface{},
+) (float64, error) {
+	values, err := c.GetValue(user, conditionIDs)
+	if err != nil {
+		return 0, err
+	}
+	return sumValueResponses(values), nil
+}
+
+func sumValueResponses(values []types.ValueResponse) float64 {
+	var total float64
+	for _, value := range values {
+		total += value.Value
+	}
+	return total
 }
 
 func min(a, b int) int {

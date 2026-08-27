@@ -20,7 +20,7 @@
 当前 SDK 不是简单的“少几个接口”，而是同时存在以下三种情况：
 
 1. CLOB 已统一使用 V2，且下单改为由业务层逐笔显式传入 tick；剩余的非十进制幂价格网格、批次错误语义和市场配置失效机制仍会直接影响真实资金交易。
-2. Data、Gamma、User WS、Sports WS 和 RFQ 中有多处仍使用旧端点或旧字段，部分方法即使 HTTP 成功也会返回关键字段为零值。
+2. Gamma、User WS、Sports WS 和 RFQ 中有多处仍使用旧端点或旧字段，部分方法即使 HTTP 成功也会返回关键字段为零值。
 3. Bridge、完整 Rewards、Builder、当前 Combos RFQ、Perps 等官方能力尚未形成 SDK 模块。
 
 建议顺序：先完成全部 P0，再完成 CLOB P1，之后按业务需求选择 P2/P3。
@@ -132,7 +132,9 @@
 - [x] 已用 `.env` Safe 钱包完成生产回归：PostOnly、最大 `0.05 USDC` 名义金额的正常订单成功挂出并撤销，确认本次错误语义修改未破坏成功路径。
 - [x] 提供可选的紧凑 `ConditionID` / `TokenID` map key 类型，避免把不同 ID 语义混用；单元测试覆盖 bytes32、uint256 上界、非法输入、规范字符串还原及 JSON map 往返。
 
-### [ ] P0-6：修正 Data API 的 Trade、Activity、Value 模型
+### [x] P0-6：修正 Data API 的 Trade、Activity、Value 模型
+
+完成于 2026-08-27，发布版本 `v1.19.0`。
 
 当前实现与官方字段冲突：
 
@@ -146,13 +148,14 @@
 
 建议验收：
 
-- [ ] 按 [Data OpenAPI](https://docs.polymarket.com/api-spec/data-openapi.yaml) 重建当前模型；如保留旧模型，放入明确的 `legacy` 包。
-- [ ] Trade 覆盖 conditionId、asset、proxyWallet、side、size、price、timestamp、title/slug/icon/eventSlug、outcome/outcomeIndex、用户资料、transactionHash。
-- [ ] Activity 覆盖 size、usdcSize、transactionHash、name/pseudonym、事件元数据和 `isCombo`。
-- [ ] 活动类型补齐 `DEPOSIT`、`WITHDRAWAL`、`YIELD`、`MAKER_REBATE`、`TAKER_REBATE`、`REFERRAL_REWARD` 等当前枚举。
-- [ ] `ValueResponse` 改为 `{user, value}`；`GetValue` 返回完整数组，另提供显式的 total helper，而不是默认取第一项。
-- [ ] 时间解析失败必须返回错误或保留原始值，不能使用当前时间兜底。
-- [ ] 用官方 schema 示例做 JSON golden tests，断言关键字段非零且可回序列化。
+- [x] 按 [Data OpenAPI](https://docs.polymarket.com/api-spec/data-openapi.yaml) 重建当前 Trade/Activity/Value 模型；删除错误旧字段，不保留看似可用的 legacy 模型。
+- [x] Trade 覆盖 conditionId、asset、proxyWallet、side、size、price、timestamp、title/slug/icon/eventSlug、outcome/outcomeIndex、用户资料、transactionHash。
+- [x] Activity 覆盖 size、usdcSize、transactionHash、name/pseudonym、事件元数据和 `isCombo`。
+- [x] 增加 `ActivityType` 类型并补齐 `DEPOSIT`、`WITHDRAWAL`、`YIELD`、`MAKER_REBATE`、`TAKER_REBATE`、`REFERRAL_REWARD` 等全部当前枚举；同时支持官方 `excludeDepositsWithdrawals` 参数。
+- [x] `ValueResponse` 改为 `{user, value}`；`GetValue` 返回完整 `[]ValueResponse`，新增 `GetTotalValue` 显式求和，不再默认取第一项。
+- [x] Trade/Activity timestamp 直接按官方 Unix 秒整数解码；字符串和浮点坏值返回 JSON 错误，不再使用当前时间兜底。
+- [x] 用官方 schema 与生产只读响应制作 JSON golden tests，断言关键字段非零且可回序列化；真实请求验证 `/trades`、`/activity`、`/value` 字段与模型一致。
+- [x] `GetTrades` 的 limit 上限由错误的 500 修正为官方 10000，并恢复官方 `takerOnly=true` 默认值；业务仍可显式传 false。
 
 ### [ ] P0-7：重做 User WebSocket 鉴权和订阅报文
 

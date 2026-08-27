@@ -20,8 +20,8 @@ func TestGetPositions(t *testing.T) {
 		positions, err := client.GetPositions(userAddr)
 		if err != nil {
 			// 如果是服务器错误（502/504），可能是临时性问题，记录但不失败
-			if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "504") || 
-			   strings.Contains(err.Error(), "Bad Gateway") || strings.Contains(err.Error(), "Gateway Timeout") {
+			if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "504") ||
+				strings.Contains(err.Error(), "Bad Gateway") || strings.Contains(err.Error(), "Gateway Timeout") {
 				t.Logf("GetPositions failed with server error (may be temporary): %v", err)
 				t.Skip("Skipping test: API server error (502/504), may be temporary")
 				return
@@ -41,8 +41,8 @@ func TestGetPositions(t *testing.T) {
 		)
 		if err != nil {
 			// 如果是服务器错误（502/504），可能是临时性问题，记录但不失败
-			if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "504") || 
-			   strings.Contains(err.Error(), "Bad Gateway") || strings.Contains(err.Error(), "Gateway Timeout") {
+			if strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "504") ||
+				strings.Contains(err.Error(), "Bad Gateway") || strings.Contains(err.Error(), "Gateway Timeout") {
 				t.Logf("GetPositions with options failed with server error (may be temporary): %v", err)
 				t.Skip("Skipping test: API server error (502/504), may be temporary")
 				return
@@ -94,6 +94,13 @@ func TestGetTrades(t *testing.T) {
 		if trades == nil {
 			t.Fatal("GetTrades returned nil")
 		}
+		if len(trades) > 0 {
+			trade := trades[0]
+			if trade.ProxyWallet == "" || trade.ConditionID == "" || trade.TokenID == "" ||
+				trade.Timestamp == 0 || trade.TransactionHash == "" {
+				t.Fatalf("GetTrades returned incomplete current-schema trade: %+v", trade)
+			}
+		}
 		t.Logf("GetTrades returned %d trades", len(trades))
 	})
 
@@ -135,7 +142,7 @@ func TestGetTrades(t *testing.T) {
 		}
 	})
 
-	// 测试limit边界值（>500的情况）
+	// 官方 /trades 支持超过 500、最高 10000 的 limit。
 	t.Run("LimitOver500", func(t *testing.T) {
 		trades, err := client.GetTrades(1000, 0)
 		if err != nil {
@@ -232,40 +239,40 @@ func TestGetValue(t *testing.T) {
 
 	// 基本功能测试 - 不带条件ID
 	t.Run("Basic", func(t *testing.T) {
-		value, err := client.GetValue(userAddr, nil)
+		values, err := client.GetValue(userAddr, nil)
 		if err != nil {
 			t.Fatalf("GetValue failed: %v", err)
 		}
-		if value == nil {
+		if values == nil {
 			t.Fatal("GetValue returned nil")
 		}
-		t.Logf("GetValue returned: %+v", value)
+		t.Logf("GetValue returned: %+v", values)
 	})
 
 	// 带单个条件ID测试
 	if config.TestConditionID != "" {
 		t.Run("WithConditionID", func(t *testing.T) {
-			value, err := client.GetValue(userAddr, string(config.TestConditionID))
+			values, err := client.GetValue(userAddr, string(config.TestConditionID))
 			if err != nil {
 				t.Fatalf("GetValue with conditionID failed: %v", err)
 			}
-			if value == nil {
+			if values == nil {
 				t.Fatal("GetValue returned nil")
 			}
-			t.Logf("GetValue with conditionID returned: %+v", value)
+			t.Logf("GetValue with conditionID returned: %+v", values)
 		})
 
 		// 带多个条件ID测试
 		t.Run("WithMultipleConditionIDs", func(t *testing.T) {
 			conditionIDs := []string{string(config.TestConditionID)}
-			value, err := client.GetValue(userAddr, conditionIDs)
+			values, err := client.GetValue(userAddr, conditionIDs)
 			if err != nil {
 				t.Fatalf("GetValue with multiple conditionIDs failed: %v", err)
 			}
-			if value == nil {
+			if values == nil {
 				t.Fatal("GetValue returned nil")
 			}
-			t.Logf("GetValue with multiple conditionIDs returned: %+v", value)
+			t.Logf("GetValue with multiple conditionIDs returned: %+v", values)
 		})
 	}
 
@@ -284,10 +291,10 @@ func TestGetValue(t *testing.T) {
 			for i := 0; i < 50; i++ {
 				conditionIDs[i] = string(config.TestConditionID)
 			}
-			value, err := client.GetValue(userAddr, conditionIDs)
+			values, err := client.GetValue(userAddr, conditionIDs)
 			if err != nil {
 				t.Logf("GetValue with large conditionIDs returned error: %v", err)
-			} else if value != nil {
+			} else if values != nil {
 				t.Logf("GetValue with large conditionIDs succeeded")
 			}
 		})
@@ -299,10 +306,10 @@ func TestGetValue(t *testing.T) {
 			"invalid-condition-id-1",
 			"invalid-condition-id-2",
 		}
-		value, err := client.GetValue(userAddr, conditionIDs)
+		values, err := client.GetValue(userAddr, conditionIDs)
 		if err != nil {
 			t.Logf("GetValue with partial invalid conditionIDs returned error: %v", err)
-		} else if value != nil {
+		} else if values != nil {
 			t.Logf("GetValue with partial invalid conditionIDs succeeded")
 		}
 	})

@@ -187,12 +187,15 @@ V1 回退选项。
 
 ### Data 客户端接口
 
-| 方法           | 描述         | 参数                                    | 返回值                    |
-| -------------- | ------------ | --------------------------------------- | ------------------------- |
-| `GetPositions` | 获取用户仓位 | `user`, `options...`                    | `[]Position`, `error`     |
-| `GetTrades`    | 获取交易记录 | `limit`, `offset`, `options...`         | `[]Trade`, `error`        |
-| `GetActivity`  | 获取用户活动 | `user`, `limit`, `offset`, `options...` | `[]Activity`, `error`     |
-| `GetValue`     | 获取仓位价值 | `user`, `conditionIDs`                  | `*ValueResponse`, `error` |
+| 方法            | 描述                     | 参数                                    | 返回值                     |
+| --------------- | ------------------------ | --------------------------------------- | -------------------------- |
+| `GetPositions`  | 获取用户仓位             | `user`, `options...`                    | `[]Position`, `error`      |
+| `GetTrades`     | 获取交易记录             | `limit`, `offset`, `options...`         | `[]Trade`, `error`         |
+| `GetActivity`   | 获取用户活动             | `user`, `limit`, `offset`, `options...` | `[]Activity`, `error`      |
+| `GetValue`      | 获取完整仓位价值响应数组 | `user`, `conditionIDs`                  | `[]ValueResponse`, `error` |
+| `GetTotalValue` | 获取仓位价值合计         | `user`, `conditionIDs`                  | `float64`, `error`         |
+
+`Trade.Timestamp` 和 `Activity.Timestamp` 是官方返回的 Unix 秒 `int64`。Activity 类型应优先使用 `types.ActivityType*` 常量；查询充值或提现时还需传入 `data.WithActivityExcludeDepositsWithdrawals(false)`。
 
 ### Web3 客户端接口
 

@@ -146,152 +146,73 @@ func (p *Position) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(processedData, aux)
 }
 
-// Trade 表示交易
+// Trade 表示 Data API /trades 返回的交易。
+// Timestamp 是官方响应中的 Unix 秒，不接受字符串或浮点数静默转换。
 type Trade struct {
-	TradeID     string     `json:"id"`
-	ConditionID Keccak256  `json:"market"`
-	TokenID     string     `json:"asset_id"`
-	Side        OrderSide  `json:"side"`
-	Price       float64    `json:"price"`
-	Size        float64    `json:"size"`
-	CashAmount  float64    `json:"cash_amount"`
-	TokenAmount float64    `json:"token_amount"`
-	Timestamp   time.Time  `json:"timestamp"`
-	User        EthAddress `json:"user"`
-	TakerOnly   bool       `json:"taker_only"`
+	ProxyWallet           EthAddress `json:"proxyWallet"`
+	Side                  OrderSide  `json:"side"`
+	TokenID               string     `json:"asset"`       // alias: asset
+	ConditionID           Keccak256  `json:"conditionId"` // alias: conditionId
+	Size                  float64    `json:"size"`
+	Price                 float64    `json:"price"`
+	Timestamp             int64      `json:"timestamp"`
+	Title                 string     `json:"title"`
+	Slug                  string     `json:"slug"`
+	Icon                  string     `json:"icon"`
+	EventSlug             string     `json:"eventSlug"`
+	Outcome               string     `json:"outcome"`
+	OutcomeIndex          int        `json:"outcomeIndex"`
+	Name                  string     `json:"name"`
+	Pseudonym             string     `json:"pseudonym"`
+	Bio                   string     `json:"bio"`
+	ProfileImage          string     `json:"profileImage"`
+	ProfileImageOptimized string     `json:"profileImageOptimized"`
+	TransactionHash       string     `json:"transactionHash"`
 }
 
-// UnmarshalJSON 实现Trade的自定义JSON反序列化，处理timestamp可能是数字或字符串的情况
-func (t *Trade) UnmarshalJSON(data []byte) error {
-	// 使用临时结构体来解析JSON
-	var temp struct {
-		TradeID     string     `json:"id"`
-		ConditionID Keccak256  `json:"market"`
-		TokenID     string     `json:"asset_id"`
-		Side        OrderSide  `json:"side"`
-		Price       float64    `json:"price"`
-		Size        float64    `json:"size"`
-		CashAmount  float64    `json:"cash_amount"`
-		TokenAmount float64    `json:"token_amount"`
-		Timestamp   interface{} `json:"timestamp"` // 可能是数字或字符串
-		User        EthAddress `json:"user"`
-		TakerOnly   bool       `json:"taker_only"`
-	}
+// ActivityType 是 Data API /activity 返回的活动类型。
+type ActivityType string
 
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
+const (
+	ActivityTypeTrade          ActivityType = "TRADE"
+	ActivityTypeSplit          ActivityType = "SPLIT"
+	ActivityTypeMerge          ActivityType = "MERGE"
+	ActivityTypeRedeem         ActivityType = "REDEEM"
+	ActivityTypeReward         ActivityType = "REWARD"
+	ActivityTypeConversion     ActivityType = "CONVERSION"
+	ActivityTypeDeposit        ActivityType = "DEPOSIT"
+	ActivityTypeWithdrawal     ActivityType = "WITHDRAWAL"
+	ActivityTypeYield          ActivityType = "YIELD"
+	ActivityTypeMakerRebate    ActivityType = "MAKER_REBATE"
+	ActivityTypeTakerRebate    ActivityType = "TAKER_REBATE"
+	ActivityTypeReferralReward ActivityType = "REFERRAL_REWARD"
+)
 
-	// 复制字段
-	t.TradeID = temp.TradeID
-	t.ConditionID = temp.ConditionID
-	t.TokenID = temp.TokenID
-	t.Side = temp.Side
-	t.Price = temp.Price
-	t.Size = temp.Size
-	t.CashAmount = temp.CashAmount
-	t.TokenAmount = temp.TokenAmount
-	t.User = temp.User
-	t.TakerOnly = temp.TakerOnly
-
-	// 处理timestamp（可能是数字或字符串）
-	switch v := temp.Timestamp.(type) {
-	case float64:
-		// Unix时间戳（秒）
-		t.Timestamp = time.Unix(int64(v), 0)
-	case int64:
-		t.Timestamp = time.Unix(v, 0)
-	case int:
-		t.Timestamp = time.Unix(int64(v), 0)
-	case string:
-		// 尝试解析为RFC3339格式
-		if parsed, err := time.Parse(time.RFC3339, v); err == nil {
-			t.Timestamp = parsed
-		} else {
-			// 尝试解析为Unix时间戳字符串
-			if ts, err := json.Number(v).Int64(); err == nil {
-				t.Timestamp = time.Unix(ts, 0)
-			} else {
-				// 如果都失败，使用当前时间
-				t.Timestamp = time.Now()
-			}
-		}
-	default:
-		t.Timestamp = time.Now()
-	}
-
-	return nil
-}
-
-// Activity 表示用户活动
+// Activity 表示 Data API /activity 返回的用户活动。
+// Asset 在非 token 活动中可能为空，因此保留为字符串而不是强制 TokenID。
 type Activity struct {
-	ActivityID  string     `json:"id"`
-	Type        string     `json:"type"` // TRADE, SPLIT, MERGE, REDEEM, REWARD, CONVERSION
-	ConditionID Keccak256  `json:"market"`
-	TokenID     string     `json:"asset_id"`
-	Side        *OrderSide `json:"side,omitempty"`
-	Tokens      float64    `json:"tokens"`
-	Cash        float64    `json:"cash"`
-	Timestamp   time.Time  `json:"timestamp"`
-	User        EthAddress `json:"user"`
-}
-
-// UnmarshalJSON 实现Activity的自定义JSON反序列化，处理timestamp可能是数字或字符串的情况
-func (a *Activity) UnmarshalJSON(data []byte) error {
-	// 使用临时结构体来解析JSON
-	var temp struct {
-		ActivityID  string     `json:"id"`
-		Type        string     `json:"type"`
-		ConditionID Keccak256  `json:"market"`
-		TokenID     string     `json:"asset_id"`
-		Side        *OrderSide `json:"side,omitempty"`
-		Tokens      float64    `json:"tokens"`
-		Cash        float64    `json:"cash"`
-		Timestamp   interface{} `json:"timestamp"` // 可能是数字或字符串
-		User        EthAddress `json:"user"`
-	}
-
-	if err := json.Unmarshal(data, &temp); err != nil {
-		return err
-	}
-
-	// 复制字段
-	a.ActivityID = temp.ActivityID
-	a.Type = temp.Type
-	a.ConditionID = temp.ConditionID
-	a.TokenID = temp.TokenID
-	a.Side = temp.Side
-	a.Tokens = temp.Tokens
-	a.Cash = temp.Cash
-	a.User = temp.User
-
-	// 处理timestamp（可能是数字或字符串）
-	switch v := temp.Timestamp.(type) {
-	case float64:
-		// Unix时间戳（秒）
-		a.Timestamp = time.Unix(int64(v), 0)
-	case int64:
-		a.Timestamp = time.Unix(v, 0)
-	case int:
-		a.Timestamp = time.Unix(int64(v), 0)
-	case string:
-		// 尝试解析为RFC3339格式
-		if parsed, err := time.Parse(time.RFC3339, v); err == nil {
-			a.Timestamp = parsed
-		} else {
-			// 尝试解析为Unix时间戳字符串
-			if ts, err := json.Number(v).Int64(); err == nil {
-				a.Timestamp = time.Unix(ts, 0)
-			} else {
-				// 如果都失败，使用当前时间
-				a.Timestamp = time.Now()
-			}
-		}
-	default:
-		a.Timestamp = time.Now()
-	}
-
-	return nil
+	ProxyWallet           EthAddress   `json:"proxyWallet"`
+	Timestamp             int64        `json:"timestamp"`
+	ConditionID           Keccak256    `json:"conditionId"`
+	Type                  ActivityType `json:"type"`
+	Size                  float64      `json:"size"`
+	USDCSize              float64      `json:"usdcSize"`
+	TransactionHash       string       `json:"transactionHash"`
+	Price                 float64      `json:"price"`
+	TokenID               string       `json:"asset"` // alias: asset
+	Side                  OrderSide    `json:"side,omitempty"`
+	OutcomeIndex          int          `json:"outcomeIndex"`
+	Title                 string       `json:"title"`
+	Slug                  string       `json:"slug"`
+	Icon                  string       `json:"icon"`
+	EventSlug             string       `json:"eventSlug"`
+	Outcome               string       `json:"outcome"`
+	Name                  string       `json:"name"`
+	Pseudonym             string       `json:"pseudonym"`
+	Bio                   string       `json:"bio"`
+	ProfileImage          string       `json:"profileImage"`
+	ProfileImageOptimized string       `json:"profileImageOptimized"`
+	IsCombo               bool         `json:"isCombo,omitempty"`
 }
 
 // HolderResponse 表示持有者信息
@@ -303,9 +224,8 @@ type HolderResponse struct {
 
 // ValueResponse 表示仓位价值
 type ValueResponse struct {
-	User         EthAddress  `json:"user"`
-	TotalValue   float64     `json:"total_value"`
-	ConditionIDs []Keccak256 `json:"condition_ids,omitempty"`
+	User  EthAddress `json:"user"`
+	Value float64    `json:"value"`
 }
 
 // MarketValue 表示市场价值信息
