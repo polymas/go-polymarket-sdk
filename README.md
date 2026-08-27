@@ -328,6 +328,27 @@ for _, mp := range midpoints {
 }
 ```
 
+批量市场数据响应是稀疏结果：关闭或不存在的 token 可能不出现在返回切片中，不能用响应下标对应请求下标。SDK 提供紧凑的 `types.TokenID`（uint256）和 `types.ConditionID`（bytes32）作为可比较的 `[32]byte` map key：
+
+```go
+books, err := clobClient.GetMultipleOrderBooks(requests)
+if err != nil {
+    log.Fatal(err)
+}
+
+booksByToken := make(map[types.TokenID]types.OrderBookSummaryResponse, len(books))
+for _, book := range books {
+    tokenID, err := types.ParseTokenID(book.AssetID)
+    if err != nil {
+        log.Printf("invalid token ID from server: %v", err)
+        continue
+    }
+    booksByToken[tokenID] = book
+}
+```
+
+`String()` 会恢复官方规范字符串：`ConditionID` 输出小写 `0x` + 64 位 hex，`TokenID` 输出无前导零的 uint256 十进制；二者均支持文本/JSON 值和 JSON map key 编解码。现有请求与响应字段继续使用字符串，业务可只在需要构建字典时转换，不破坏旧代码。
+
 ### WebSocket 实时数据订阅
 
 ```go
