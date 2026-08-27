@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -9,13 +10,16 @@ import (
 )
 
 const (
-	wsMarketURL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+	wsMarketURL             = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+	marketHeartbeatInterval = 10 * time.Second
 )
 
-// Client 定义公开 Market WebSocket 客户端。
-// User Channel 使用独立的 UserClient。
+// Client is the public Market Channel client. SetOnBookUpdate is retained for
+// callers that only need the best bid/ask view; SetOnMarketEvent exposes the
+// complete typed protocol.
 type Client interface {
 	SetOnBookUpdate(callback func(assetID string, snapshot *types.BookSnapshot))
+	SetOnMarketEvent(callback func(event MarketEvent))
 	Start(assetIDs []string) error
 	Stop()
 	IsRunning() bool
@@ -24,36 +28,112 @@ type Client interface {
 	UnsubscribeAssets(assetIDs []string) error
 }
 
-// webSocketClient 处理订单簿订阅的WebSocket连接
-// 不允许直接导出，只能通过 NewWebSocketClient 创建
-type webSocketClient struct {
-	url             string
-	conn            *websocket.Conn
-	connMutex       sync.RWMutex
-	subscribedIDs   []string
-	subscribedMutex sync.RWMutex // 保护subscribedIDs的访问
-	onBookUpdate    func(assetID string, snapshot *types.BookSnapshot)
-	reconnectDelay  time.Duration
-	stopChan        chan struct{}
-	stopOnce        sync.Once // Ensure stopChan is only closed once
-	running         bool
-	runningMutex    sync.RWMutex
-	lastConnected   time.Time    // 最后连接成功的时间
-	disconnectedAt  *time.Time   // 断连时间（nil表示已连接）
-	disconnectMutex sync.RWMutex // 保护断连时间
+// MarketSubscriptionLevel controls the depth/detail level requested from the
+// Market Channel.
+type MarketSubscriptionLevel int
+
+const (
+	MarketSubscriptionLevel1 MarketSubscriptionLevel = 1
+	MarketSubscriptionLevel2 MarketSubscriptionLevel = 2
+	MarketSubscriptionLevel3 MarketSubscriptionLevel = 3
+)
+
+// MarketSubscriptionOptions controls the initial subscription and is restored
+// after reconnects. CustomFeatureEnabled enables best_bid_ask, new_market, and
+// market_resolved events.
+type MarketSubscriptionOptions struct {
+	InitialDump          bool
+	Level                MarketSubscriptionLevel
+	CustomFeatureEnabled bool
 }
 
-// NewClient 创建新的WebSocket客户端
-// 返回 Client 接口，不允许直接访问实现类型
-func NewClient(reconnectDelay time.Duration) Client {
-	return &webSocketClient{
-		url:            wsMarketURL,
-		reconnectDelay: reconnectDelay,
-		stopChan:       make(chan struct{}),
+// DefaultMarketSubscriptionOptions returns the official protocol defaults.
+func DefaultMarketSubscriptionOptions() MarketSubscriptionOptions {
+	return MarketSubscriptionOptions{
+		InitialDump: true,
+		Level:       MarketSubscriptionLevel2,
 	}
 }
 
-// SetOnBookUpdate 设置订单簿更新的回调函数
+func (o MarketSubscriptionOptions) validate() error {
+	if o.Level < MarketSubscriptionLevel1 || o.Level > MarketSubscriptionLevel3 {
+		return fmt.Errorf("Market subscription level must be 1, 2, or 3")
+	}
+	return nil
+}
+
+type webSocketClient struct {
+	url               string
+	reconnectDelay    time.Duration
+	heartbeatInterval time.Duration
+	options           MarketSubscriptionOptions
+
+	conn       *websocket.Conn
+	connMutex  sync.RWMutex
+	writeMutex sync.Mutex
+
+	subscribedIDs   map[string]struct{}
+	subscribedMutex sync.RWMutex
+
+	onBookUpdate  func(assetID string, snapshot *types.BookSnapshot)
+	onMarketEvent func(event MarketEvent)
+	callbackMutex sync.RWMutex
+
+	stopChan     chan struct{}
+	stopOnce     sync.Once
+	running      bool
+	runningMutex sync.RWMutex
+}
+
+// NewClient creates a Market Channel client using the official defaults:
+// initial dump enabled, level 2, and custom features disabled.
+func NewClient(reconnectDelay time.Duration) Client {
+	client, _ := newMarketClient(
+		wsMarketURL,
+		reconnectDelay,
+		marketHeartbeatInterval,
+		DefaultMarketSubscriptionOptions(),
+	)
+	return client
+}
+
+// NewClientWithOptions creates a configurable Market Channel client. Callers
+// should start with DefaultMarketSubscriptionOptions and change only the
+// fields they need.
+func NewClientWithOptions(
+	reconnectDelay time.Duration,
+	options MarketSubscriptionOptions,
+) (Client, error) {
+	return newMarketClient(wsMarketURL, reconnectDelay, marketHeartbeatInterval, options)
+}
+
+func newMarketClient(
+	url string,
+	reconnectDelay time.Duration,
+	heartbeatInterval time.Duration,
+	options MarketSubscriptionOptions,
+) (*webSocketClient, error) {
+	if err := options.validate(); err != nil {
+		return nil, err
+	}
+	return &webSocketClient{
+		url:               url,
+		reconnectDelay:    reconnectDelay,
+		heartbeatInterval: heartbeatInterval,
+		options:           options,
+		subscribedIDs:     make(map[string]struct{}),
+		stopChan:          make(chan struct{}),
+	}, nil
+}
+
 func (w *webSocketClient) SetOnBookUpdate(callback func(assetID string, snapshot *types.BookSnapshot)) {
+	w.callbackMutex.Lock()
 	w.onBookUpdate = callback
+	w.callbackMutex.Unlock()
+}
+
+func (w *webSocketClient) SetOnMarketEvent(callback func(event MarketEvent)) {
+	w.callbackMutex.Lock()
+	w.onMarketEvent = callback
+	w.callbackMutex.Unlock()
 }

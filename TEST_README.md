@@ -237,7 +237,10 @@ go test -parallel 4 ./...
 
 | 测试函数                      | 状态   | 说明   |
 | ----------------------------- | ------ | ------ |
-| `TestSetOnBookUpdate`         | ✅ PASS | 已通过 |
+| `TestMarketClientProtocolAndEvents` | ✅ PASS | 订阅选项、纯文本心跳、7 类 typed event 及旧 book 回调 |
+| `TestMarketClientDynamicSubscriptionsAndReconnect` | ✅ PASS | 动态增删订阅与重连恢复 |
+| `TestMarketClientOptionsAndRestart` | ✅ PASS | level 校验与停止后重启 |
+| `TestMarketClientLive`       | ✅ PASS | `-tags=live`，真实只读订阅跨越客户端心跳周期 |
 | `TestUserClientProtocolEventsAndHeartbeat` | ✅ PASS | 鉴权、事件、动态订阅和纯文本心跳 |
 | `TestUserClientReconnectRestoresMarkets` | ✅ PASS | 重连恢复 ConditionID 过滤 |
 | `TestUserClientValidationAndAllMarkets` | ✅ PASS | 凭证校验和全市场订阅 |

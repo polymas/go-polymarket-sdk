@@ -1,123 +1,124 @@
 package websocket
 
 import (
-	"fmt"
-	"strings"
+	"bytes"
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// handleBookUpdate handles order book update messages
-func (w *webSocketClient) handleBookUpdate(msg map[string]interface{}) {
-	assetID, ok := msg["asset_id"].(string)
-	if !ok {
+func (w *webSocketClient) dispatchMarketMessage(message []byte) {
+	message = bytes.TrimSpace(message)
+	if len(message) == 0 {
+		return
+	}
+	if message[0] == '[' {
+		var messages []json.RawMessage
+		if err := json.Unmarshal(message, &messages); err != nil {
+			return
+		}
+		for _, item := range messages {
+			w.dispatchMarketMessage(item)
+		}
 		return
 	}
 
-	// Clean asset ID
-	assetID = strings.TrimPrefix(assetID, "0x")
+	var envelope struct {
+		EventType MarketEventType `json:"event_type"`
+	}
+	if err := json.Unmarshal(message, &envelope); err != nil {
+		return
+	}
 
+	var event MarketEvent
+	switch envelope.EventType {
+	case MarketEventBook:
+		event = &MarketBookEvent{}
+	case MarketEventPriceChange:
+		event = &MarketPriceChangeEvent{}
+	case MarketEventLastTradePrice:
+		event = &MarketLastTradePriceEvent{}
+	case MarketEventTickSizeChange:
+		event = &MarketTickSizeChangeEvent{}
+	case MarketEventBestBidAsk:
+		event = &MarketBestBidAskEvent{}
+	case MarketEventNewMarket:
+		event = &MarketNewMarketEvent{}
+	case MarketEventMarketResolved:
+		event = &MarketResolvedEvent{}
+	default:
+		return
+	}
+	if err := json.Unmarshal(message, event); err != nil {
+		return
+	}
+	w.emitMarketEvent(event)
+}
+
+func (w *webSocketClient) emitMarketEvent(event MarketEvent) {
+	w.callbackMutex.RLock()
+	marketCallback := w.onMarketEvent
+	bookCallback := w.onBookUpdate
+	w.callbackMutex.RUnlock()
+
+	if marketCallback != nil {
+		marketCallback(event)
+	}
+	book, ok := event.(*MarketBookEvent)
+	if !ok || bookCallback == nil {
+		return
+	}
+	snapshot := marketBookSnapshot(book)
+	internal.LogDebug(
+		"[WebSocket] 收到订单簿更新: asset_id=%s, best_bid=%v, best_ask=%v",
+		book.AssetID.String(),
+		snapshot.BestBid,
+		snapshot.BestAsk,
+	)
+	bookCallback(book.AssetID.String(), snapshot)
+}
+
+func marketBookSnapshot(event *MarketBookEvent) *types.BookSnapshot {
 	var bestBid, bestAsk *types.BookSide
-
-	// Parse bids - Python code: bb = self._parse_top(bids, max)
-	// Python finds the maximum price from all bids
-	if bidsRaw, ok := msg["bids"]; ok && bidsRaw != nil {
-		var bids []interface{}
-		switch v := bidsRaw.(type) {
-		case []interface{}:
-			bids = v
-		default:
-			// Skip invalid bid format
+	for _, level := range event.Bids {
+		price, priceOK := parseMarketDecimal(level.Price)
+		size, sizeOK := parseMarketDecimal(level.Size)
+		if !priceOK || !sizeOK {
+			continue
 		}
-
-		if len(bids) > 0 {
-			// Find best bid (highest price) - Python uses max(parsed, key=lambda x: x[0])
-			var bestPrice float64 = -1
-			var bestSize float64 = 0
-			for _, bidRaw := range bids {
-				bid, ok := bidRaw.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				price := parseFloat64(bid["price"])
-				size := parseFloat64(bid["size"])
-				if price > bestPrice {
-					bestPrice = price
-					bestSize = size
-				}
-			}
-			if bestPrice > 0 {
-				bestBid = &types.BookSide{Price: bestPrice, Size: bestSize}
-			}
+		if bestBid == nil || price > bestBid.Price {
+			bestBid = &types.BookSide{Price: price, Size: size}
 		}
 	}
-
-	// Parse asks - Python code: ba = self._parse_top(asks, min)
-	// Python finds the minimum price from all asks
-	if asksRaw, ok := msg["asks"]; ok && asksRaw != nil {
-		var asks []interface{}
-		switch v := asksRaw.(type) {
-		case []interface{}:
-			asks = v
-		default:
-			// Skip invalid ask format
+	for _, level := range event.Asks {
+		price, priceOK := parseMarketDecimal(level.Price)
+		size, sizeOK := parseMarketDecimal(level.Size)
+		if !priceOK || !sizeOK {
+			continue
 		}
-
-		if len(asks) > 0 {
-			// Find best ask (lowest price) - Python uses min(parsed, key=lambda x: x[0])
-			var bestPrice float64 = -1
-			var bestSize float64 = 0
-			for _, askRaw := range asks {
-				ask, ok := askRaw.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				price := parseFloat64(ask["price"])
-				size := parseFloat64(ask["size"])
-				if bestPrice < 0 || price < bestPrice {
-					bestPrice = price
-					bestSize = size
-				}
-			}
-			if bestPrice > 0 {
-				bestAsk = &types.BookSide{Price: bestPrice, Size: bestSize}
-			}
+		if bestAsk == nil || price < bestAsk.Price {
+			bestAsk = &types.BookSide{Price: price, Size: size}
 		}
 	}
-
-	snapshot := &types.BookSnapshot{
+	return &types.BookSnapshot{
 		BestBid: bestBid,
 		BestAsk: bestAsk,
-		TS:      time.Now(),
-	}
-
-	// Debug日志：记录订单簿更新
-	internal.LogDebug("[WebSocket] 收到订单簿更新: asset_id=%s, best_bid=%v, best_ask=%v",
-		assetID, bestBid, bestAsk)
-
-	if w.onBookUpdate != nil {
-		w.onBookUpdate(assetID, snapshot)
+		TS:      parseMarketTimestamp(event.Timestamp),
 	}
 }
 
-// parseFloat64 safely parses a float64 from interface{}
-func parseFloat64(v interface{}) float64 {
-	switch val := v.(type) {
-	case float64:
-		return val
-	case float32:
-		return float64(val)
-	case int:
-		return float64(val)
-	case int64:
-		return float64(val)
-	case string:
-		var f float64
-		fmt.Sscanf(val, "%f", &f)
-		return f
-	default:
-		return 0
+func parseMarketDecimal(value string) (float64, bool) {
+	parsed, err := strconv.ParseFloat(value, 64)
+	return parsed, err == nil
+}
+
+func parseMarketTimestamp(value string) time.Time {
+	milliseconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return time.Now()
 	}
+	return time.UnixMilli(milliseconds)
 }

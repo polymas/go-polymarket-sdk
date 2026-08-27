@@ -2,13 +2,9 @@ package websocket
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"sync"
 	"time"
 
@@ -16,30 +12,47 @@ import (
 	"github.com/polymas/go-polymarket-sdk/internal"
 )
 
-// Start 启动WebSocket连接和订阅循环
+type marketSubscriptionRequest struct {
+	AssetIDs             []string                `json:"assets_ids"`
+	Type                 string                  `json:"type"`
+	InitialDump          bool                    `json:"initial_dump"`
+	Level                MarketSubscriptionLevel `json:"level"`
+	CustomFeatureEnabled bool                    `json:"custom_feature_enabled"`
+}
+
+type marketSubscriptionUpdate struct {
+	Operation            string                  `json:"operation"`
+	AssetIDs             []string                `json:"assets_ids"`
+	Level                MarketSubscriptionLevel `json:"level"`
+	CustomFeatureEnabled bool                    `json:"custom_feature_enabled"`
+}
+
 func (w *webSocketClient) Start(assetIDs []string) error {
 	w.runningMutex.Lock()
 	if w.running {
 		w.runningMutex.Unlock()
-		return fmt.Errorf("WebSocket client already running")
+		return fmt.Errorf("Market WebSocket client already running")
 	}
-
-	// Always create a new stopChan for each Start() call
-	// This allows restarting after Stop() without panic
 	w.stopChan = make(chan struct{})
-	w.stopOnce = sync.Once{} // Reset sync.Once for new run
-
+	w.stopOnce = sync.Once{}
 	w.running = true
+	stop := w.stopChan
 	w.runningMutex.Unlock()
 
-	w.subscribedMutex.Lock()
-	w.subscribedIDs = assetIDs
-	w.subscribedMutex.Unlock()
-	go w.run()
+	w.setSubscribedIDs(assetIDs)
+	conn, err := w.connect(stop)
+	if err != nil {
+		w.runningMutex.Lock()
+		if w.stopChan == stop {
+			w.running = false
+		}
+		w.runningMutex.Unlock()
+		return err
+	}
+	go w.run(conn, stop)
 	return nil
 }
 
-// Stop 停止WebSocket客户端
 func (w *webSocketClient) Stop() {
 	w.runningMutex.Lock()
 	if !w.running {
@@ -47,255 +60,142 @@ func (w *webSocketClient) Stop() {
 		return
 	}
 	w.running = false
+	stop := w.stopChan
 	w.runningMutex.Unlock()
 
-	// Use sync.Once to ensure stopChan is only closed once
-	w.stopOnce.Do(func() {
-		close(w.stopChan)
-	})
-
-	w.connMutex.Lock()
-	if w.conn != nil {
-		w.conn.Close()
+	w.stopOnce.Do(func() { close(stop) })
+	if conn := w.currentConn(); conn != nil {
+		_ = conn.Close()
 	}
-	w.connMutex.Unlock()
 }
 
-// IsRunning 返回客户端是否正在运行
 func (w *webSocketClient) IsRunning() bool {
 	w.runningMutex.RLock()
 	defer w.runningMutex.RUnlock()
 	return w.running
 }
 
-// run runs the main WebSocket loop
-func (w *webSocketClient) run() {
-	// 启动定时打印订阅资产总数的goroutine
-	go w.logSubscriptionStats()
-
+func (w *webSocketClient) run(conn *websocket.Conn, stop <-chan struct{}) {
 	for {
-		select {
-		case <-w.stopChan:
+		_ = w.listen(conn, stop)
+		w.clearConn(conn)
+		_ = conn.Close()
+
+		if channelClosed(stop) {
 			return
-		default:
-			// 记录断连时间
-			now := time.Now()
-			w.disconnectMutex.Lock()
-			if w.disconnectedAt == nil {
-				w.disconnectedAt = &now
+		}
+		for {
+			if !waitForReconnect(stop, w.reconnectDelay) {
+				return
 			}
-			w.disconnectMutex.Unlock()
-
-			if err := w.connectAndListen(); err != nil {
-				// 检查断连时间，超过1分钟才输出日志
-				w.disconnectMutex.RLock()
-				disconnectedAt := w.disconnectedAt
-				w.disconnectMutex.RUnlock()
-
-				if disconnectedAt != nil {
-					disconnectedDuration := time.Since(*disconnectedAt)
-					if disconnectedDuration > 1*time.Minute {
-						log.Printf("[WARN] [WebSocket] 断连超过1分钟 (已断连: %v), 错误: %v", disconnectedDuration, err)
-					}
-				}
-
-				time.Sleep(w.reconnectDelay)
-			} else {
-				// 连接成功，清除断连时间
-				w.disconnectMutex.Lock()
-				w.disconnectedAt = nil
-				w.lastConnected = time.Now()
-				w.disconnectMutex.Unlock()
+			nextConn, err := w.connect(stop)
+			if err != nil {
+				continue
 			}
+			conn = nextConn
+			break
 		}
 	}
 }
 
-// logSubscriptionStats 每10秒打印一次订阅的资产总数
-func (w *webSocketClient) logSubscriptionStats() {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
+func (w *webSocketClient) connect(stop <-chan struct{}) (*websocket.Conn, error) {
+	w.writeMutex.Lock()
+	defer w.writeMutex.Unlock()
 
-	for {
-		select {
-		case <-w.stopChan:
-			return
-		case <-ticker.C:
-			// 获取订阅的资产总数（加锁保护）
-			w.subscribedMutex.RLock()
-			assetCount := len(w.subscribedIDs)
-			w.subscribedMutex.RUnlock()
-			internal.LogDebug("[WebSocket] 当前订阅的资产总数: %d", assetCount)
-		}
-	}
-}
-
-// connectAndListen connects to WebSocket and listens for messages
-func (w *webSocketClient) connectAndListen() error {
-	// Configure dialer to prefer IPv4 and increase timeout
 	netDialer := &net.Dialer{
 		Timeout:   internal.WebSocketDialTimeout,
-		DualStack: false, // Disable IPv6 to avoid timeout issues
 		KeepAlive: internal.WebSocketKeepAlive,
 	}
-
-	// Configure TLS
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: false, // 验证SSL证书
-	}
-
-	// Check for proxy from environment variables
-	var proxyURL *url.URL
-	if proxyEnv := os.Getenv("HTTPS_PROXY"); proxyEnv != "" {
-		if proxyEnv == "" {
-			proxyEnv = os.Getenv("HTTP_PROXY")
-		}
-		if proxyEnv != "" {
-			proxyURL, _ = url.Parse(proxyEnv)
-		}
-	}
-
 	dialer := websocket.Dialer{
 		HandshakeTimeout: internal.WebSocketHandshakeTimeout,
-		TLSClientConfig:  tlsConfig,
-		Proxy: func(req *http.Request) (*url.URL, error) {
-			if proxyURL != nil {
-				return proxyURL, nil
-			}
-			return http.ProxyFromEnvironment(req)
-		},
+		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12},
+		Proxy:            http.ProxyFromEnvironment,
 		NetDial: func(network, addr string) (net.Conn, error) {
-			// Force IPv4 by using "tcp4" instead of "tcp"
 			if network == "tcp" {
 				network = "tcp4"
 			}
-			// TCP连接日志已移除
-			conn, err := netDialer.Dial(network, addr)
-			return conn, err
+			return netDialer.Dial(network, addr)
 		},
 	}
 
-	// WebSocket连接日志已移除
 	conn, _, err := dialer.Dial(w.url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return nil, fmt.Errorf("connect Market Channel: %w", err)
+	}
+	request := marketSubscriptionRequest{
+		AssetIDs:             w.subscribedIDStrings(),
+		Type:                 "market",
+		InitialDump:          w.options.InitialDump,
+		Level:                w.options.Level,
+		CustomFeatureEnabled: w.options.CustomFeatureEnabled,
+	}
+	if err := conn.WriteJSON(request); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("send Market Channel subscription: %w", err)
+	}
+	if channelClosed(stop) {
+		_ = conn.Close()
+		return nil, fmt.Errorf("Market WebSocket client stopped")
 	}
 
 	w.connMutex.Lock()
 	w.conn = conn
 	w.connMutex.Unlock()
+	return conn, nil
+}
 
-	// Send subscription message according to Polymarket WSS documentation
-	// https://docs.polymarket.com/developers/CLOB/websocket/wss-overview
-	w.subscribedMutex.RLock()
-	subscribedIDsCopy := make([]string, len(w.subscribedIDs))
-	copy(subscribedIDsCopy, w.subscribedIDs)
-	w.subscribedMutex.RUnlock()
-
-	if len(subscribedIDsCopy) > 0 {
-		subMsg := map[string]interface{}{
-			"assets_ids": subscribedIDsCopy,
-			"type":       "MARKET",
-		}
-
-		if err := conn.WriteJSON(subMsg); err != nil {
-			return fmt.Errorf("failed to send subscription: %w", err)
-		}
-	}
-
-	// Start heartbeat goroutine
+func (w *webSocketClient) listen(conn *websocket.Conn, stop <-chan struct{}) error {
 	heartbeatStop := make(chan struct{})
-	go w.heartbeat(conn, heartbeatStop)
+	go w.heartbeat(conn, stop, heartbeatStop)
 	defer close(heartbeatStop)
 
-	// Listen for messages
+	for {
+		messageType, message, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if messageType != websocket.TextMessage || string(message) == "PONG" {
+			continue
+		}
+		w.dispatchMarketMessage(message)
+	}
+}
+
+func (w *webSocketClient) heartbeat(
+	conn *websocket.Conn,
+	stop <-chan struct{},
+	heartbeatStop <-chan struct{},
+) {
+	ticker := time.NewTicker(w.heartbeatInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-w.stopChan:
-			return nil
-		default:
-			// Read message as raw bytes first to handle non-JSON messages (like "PONG")
-			messageType, messageBytes, err := conn.ReadMessage()
+		case <-stop:
+			return
+		case <-heartbeatStop:
+			return
+		case <-ticker.C:
+			w.writeMutex.Lock()
+			err := conn.WriteMessage(websocket.TextMessage, []byte("PING"))
+			w.writeMutex.Unlock()
 			if err != nil {
-				// 记录断连时间
-				now := time.Now()
-				w.disconnectMutex.Lock()
-				if w.disconnectedAt == nil {
-					w.disconnectedAt = &now
-				}
-				w.disconnectMutex.Unlock()
-				return fmt.Errorf("failed to read message: %w", err)
-			}
-
-			// Handle text messages only (ignore binary)
-			if messageType != websocket.TextMessage {
-				continue
-			}
-
-			// Check for plain text PONG message (not JSON)
-			messageStr := string(messageBytes)
-			if messageStr == "PONG" {
-				continue
-			}
-
-			// Parse JSON message (can be object or array)
-			var rawMsg interface{}
-			if err := json.Unmarshal(messageBytes, &rawMsg); err != nil {
-				continue
-			}
-
-			// Normalize to list (handle both array and single object)
-			var msgList []interface{}
-			switch v := rawMsg.(type) {
-			case []interface{}:
-				msgList = v
-			case map[string]interface{}:
-				msgList = []interface{}{v}
-			default:
-				continue
-			}
-
-			// Process each message in the list
-			for _, rawData := range msgList {
-				msg, ok := rawData.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				// Handle PONG
-				if msgStr, ok := msg["type"].(string); ok && msgStr == "PONG" {
-					continue
-				}
-
-				// Handle book updates
-				if eventType, ok := msg["event_type"].(string); ok && eventType == "book" {
-					w.handleBookUpdate(msg)
-				}
+				_ = conn.Close()
+				return
 			}
 		}
 	}
 }
 
-// heartbeat sends periodic PING messages
-func (w *webSocketClient) heartbeat(conn *websocket.Conn, stop chan struct{}) {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
+func (w *webSocketClient) currentConn() *websocket.Conn {
+	w.connMutex.RLock()
+	defer w.connMutex.RUnlock()
+	return w.conn
+}
 
-	for {
-		select {
-		case <-stop:
-			return
-		case <-ticker.C:
-			if err := conn.WriteJSON("PING"); err != nil {
-				// 记录断连时间
-				now := time.Now()
-				w.disconnectMutex.Lock()
-				if w.disconnectedAt == nil {
-					w.disconnectedAt = &now
-				}
-				w.disconnectMutex.Unlock()
-				return
-			}
-		}
+func (w *webSocketClient) clearConn(conn *websocket.Conn) {
+	w.connMutex.Lock()
+	if w.conn == conn {
+		w.conn = nil
 	}
+	w.connMutex.Unlock()
 }

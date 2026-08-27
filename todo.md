@@ -194,11 +194,11 @@
 - [x] mock server 验证无订阅包、ping/pong、重连和事件解析；race 通过。
 - [x] 官方生产 Sports Channel 真实只读连接跨越两个 ping 周期保持稳定。
 
-### [ ] P0-9：补齐 Market WebSocket 事件，暴露 tick size 变化
+### [x] P0-9：补齐 Market WebSocket 事件，暴露 tick size 变化
 
-当前实现：初始订阅发送大写 `MARKET`，只处理 `book`；心跳使用 JSON 编码的 `"PING"`。
+修复前：初始订阅发送大写 `MARKET`，只处理 `book`；心跳使用 JSON 编码的 `"PING"`。
 
-官方基线：[Market Channel](https://docs.polymarket.com/api-reference/wss/market.md) 使用小写 `market`，支持 `initial_dump`、level 和 feature flags，并发布：
+官方基线：[Market Channel](https://docs.polymarket.com/api-reference/wss/market) 使用小写 `market`，支持 `initial_dump`、level 和 feature flags，并发布：
 
 - `book`
 - `price_change`
@@ -208,13 +208,14 @@
 - `new_market`
 - `market_resolved`
 
-建议验收：
+完成：
 
-- [ ] 严格按 AsyncAPI 发送初始/动态订阅和纯文本 ping/pong。
-- [ ] 为上述每类事件提供 typed model 和回调/统一 event stream。
-- [ ] 以 typed event 暴露 `tick_size_change`，由业务层原子更新自己的 market config cache。
-- [ ] 支持 initial dump、订阅 level 和 custom feature。
-- [ ] 重连时恢复订阅并处理重复快照/增量事件。
+- [x] 初始订阅使用小写 `market`；动态更新使用 `subscribe` / `unsubscribe`；每 10 秒发送纯文本 `PING` 并处理 `PONG`。
+- [x] 为 7 类官方事件提供 typed model 和统一 `SetOnMarketEvent` 回调，同时保留旧 `SetOnBookUpdate`。
+- [x] `MarketTickSizeChangeEvent` 使用 `types.TokenID` 和 `types.TickSize`，业务可直接原子更新 market config cache。
+- [x] `NewClientWithOptions` 支持 initial dump、level 1/2/3 和 custom feature；`NewClient` 保留官方默认行为。
+- [x] 重连恢复去重后的 asset 订阅与选项；明确事件回调可重放，由业务幂等处理。
+- [x] mock 协议、动态订阅、重连、重启和 race 测试通过；官方生产 Market Channel 真实只读订阅跨越心跳周期通过。
 
 ### [x] P0-10：废弃当前 RFQ 旧端点，避免暴露看似可用但官方已不存在的方法
 

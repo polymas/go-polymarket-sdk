@@ -218,12 +218,21 @@ Market Channel 使用 `websocket.Client`，不需要鉴权：
 | 方法                 | 描述               | 参数       | 返回值  |
 | -------------------- | ------------------ | ---------- | ------- |
 | `SetOnBookUpdate`    | 设置订单簿更新回调 | `callback` | -       |
+| `SetOnMarketEvent`   | 设置完整 typed event 回调 | `callback` | -       |
 | `Start`              | 启动连接           | `assetIDs` | `error` |
 | `Stop`               | 停止连接           | -          | -       |
 | `IsRunning`          | 检查是否运行中     | -          | `bool`  |
 | `UpdateSubscription` | 更新订阅           | `assetIDs` | `error` |
 | `SubscribeAssets`    | 订阅资产           | `assetIDs` | `error` |
 | `UnsubscribeAssets`  | 取消订阅资产       | `assetIDs` | `error` |
+
+`NewClient` 使用官方默认值：initial dump 开启、level 2、custom feature 关闭。
+需要 `best_bid_ask` / `new_market` / `market_resolved` 时，从
+`DefaultMarketSubscriptionOptions` 起步并通过 `NewClientWithOptions` 创建。
+`SetOnMarketEvent` 可接收 `MarketBookEvent`、`MarketPriceChangeEvent`、
+`MarketLastTradePriceEvent`、`MarketTickSizeChangeEvent`、`MarketBestBidAskEvent`、
+`MarketNewMarketEvent` 和 `MarketResolvedEvent`。重连可能重放快照或事件，
+业务层更新缓存时应保持幂等。
 
 User Channel 使用独立 `websocket.UserClient`，构造时传入 CLOB `types.ApiCreds`：
 动态订阅/退订需要 `Start` 时传入显式 ConditionID；`Start(nil)` 的全市场模式不支持动态改为局部过滤。
