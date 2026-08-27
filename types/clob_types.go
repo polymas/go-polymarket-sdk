@@ -364,6 +364,47 @@ type OrderPostResponse struct {
 	Timing             OrderResponseTiming  `json:"-"`
 }
 
+// Accepted 表示 CLOB 已明确接收订单。它只判断接单结果，不代表订单已经成交。
+func (r OrderPostResponse) Accepted() bool {
+	if r.Success {
+		return true
+	}
+	switch strings.ToLower(r.Status) {
+	case "live", "matched", "delayed":
+		return r.ErrorMsg == ""
+	default:
+		return false
+	}
+}
+
+// IsUnknown 表示请求可能已经到达 CLOB，但当前无法确认接单结果。
+func (r OrderPostResponse) IsUnknown() bool {
+	return strings.EqualFold(r.Status, "unknown")
+}
+
+// NeedsSettlement 表示订单已撮合但 SDK 还没有取得交易哈希或明确失败结果。
+func (r OrderPostResponse) NeedsSettlement() bool {
+	return strings.EqualFold(r.Status, "matched") &&
+		len(r.TradeIDs) > 0 &&
+		len(r.TransactionsHashes) == 0 &&
+		r.SettlementState != OrderSettlementFailed
+}
+
+// NeedsFollowUp 表示 Instant 响应仍需通过 AwaitOrderResult(s) 继续对账。
+func (r OrderPostResponse) NeedsFollowUp() bool {
+	return r.IsUnknown() || r.NeedsSettlement()
+}
+
+// DefinitelyNotSubmitted 表示 SDK 能确定该订单没有被 CLOB 接收。
+func (r OrderPostResponse) DefinitelyNotSubmitted() bool {
+	switch strings.ToLower(r.Status) {
+	case "not_submitted", "market_closed", "server_rejected":
+		return true
+	default:
+		return false
+	}
+}
+
 // SendOrderResponse 是官方文档中的响应名称。保留 OrderPostResponse 作为主类型，
 // 避免破坏现有调用方。
 type SendOrderResponse = OrderPostResponse

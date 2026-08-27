@@ -278,6 +278,9 @@
 - [x] matched 响应缺少交易哈希时由 SDK 自动等待，批次共享 30 秒窗口并以 4 路并发查询 trade；业务层无需二次调用。
 - [x] 网络结果不明确时保留 unknown，并按本地 V2 EIP-712 order hash 自动查询单订单；只在对账仍无法确认时返回 unknown，禁止自动重下。
 - [x] 每笔响应暴露 POST、order-hash 对账、settlement 和总耗时，以及轮询/查询错误/超时统计；生产 PostOnly 实测本地 hash 与 CLOB orderID 一致。
+- [x] 同时提供 `PostOrder/CreateAndPostOrders` 的 `Instant` 与 `AndWait(ctx, ...)` 版本；旧接口保持自动等待语义兼容，Instant 结果也可稍后交给 `AwaitOrderResult(s)` 补全。
+- [x] 为响应提供 `Accepted/NeedsFollowUp/DefinitelyNotSubmitted` 等业务语义辅助方法，并以同一批次共享 deadline，避免按订单累计等待。
+- [x] 增加默认跳过的生产批量延迟测试：5 个不同 condition、最低 tick、PostOnly、单笔名义金额不超过 0.05 USDC、逐批精确撤单。20 样本复测中 Instant p95=258.6ms、AndWait p95=259.7ms，等待阶段 p95=0；首轮曾观察到 AndWait p95=1.34s，需按外部 POST 尾延迟预留余量。
 
 ### [x] P0-13：迁移 RTDS URL、订阅协议和心跳
 

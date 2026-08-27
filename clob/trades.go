@@ -160,10 +160,107 @@ func (c *orderClientImpl) WaitForOrderFillSettlement(
 	return report, err
 }
 
+// AwaitOrderResult 补全一笔 Instant 下单结果。ctx 控制业务允许等待的时间；
+// 未设置 deadline 时，SDK 使用 30 秒上限。
+func (c *orderClientImpl) AwaitOrderResult(
+	ctx context.Context,
+	response types.OrderPostResponse,
+) (*types.OrderPostResponse, error) {
+	responses, err := c.AwaitOrderResults(ctx, []types.OrderPostResponse{response})
+	if len(responses) == 0 {
+		return nil, err
+	}
+	return &responses[0], err
+}
+
+// AwaitOrderResults 补全 Instant 批量结果：unknown 先按本地确定性 order hash
+// 对账，matched 再等待关联 trade 的交易哈希。整个批次共享同一个 ctx 和最长
+// 30 秒的 SDK 上限，不会按订单串行累计超时。
+func (c *orderClientImpl) AwaitOrderResults(
+	ctx context.Context,
+	responses []types.OrderPostResponse,
+) ([]types.OrderPostResponse, error) {
+	result := append([]types.OrderPostResponse(nil), responses...)
+	if len(result) == 0 {
+		return result, nil
+	}
+
+	waitCtx, cancel := boundedOrderWaitContext(ctx)
+	defer cancel()
+	waitStart := time.Now()
+	originalTotals := make([]time.Duration, len(result))
+	for i := range result {
+		originalTotals[i] = result[i].Timing.TotalDuration
+	}
+	defer func() {
+		waitDuration := time.Since(waitStart)
+		for i := range result {
+			result[i].Timing.TotalDuration = originalTotals[i] + waitDuration
+		}
+	}()
+
+	expectedOrderIDs := make([]types.Keccak256, 0, len(result))
+	for i := range result {
+		if result[i].IsUnknown() && result[i].ExpectedOrderID != "" {
+			expectedOrderIDs = append(expectedOrderIDs, result[i].ExpectedOrderID)
+		}
+	}
+
+	var awaitErr error
+	if len(expectedOrderIDs) > 0 {
+		orders, timing, err := c.reconcileExpectedOrders(waitCtx, expectedOrderIDs, orderSettlementPollInterval)
+		awaitErr = errors.Join(awaitErr, err)
+		for i := range result {
+			if !result[i].IsUnknown() || result[i].ExpectedOrderID == "" {
+				continue
+			}
+			result[i].Timing.ReconciliationWaitDuration = timing.ReconciliationWaitDuration
+			result[i].Timing.ReconciliationPollCount = timing.ReconciliationPollCount
+			result[i].Timing.ReconciliationQueryErrors = timing.ReconciliationQueryErrors
+			result[i].Timing.ReconciliationTimedOut = timing.ReconciliationTimedOut
+			order, found := orders[result[i].ExpectedOrderID]
+			if !found {
+				continue
+			}
+			result[i].Success = true
+			result[i].OrderID = order.OrderID
+			result[i].Status = normalizeOrderStatus(order.Status)
+			result[i].ErrorMsg = ""
+			result[i].TradeIDs = append([]string(nil), order.AssociateTrades...)
+			result[i].Timing.Reconciled = true
+			result[i].Timing.ReconciliationTimedOut = false
+		}
+	}
+
+	if waitCtx.Err() == nil {
+		awaitErr = errors.Join(awaitErr, c.resolveOrderTransactionsContext(waitCtx, result))
+	}
+	return result, awaitErr
+}
+
+func boundedOrderWaitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= orderSettlementTimeout {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, orderSettlementTimeout)
+}
+
 // resolveOrderTransactions 按官方 SDK 的兼容语义补全 matched 响应：如果服务端
 // 只给出 tradeIDs，则在一个批次级截止时间内等待交易哈希或明确失败。下单已经
 // 成功后，查询失败或超时都不会改写为提交失败。
 func (c *orderClientImpl) resolveOrderTransactions(responses []types.OrderPostResponse, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_ = c.resolveOrderTransactionsContext(ctx, responses)
+}
+
+func (c *orderClientImpl) resolveOrderTransactionsContext(
+	ctx context.Context,
+	responses []types.OrderPostResponse,
+) error {
 	tradeIDs := make([]string, 0)
 	for i := range responses {
 		if len(responses[i].TransactionsHashes) == 0 {
@@ -172,11 +269,9 @@ func (c *orderClientImpl) resolveOrderTransactions(responses []types.OrderPostRe
 	}
 	tradeIDs = uniqueStrings(tradeIDs)
 	if len(tradeIDs) == 0 {
-		return
+		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 	start := time.Now()
 	trades, timing, err := c.waitForTradeIDs(ctx, tradeIDs, orderSettlementPollInterval)
 	timing.SettlementWaitDuration = time.Since(start)
@@ -208,6 +303,7 @@ func (c *orderClientImpl) resolveOrderTransactions(responses []types.OrderPostRe
 			len(tradeIDs), timing.SettlementWaitDuration, timing.PollCount, timing.QueryErrors,
 		)
 	}
+	return err
 }
 
 func (c *orderClientImpl) waitForTradeIDs(

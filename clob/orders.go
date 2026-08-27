@@ -1,7 +1,9 @@
 package clob
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -77,6 +79,54 @@ func (c *orderClientImpl) CreateAndPostOrders(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 ) ([]types.OrderPostResponse, error) {
+	return c.createAndPostOrdersWith(orderArgsList, orderTypes, c.postOrdersBatchV2)
+}
+
+// CreateAndPostOrdersInstant 只等待 CLOB 的 POST /orders 响应，不等待异步
+// trade settlement，也不在网络结果不明确时自动轮询订单。返回的 unknown 或
+// NeedsSettlement 结果可稍后传给 AwaitOrderResults。
+func (c *orderClientImpl) CreateAndPostOrdersInstant(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+) ([]types.OrderPostResponse, error) {
+	return c.createAndPostOrdersWith(orderArgsList, orderTypes, c.postOrdersBatchV2Instant)
+}
+
+// CreateAndPostOrdersAndWait 提交后自动完成 unknown order-hash 对账和异步成交
+// 查询。ctx 可以设置更短 deadline；未设置时 SDK 最多等待 30 秒。
+func (c *orderClientImpl) CreateAndPostOrdersAndWait(
+	ctx context.Context,
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+) ([]types.OrderPostResponse, error) {
+	results, submitErr := c.CreateAndPostOrdersInstant(orderArgsList, orderTypes)
+	if len(results) == 0 {
+		return results, submitErr
+	}
+	awaited, awaitErr := c.AwaitOrderResults(ctx, results)
+	if awaitErr != nil {
+		return awaited, errors.Join(submitErr, awaitErr)
+	}
+
+	var ambiguousErr *batchPostError
+	if submitErr != nil && errors.As(submitErr, &ambiguousErr) && allOrderResponsesAccepted(awaited) {
+		// POST 本身报错，但确定性 order hash 已证明整批都被 CLOB 接收。
+		submitErr = nil
+	}
+	return awaited, submitErr
+}
+
+type orderBatchPostFunc func(
+	[]types.OrderArgs,
+	[]types.OrderType,
+	...bool,
+) ([]types.OrderPostResponse, error)
+
+func (c *orderClientImpl) createAndPostOrdersWith(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	postFn orderBatchPostFunc,
+) ([]types.OrderPostResponse, error) {
 	if len(orderArgsList) == 0 {
 		return []types.OrderPostResponse{}, nil
 	}
@@ -99,7 +149,19 @@ func (c *orderClientImpl) CreateAndPostOrders(
 	}
 
 	const maxBatchSize = 15 // 每批最多15个订单
-	return runOrderBatches(orderArgsList, orderTypes, maxBatchSize, c.postOrdersBatchV2)
+	return runOrderBatches(orderArgsList, orderTypes, maxBatchSize, postFn)
+}
+
+func allOrderResponsesAccepted(responses []types.OrderPostResponse) bool {
+	if len(responses) == 0 {
+		return false
+	}
+	for _, response := range responses {
+		if !response.Accepted() {
+			return false
+		}
+	}
+	return true
 }
 
 // runOrderBatches 把逻辑批次切成最多 maxBatchSize 的 HTTP 子批。一个子批
@@ -180,13 +242,33 @@ func runOrderBatches(
 // PostOrder 提交单个订单
 func (c *orderClientImpl) PostOrder(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
 	results, err := c.CreateAndPostOrders([]types.OrderArgs{orderArgs}, []types.OrderType{orderType})
-	if err != nil {
-		return nil, err
-	}
+	return firstOrderResponse(results, err)
+}
+
+// PostOrderInstant 是单笔立即返回版本。
+func (c *orderClientImpl) PostOrderInstant(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
+	results, err := c.CreateAndPostOrdersInstant([]types.OrderArgs{orderArgs}, []types.OrderType{orderType})
+	return firstOrderResponse(results, err)
+}
+
+// PostOrderAndWait 是单笔等待版本。
+func (c *orderClientImpl) PostOrderAndWait(
+	ctx context.Context,
+	orderArgs types.OrderArgs,
+	orderType types.OrderType,
+) (*types.OrderPostResponse, error) {
+	results, err := c.CreateAndPostOrdersAndWait(ctx, []types.OrderArgs{orderArgs}, []types.OrderType{orderType})
+	return firstOrderResponse(results, err)
+}
+
+func firstOrderResponse(results []types.OrderPostResponse, err error) (*types.OrderPostResponse, error) {
 	if len(results) == 0 {
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("no response from server")
 	}
-	return &results[0], nil
+	return &results[0], err
 }
 
 // CancelOrders cancels multiple orders

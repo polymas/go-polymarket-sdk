@@ -342,3 +342,149 @@ func TestOrderPostResponseModelsOfficialAsyncFields(t *testing.T) {
 		t.Fatalf("response = %+v", response)
 	}
 }
+
+func TestAwaitOrderResultsReconcilesUnknownThenSettlement(t *testing.T) {
+	var orderCalls atomic.Int32
+	var tradeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == internal.GetOrder+testOrderID:
+			orderCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":               testOrderID,
+				"status":           "ORDER_STATUS_MATCHED",
+				"market":           testCondition,
+				"asset_id":         testTokenID,
+				"associate_trades": []string{"trade-a"},
+			})
+		case r.URL.Path == internal.Trades:
+			tradeCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"next_cursor": internal.EndCursor,
+				"data": []map[string]interface{}{{
+					"id": "trade-a", "taker_order_id": testOrderID,
+					"market": testCondition, "asset_id": testTokenID,
+					"status": "MINED", "transaction_hash": testTxHash,
+				}},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := newAuthenticatedOrderClientForTest(t, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	responses, err := client.AwaitOrderResults(ctx, []types.OrderPostResponse{{
+		Status:          OrderUnknownStatus,
+		ExpectedOrderID: types.Keccak256(testOrderID),
+		MakingAmount:    "5000000",
+		TakingAmount:    "50000",
+	}})
+	if err != nil {
+		t.Fatalf("AwaitOrderResults: %v", err)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("responses = %+v", responses)
+	}
+	response := responses[0]
+	if !response.Accepted() || response.Status != "matched" || response.OrderID.String() != testOrderID {
+		t.Fatalf("response = %+v", response)
+	}
+	if response.SettlementState != types.OrderSettlementMined || len(response.TransactionsHashes) != 1 {
+		t.Fatalf("settlement was not completed: %+v", response)
+	}
+	if response.MakingAmount != "5000000" || response.TakingAmount != "50000" ||
+		!response.Timing.Reconciled || response.Timing.ReconciliationPollCount != 1 ||
+		response.Timing.PollCount != 1 || response.Timing.TotalDuration <= 0 {
+		t.Fatalf("metadata/timing = %+v", response)
+	}
+	if orderCalls.Load() != 1 || tradeCalls.Load() != 1 {
+		t.Fatalf("order calls=%d trade calls=%d", orderCalls.Load(), tradeCalls.Load())
+	}
+}
+
+func TestAwaitOrderResultsUsesOneBatchDeadline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"next_cursor": internal.EndCursor,
+			"data":        []interface{}{},
+		})
+	}))
+	defer server.Close()
+
+	client := newAuthenticatedOrderClientForTest(t, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	responses, err := client.AwaitOrderResults(ctx, []types.OrderPostResponse{
+		{Status: "matched", TradeIDs: []string{"trade-a"}},
+		{Status: "matched", TradeIDs: []string{"trade-b"}},
+	})
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want deadline exceeded", err)
+	}
+	if elapsed > 150*time.Millisecond {
+		t.Fatalf("batch wait took %v; deadline appears to have been applied per order", elapsed)
+	}
+	for i, response := range responses {
+		if response.SettlementState != types.OrderSettlementTimeout || !response.Timing.SettlementTimedOut {
+			t.Fatalf("response[%d] = %+v", i, response)
+		}
+	}
+}
+
+func TestAwaitOrderResultsReturnsTerminalResultsWithoutNetwork(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := newAuthenticatedOrderClientForTest(t, server.URL)
+	responses, err := client.AwaitOrderResults(context.Background(), []types.OrderPostResponse{
+		{Success: true, Status: "live", OrderID: types.Keccak256(testOrderID)},
+		{Status: OrderMarketClosedStatus, ErrorMsg: "closed"},
+	})
+	if err != nil {
+		t.Fatalf("AwaitOrderResults: %v", err)
+	}
+	if len(responses) != 2 || !responses[0].Accepted() || !responses[1].DefinitelyNotSubmitted() {
+		t.Fatalf("responses = %+v", responses)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("terminal responses caused %d network calls", calls.Load())
+	}
+}
+
+func TestOrderPostResponseStateHelpers(t *testing.T) {
+	tests := []struct {
+		name         string
+		response     types.OrderPostResponse
+		accepted     bool
+		followUp     bool
+		notSubmitted bool
+	}{
+		{name: "live", response: types.OrderPostResponse{Status: "live"}, accepted: true},
+		{name: "matched pending", response: types.OrderPostResponse{Status: "matched", TradeIDs: []string{"trade"}}, accepted: true, followUp: true},
+		{name: "unknown", response: types.OrderPostResponse{Status: OrderUnknownStatus}, followUp: true},
+		{name: "market closed", response: types.OrderPostResponse{Status: OrderMarketClosedStatus}, notSubmitted: true},
+		{name: "server rejected", response: types.OrderPostResponse{Status: OrderServerRejectedStatus}, notSubmitted: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.response.Accepted(); got != test.accepted {
+				t.Fatalf("Accepted() = %v, want %v", got, test.accepted)
+			}
+			if got := test.response.NeedsFollowUp(); got != test.followUp {
+				t.Fatalf("NeedsFollowUp() = %v, want %v", got, test.followUp)
+			}
+			if got := test.response.DefinitelyNotSubmitted(); got != test.notSubmitted {
+				t.Fatalf("DefinitelyNotSubmitted() = %v, want %v", got, test.notSubmitted)
+			}
+		})
+	}
+}

@@ -82,6 +82,8 @@ func newBatchNotSubmittedError(format string, args ...interface{}) error {
 type batchPostError struct {
 	err              error
 	expectedOrderIDs []types.Keccak256
+	makingAmounts    []string
+	takingAmounts    []string
 	timing           types.OrderResponseTiming
 }
 
@@ -96,8 +98,25 @@ func (c *orderClientImpl) postOrdersBatchV2(
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2WithMode(orderArgsList, orderTypes, true, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2Instant(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	isRetry ...bool,
+) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2WithMode(orderArgsList, orderTypes, false, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2WithMode(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	waitForResult bool,
+	isRetry ...bool,
+) ([]types.OrderPostResponse, error) {
 	return resolveV2BatchAttempt(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
-		return c.postOrdersBatchV2Once(a, t, isRetry...)
+		return c.postOrdersBatchV2Once(a, t, waitForResult, isRetry...)
 	})
 }
 
@@ -166,6 +185,12 @@ func applyBatchPostMetadata(results []types.OrderPostResponse, postErr *batchPos
 	for i := range results {
 		if i < len(postErr.expectedOrderIDs) {
 			results[i].ExpectedOrderID = postErr.expectedOrderIDs[i]
+		}
+		if i < len(postErr.makingAmounts) {
+			results[i].MakingAmount = postErr.makingAmounts[i]
+		}
+		if i < len(postErr.takingAmounts) {
+			results[i].TakingAmount = postErr.takingAmounts[i]
 		}
 		results[i].Timing = postErr.timing
 	}
@@ -236,6 +261,7 @@ func extractBadOrderbookTokensFromErr(err error) []string {
 func (c *orderClientImpl) postOrdersBatchV2Once(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
+	waitForResult bool,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
 	batchStart := time.Now()
@@ -326,53 +352,56 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	responseBody, err := http.PostRaw(c.baseClient.baseURL, internal.PostOrders, bodyJSON, http.WithHeaders(headers))
 	postDuration := time.Since(postStart)
 	if err != nil {
-		if !topLevelHTTP4xxRegex.MatchString(err.Error()) {
+		if waitForResult && !topLevelHTTP4xxRegex.MatchString(err.Error()) {
 			if reconciled, complete := c.reconcileAmbiguousPost(
 				expectedOrderIDs, requestBody, batchStart, postDuration,
 			); len(reconciled) > 0 {
 				if complete {
 					return reconciled, nil
 				}
-				return reconciled, &batchPostError{
-					err:              err,
-					expectedOrderIDs: expectedOrderIDs,
-					timing:           reconciled[0].Timing,
-				}
+				return reconciled, newBatchPostError(
+					err,
+					expectedOrderIDs,
+					requestBody,
+					reconciled[0].Timing,
+				)
 			}
 		}
-		return nil, &batchPostError{
-			err:              err,
-			expectedOrderIDs: expectedOrderIDs,
-			timing: types.OrderResponseTiming{
+		return nil, newBatchPostError(
+			err, expectedOrderIDs, requestBody, types.OrderResponseTiming{
 				PostDuration:  postDuration,
 				TotalDuration: time.Since(batchStart),
 			},
-		}
+		)
 	}
 
 	var resp []types.OrderPostResponse
 	if len(responseBody) > 0 {
 		if err := json.Unmarshal(responseBody, &resp); err != nil {
-			if reconciled, complete := c.reconcileAmbiguousPost(
-				expectedOrderIDs, requestBody, batchStart, postDuration,
-			); len(reconciled) > 0 {
-				if complete {
-					return reconciled, nil
-				}
-				return reconciled, &batchPostError{
-					err:              fmt.Errorf("failed to parse response: %w", err),
-					expectedOrderIDs: expectedOrderIDs,
-					timing:           reconciled[0].Timing,
+			if waitForResult {
+				if reconciled, complete := c.reconcileAmbiguousPost(
+					expectedOrderIDs, requestBody, batchStart, postDuration,
+				); len(reconciled) > 0 {
+					if complete {
+						return reconciled, nil
+					}
+					return reconciled, newBatchPostError(
+						fmt.Errorf("failed to parse response: %w", err),
+						expectedOrderIDs,
+						requestBody,
+						reconciled[0].Timing,
+					)
 				}
 			}
-			return nil, &batchPostError{
-				err:              fmt.Errorf("failed to parse response: %w", err),
-				expectedOrderIDs: expectedOrderIDs,
-				timing: types.OrderResponseTiming{
+			return nil, newBatchPostError(
+				fmt.Errorf("failed to parse response: %w", err),
+				expectedOrderIDs,
+				requestBody,
+				types.OrderResponseTiming{
 					PostDuration:  postDuration,
 					TotalDuration: time.Since(batchStart),
 				},
-			}
+			)
 		}
 	}
 	for i := range resp {
@@ -398,7 +427,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 			retryArgs = append(retryArgs, orderArgsList[idx])
 			retryTypes = append(retryTypes, orderTypes[idx])
 		}
-		retryResults, err := c.postOrdersBatchV2(retryArgs, retryTypes, true)
+		retryResults, err := c.postOrdersBatchV2WithMode(retryArgs, retryTypes, waitForResult, true)
 		if err != nil {
 			internal.LogError("V2 重试订单失败: %v", err)
 		} else {
@@ -410,13 +439,16 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		}
 	}
 
+	settlementDuration := time.Duration(0)
 	needsSettlement := make([]bool, len(resp))
-	for i := range resp {
-		needsSettlement[i] = len(resp[i].TradeIDs) > 0 && len(resp[i].TransactionsHashes) == 0
+	if waitForResult {
+		for i := range resp {
+			needsSettlement[i] = len(resp[i].TradeIDs) > 0 && len(resp[i].TransactionsHashes) == 0
+		}
+		settlementStart := time.Now()
+		c.resolveOrderTransactions(resp, orderSettlementTimeout)
+		settlementDuration = time.Since(settlementStart)
 	}
-	settlementStart := time.Now()
-	c.resolveOrderTransactions(resp, orderSettlementTimeout)
-	settlementDuration := time.Since(settlementStart)
 	for i := range resp {
 		resp[i].Timing.PostDuration = postDuration
 		if needsSettlement[i] && resp[i].Timing.SettlementWaitDuration == 0 {
@@ -430,6 +462,26 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	)
 
 	return resp, nil
+}
+
+func newBatchPostError(
+	err error,
+	expectedOrderIDs []types.Keccak256,
+	requestBody []orderRequestV2,
+	timing types.OrderResponseTiming,
+) *batchPostError {
+	postErr := &batchPostError{
+		err:              err,
+		expectedOrderIDs: append([]types.Keccak256(nil), expectedOrderIDs...),
+		makingAmounts:    make([]string, len(requestBody)),
+		takingAmounts:    make([]string, len(requestBody)),
+		timing:           timing,
+	}
+	for i := range requestBody {
+		postErr.makingAmounts[i] = requestBody[i].Order.MakerAmount
+		postErr.takingAmounts[i] = requestBody[i].Order.TakerAmount
+	}
+	return postErr
 }
 
 func (c *orderClientImpl) reconcileAmbiguousPost(
