@@ -9,7 +9,10 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-const orderSizeDecimals = 2
+const (
+	orderSizeDecimals   = 2
+	defaultMinOrderSize = 5.0
+)
 
 // orderRoundingConfig 与官方 V2 order builder 的 ROUNDING_CONFIG 对齐。
 // limit order 的 amount 精度恒等于 price 精度 + size 的两位精度。
@@ -92,6 +95,18 @@ func validateOrderTickSizes(orderArgsList []types.OrderArgs) error {
 		}
 		if _, _, err := priceUnitsOnTick(orderArgs.Price, orderArgs.TickSize); err != nil {
 			return fmt.Errorf("订单 %d token=%s: %w", i+1, orderArgs.TokenID, err)
+		}
+	}
+	return nil
+}
+
+// validateOrderSizes 保留 SDK 原有的默认最小数量 5，但不再
+// 静默改写调用方的订单。该校验为纯本地操作，不请求市场配置。
+func validateOrderSizes(orderArgsList []types.OrderArgs) error {
+	for i, orderArgs := range orderArgsList {
+		if math.IsNaN(orderArgs.Size) || math.IsInf(orderArgs.Size, 0) || orderArgs.Size < defaultMinOrderSize {
+			return fmt.Errorf("订单 %d token=%s: size=%g 无效或小于默认最小值 %g",
+				i+1, orderArgs.TokenID, orderArgs.Size, defaultMinOrderSize)
 		}
 	}
 	return nil

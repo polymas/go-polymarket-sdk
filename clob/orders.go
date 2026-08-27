@@ -67,6 +67,7 @@ func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types
 // 如果订单数量超过15个，将自动分批提交，每批最多15个订单
 // 每笔 OrderArgs 必须显式携带 TickSize；SDK 不在下单热路径请求 /tick-size。
 // 同一批订单可以使用不同 tick size，并逐笔完成价格范围校验和金额计算。
+// Size 必须不小于默认值 5；SDK 只报错，不会自动改大订单数量。
 //
 // 返回契约：成功路径下返回的切片长度恒等于 len(orderArgsList) 且同序；被
 // SDK 自动剥离（如 "orderbook X does not exist"）或批次失败的位置会回填
@@ -85,6 +86,9 @@ func (c *orderClientImpl) CreateAndPostOrders(
 	}
 
 	if err := validateOrderTickSizes(orderArgsList); err != nil {
+		return nil, err
+	}
+	if err := validateOrderSizes(orderArgsList); err != nil {
 		return nil, err
 	}
 

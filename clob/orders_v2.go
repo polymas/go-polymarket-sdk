@@ -253,10 +253,6 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	}
 
 	for i, orderArgs := range orderArgsList {
-		if orderArgs.Size < 5.0 {
-			orderArgs.Size = 5.0
-		}
-
 		// type-3（POLY_1271）签名的 exchange 域取决于市场是否 NegRisk：
 		// 非 retry 时按真实状态签对域；retry 时 negRisk 已被强制为 true，作为
 		// 整批兜底（首次按真实值仍签错的极端情况下再统一改走 NegRisk Exchange
