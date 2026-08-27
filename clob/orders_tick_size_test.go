@@ -37,6 +37,7 @@ func TestParseRequiredTickSizeRejectsMissingAndInvalid(t *testing.T) {
 	}{
 		{name: "missing", wantErr: "required"},
 		{name: "spaces", value: "   ", wantErr: "required"},
+		{name: "padded enum", value: " 0.01 ", wantErr: "invalid"},
 		{name: "not a number", value: "abc", wantErr: "invalid"},
 		{name: "zero", value: "0", wantErr: "invalid"},
 		{name: "negative", value: "-0.01", wantErr: "invalid"},
@@ -65,6 +66,80 @@ func TestValidateOrderTickSizesSupportsPerOrderValues(t *testing.T) {
 	}
 }
 
+func TestRoundingConfigForTickSizeMatchesOfficialV2(t *testing.T) {
+	tests := []struct {
+		tick           types.TickSize
+		priceDecimals  int
+		amountDecimals int
+		tickUnits      int64
+	}{
+		{types.TickSize0_1, 1, 3, 1},
+		{types.TickSize0_01, 2, 4, 1},
+		{types.TickSize0_005, 3, 5, 5},
+		{types.TickSize0_0025, 4, 6, 25},
+		{types.TickSize0_001, 3, 5, 1},
+		{types.TickSize0_0001, 4, 6, 1},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.tick), func(t *testing.T) {
+			config, ok := roundingConfigForTickSize(tt.tick)
+			if !ok {
+				t.Fatalf("missing rounding config for %s", tt.tick)
+			}
+			if config.priceDecimals != tt.priceDecimals ||
+				config.amountDecimals != tt.amountDecimals ||
+				config.tickUnits != tt.tickUnits {
+				t.Fatalf("config for %s = %+v", tt.tick, config)
+			}
+		})
+	}
+}
+
+func TestPriceUnitsOnTickAcceptsEveryOfficialGrid(t *testing.T) {
+	tests := []struct {
+		tick  types.TickSize
+		price float64
+	}{
+		{types.TickSize0_1, 0.3},
+		{types.TickSize0_01, 0.37},
+		{types.TickSize0_005, 0.375},
+		{types.TickSize0_0025, 0.3775},
+		{types.TickSize0_001, 0.377},
+		{types.TickSize0_0001, 0.3771},
+		// 接受正常业务计算产生的 float64 尾差，但不改变真实价格网格。
+		{types.TickSize0_1, 0.1 + 0.2},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.tick), func(t *testing.T) {
+			if _, _, err := priceUnitsOnTick(tt.price, tt.tick); err != nil {
+				t.Fatalf("valid grid price %g for %s rejected: %v", tt.price, tt.tick, err)
+			}
+		})
+	}
+}
+
+func TestPriceUnitsOnTickRejectsOffGridWithoutRounding(t *testing.T) {
+	tests := []struct {
+		tick  types.TickSize
+		price float64
+	}{
+		{types.TickSize0_1, 0.15},
+		{types.TickSize0_01, 0.371},
+		{types.TickSize0_005, 0.377},
+		{types.TickSize0_0025, 0.378},
+		{types.TickSize0_001, 0.3771},
+		{types.TickSize0_0001, 0.37711},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.tick), func(t *testing.T) {
+			_, _, err := priceUnitsOnTick(tt.price, tt.tick)
+			if err == nil || !strings.Contains(err.Error(), "not aligned") {
+				t.Fatalf("off-grid price %g for %s error = %v", tt.price, tt.tick, err)
+			}
+		})
+	}
+}
+
 func TestValidateOrderTickSizesRejectsBeforeSubmission(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -85,6 +160,16 @@ func TestValidateOrderTickSizesRejectsBeforeSubmission(t *testing.T) {
 			name:    "nan price",
 			orders:  []types.OrderArgs{{TokenID: "token", Price: math.NaN(), TickSize: types.TickSize0_01}},
 			wantErr: "价格无效",
+		},
+		{
+			name:    "price off 0.005 grid",
+			orders:  []types.OrderArgs{{TokenID: "token", Price: 0.007, TickSize: types.TickSize0_005}},
+			wantErr: "not aligned",
+		},
+		{
+			name:    "price off 0.0025 grid",
+			orders:  []types.OrderArgs{{TokenID: "token", Price: 0.007, TickSize: types.TickSize0_0025}},
+			wantErr: "not aligned",
 		},
 	}
 	for _, tt := range tests {
@@ -108,22 +193,48 @@ func TestCreateAndPostOrdersRejectsMissingTickBeforeSubmission(t *testing.T) {
 	}
 }
 
-func TestCalculateOrderAmountsUsesCallerSuppliedTickSize(t *testing.T) {
+func TestCreateAndPostOrdersRejectsOffGridPriceBeforeSubmission(t *testing.T) {
 	client := &orderClientImpl{}
+	_, err := client.CreateAndPostOrders(
+		[]types.OrderArgs{{TokenID: "token", Price: 0.007, Size: 5, Side: types.OrderSideBUY, TickSize: types.TickSize0_005}},
+		[]types.OrderType{types.OrderTypeGTC},
+	)
+	if err == nil || !strings.Contains(err.Error(), "not aligned") {
+		t.Fatalf("CreateAndPostOrders() error = %v, want off-grid error", err)
+	}
+}
 
-	coarseMaker, coarseTaker, err := client.calculateOrderAmounts(types.OrderSideBUY, 5, 0.1234, types.TickSize0_01)
-	if err != nil {
-		t.Fatalf("calculateOrderAmounts(coarse tick): %v", err)
+func TestCalculateOrderAmountsMatchesOfficialV2RoundingConfig(t *testing.T) {
+	tests := []struct {
+		tick        types.TickSize
+		price       float64
+		quoteAmount string
+	}{
+		{types.TickSize0_1, 0.3, "3702000"},
+		{types.TickSize0_01, 0.37, "4565800"},
+		{types.TickSize0_005, 0.375, "4627500"},
+		{types.TickSize0_0025, 0.3775, "4658350"},
+		{types.TickSize0_001, 0.377, "4652180"},
+		{types.TickSize0_0001, 0.3771, "4653414"},
 	}
-	fineMaker, fineTaker, err := client.calculateOrderAmounts(types.OrderSideBUY, 5, 0.1234, types.TickSize0_001)
-	if err != nil {
-		t.Fatalf("calculateOrderAmounts(fine tick): %v", err)
-	}
+	client := &orderClientImpl{}
+	for _, tt := range tests {
+		t.Run(string(tt.tick), func(t *testing.T) {
+			buyMaker, buyTaker, err := client.calculateOrderAmounts(types.OrderSideBUY, 12.349, tt.price, tt.tick)
+			if err != nil {
+				t.Fatalf("BUY calculateOrderAmounts: %v", err)
+			}
+			if buyMaker.String() != tt.quoteAmount || buyTaker.String() != "12340000" {
+				t.Fatalf("BUY amounts = maker %s taker %s; want %s/12340000", buyMaker, buyTaker, tt.quoteAmount)
+			}
 
-	if coarseMaker.String() != "600000" || fineMaker.String() != "615000" {
-		t.Fatalf("maker amounts = coarse %s, fine %s; want 600000 and 615000", coarseMaker, fineMaker)
-	}
-	if coarseTaker.String() != "5000000" || fineTaker.String() != "5000000" {
-		t.Fatalf("taker amounts = coarse %s, fine %s; want both 5000000", coarseTaker, fineTaker)
+			sellMaker, sellTaker, err := client.calculateOrderAmounts(types.OrderSideSELL, 12.349, tt.price, tt.tick)
+			if err != nil {
+				t.Fatalf("SELL calculateOrderAmounts: %v", err)
+			}
+			if sellMaker.String() != "12340000" || sellTaker.String() != tt.quoteAmount {
+				t.Fatalf("SELL amounts = maker %s taker %s; want 12340000/%s", sellMaker, sellTaker, tt.quoteAmount)
+			}
+		})
 	}
 }

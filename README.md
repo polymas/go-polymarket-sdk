@@ -302,7 +302,7 @@ responses, err := clobClient.CreateAndPostOrders(orders, []types.OrderType{
 })
 ```
 
-`TickSize` 只用于 SDK 的本地校验、金额计算和签名，不会作为额外字段发给官方 `/orders`；官方请求格式中没有该字段。业务层可用配置、Gamma/WS 数据，或在非热路径显式调用 `GetTickSize(tokenID)` 准备它。
+`TickSize` 只用于 SDK 的本地校验、金额计算和签名，不会作为额外字段发给官方 `/orders`；官方请求格式中没有该字段。业务层可用配置、Gamma/WS 数据，或在非热路径显式调用 `GetTickSize(tokenID)` 准备它。`Price` 必须是对应 `TickSize` 的整数倍；非网格价格会在整批签名和提交前报错，SDK 不会自动舍入到其他价格。
 
 ### 批量获取市场数据
 

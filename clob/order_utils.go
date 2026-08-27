@@ -4,24 +4,77 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"strconv"
 	"strings"
 
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
+const orderSizeDecimals = 2
+
+// orderRoundingConfig 与官方 V2 order builder 的 ROUNDING_CONFIG 对齐。
+// limit order 的 amount 精度恒等于 price 精度 + size 的两位精度。
+type orderRoundingConfig struct {
+	priceDecimals  int
+	amountDecimals int
+	priceScale     int64
+	tickUnits      int64
+}
+
+func roundingConfigForTickSize(tickSize types.TickSize) (orderRoundingConfig, bool) {
+	switch tickSize {
+	case types.TickSize0_1:
+		return orderRoundingConfig{priceDecimals: 1, amountDecimals: 3, priceScale: 10, tickUnits: 1}, true
+	case types.TickSize0_01:
+		return orderRoundingConfig{priceDecimals: 2, amountDecimals: 4, priceScale: 100, tickUnits: 1}, true
+	case types.TickSize0_005:
+		return orderRoundingConfig{priceDecimals: 3, amountDecimals: 5, priceScale: 1_000, tickUnits: 5}, true
+	case types.TickSize0_0025:
+		return orderRoundingConfig{priceDecimals: 4, amountDecimals: 6, priceScale: 10_000, tickUnits: 25}, true
+	case types.TickSize0_001:
+		return orderRoundingConfig{priceDecimals: 3, amountDecimals: 5, priceScale: 1_000, tickUnits: 1}, true
+	case types.TickSize0_0001:
+		return orderRoundingConfig{priceDecimals: 4, amountDecimals: 6, priceScale: 10_000, tickUnits: 1}, true
+	default:
+		return orderRoundingConfig{}, false
+	}
+}
+
 // parseRequiredTickSize 解析业务层显式传入的 tick size。
 // 下单路径只消费该值，不在这里或调用方上层隐式请求 /tick-size。
 func parseRequiredTickSize(tickSize types.TickSize) (float64, error) {
-	raw := strings.TrimSpace(string(tickSize))
-	if raw == "" {
+	raw := string(tickSize)
+	if strings.TrimSpace(raw) == "" {
 		return 0, fmt.Errorf("tick_size is required")
 	}
-	parsed, err := strconv.ParseFloat(raw, 64)
-	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed <= 0 || parsed >= 0.5 {
+	config, ok := roundingConfigForTickSize(tickSize)
+	if !ok {
 		return 0, fmt.Errorf("invalid tick_size %q", raw)
 	}
-	return parsed, nil
+	return float64(config.tickUnits) / float64(config.priceScale), nil
+}
+
+// priceUnitsOnTick 将价格归一为 tick 对应的小数整数，并校验其严格落在网格上。
+// tolerance 只吸收 float64 的二进制表示误差，不会把真实的非网格价格自动舍入。
+func priceUnitsOnTick(price float64, tickSize types.TickSize) (int64, orderRoundingConfig, error) {
+	config, ok := roundingConfigForTickSize(tickSize)
+	if !ok {
+		return 0, orderRoundingConfig{}, fmt.Errorf("invalid tick_size %q", tickSize)
+	}
+	if math.IsNaN(price) || math.IsInf(price, 0) {
+		return 0, orderRoundingConfig{}, fmt.Errorf("price must be finite")
+	}
+
+	scaled := price * float64(config.priceScale)
+	nearest := math.Round(scaled)
+	const floatTolerance = 1e-8
+	if math.Abs(scaled-nearest) > floatTolerance {
+		return 0, orderRoundingConfig{}, fmt.Errorf("price %g is not aligned to tick_size %s", price, tickSize)
+	}
+	units := int64(nearest)
+	if units%config.tickUnits != 0 {
+		return 0, orderRoundingConfig{}, fmt.Errorf("price %g is not aligned to tick_size %s", price, tickSize)
+	}
+	return units, config, nil
 }
 
 // validateOrderTickSizes 对一批订单逐笔校验业务层传入的 tick size 和价格范围。
@@ -37,6 +90,9 @@ func validateOrderTickSizes(orderArgsList []types.OrderArgs) error {
 			return fmt.Errorf("订单 %d 价格无效: price=%g 必须在范围 [%g, %g] 内（tick_size=%s）",
 				i+1, orderArgs.Price, tickSize, 1.0-tickSize, orderArgs.TickSize)
 		}
+		if _, _, err := priceUnitsOnTick(orderArgs.Price, orderArgs.TickSize); err != nil {
+			return fmt.Errorf("订单 %d token=%s: %w", i+1, orderArgs.TokenID, err)
+		}
 	}
 	return nil
 }
@@ -48,162 +104,30 @@ func (c *orderClientImpl) calculateOrderAmounts(
 	price float64,
 	tickSize types.TickSize,
 ) (*big.Int, *big.Int, error) {
-	// Parse caller-supplied tick size. No network lookup occurs in the order path.
-	tickSizeFloat, err := parseRequiredTickSize(tickSize)
+	priceUnits, config, err := priceUnitsOnTick(price, tickSize)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid tick size: %w", err)
+		return nil, nil, err
+	}
+	if math.IsNaN(size) || math.IsInf(size, 0) || size <= 0 {
+		return nil, nil, fmt.Errorf("size must be finite and positive")
 	}
 
-	// Round price to tick size using round_normal (ROUND_HALF_UP) matching Python
-	roundedPrice := roundNormal(price, tickSizeFloat)
-
-	// Convert to token decimals (1e6) - matching Python's to_token_decimals
-	// Python: to_token_decimals(x) = int(Decimal(str(x)) * Decimal(10**6).quantize(exp=Decimal(1), rounding=ROUND_HALF_UP))
-	toTokenDecimals := func(val float64) *big.Int {
-		// Multiply by 1e6 and convert to big.Int (ROUND_HALF_UP)
-		valBig := new(big.Float).SetFloat64(val)
-		multiplier := new(big.Float).SetFloat64(1e6)
-		result := new(big.Float).Mul(valBig, multiplier)
-		// Round to nearest integer (ROUND_HALF_UP)
-		intResult, _ := result.Int(nil)
-		// Check if we need to round up (if fractional part >= 0.5)
-		frac := new(big.Float).Sub(result, new(big.Float).SetInt(intResult))
-		if frac.Cmp(new(big.Float).SetFloat64(0.5)) >= 0 {
-			intResult.Add(intResult, big.NewInt(1))
-		}
-		return intResult
+	// 官方 builder 对 size 向下保留两位。加上的微小 tolerance 只吸收
+	// 12.34*100 这类 float64 表示误差，不会把第三位小数进位。
+	sizeHundredths := int64(math.Floor(size*100 + 1e-9))
+	if sizeHundredths <= 0 {
+		return nil, nil, fmt.Errorf("size is too small after rounding to %d decimals", orderSizeDecimals)
 	}
 
-	// Round down size to 2 decimal places (matching Python's round_config.size = 2)
-	roundedSize := roundDown(size, 2)
+	// size 最多两位、price 最多四位，因此乘积最多六位，正好能无损转换为
+	// CLOB 使用的 1e6 token units。使用 big.Int 避免金额乘法溢出。
+	sizeAmount := new(big.Int).Mul(big.NewInt(sizeHundredths), big.NewInt(10_000))
+	quoteFactor := int64(1_000_000) / (100 * config.priceScale)
+	quoteAmount := new(big.Int).Mul(big.NewInt(sizeHundredths), big.NewInt(priceUnits))
+	quoteAmount.Mul(quoteAmount, big.NewInt(quoteFactor))
 
 	if side == types.OrderSideBUY {
-		// BUY: taker_amount = size, maker_amount = size * price
-		takerAmount := roundedSize
-		makerAmount := takerAmount * roundedPrice
-
-		// Round maker amount following Python logic:
-		// 1. If decimal places > round_config.amount (6), try round_up to (amount + 4) = 10
-		// 2. If still > amount, round_down to amount = 6
-		makerAmount = roundMakerAmount(makerAmount, tickSizeFloat)
-
-		return toTokenDecimals(makerAmount), toTokenDecimals(takerAmount), nil
-	} else {
-		// SELL: maker_amount = size, taker_amount = size * price
-		makerAmount := roundedSize
-		takerAmount := makerAmount * roundedPrice
-
-		// Round taker amount following Python logic:
-		// 1. If decimal places > round_config.amount (6), try round_up to (amount + 4) = 10
-		// 2. If still > amount, round_down to amount = 6
-		takerAmount = roundMakerAmount(takerAmount, tickSizeFloat)
-
-		return toTokenDecimals(makerAmount), toTokenDecimals(takerAmount), nil
+		return quoteAmount, sizeAmount, nil
 	}
-}
-
-// roundNormal rounds a price to tick size using ROUND_HALF_UP (matching Python's round_normal)
-// Python: round_normal(x, sig_digits) uses Decimal.quantize(exp=Decimal(1).scaleb(-sig_digits), rounding=ROUND_HALF_UP)
-func roundNormal(price float64, tickSize float64) float64 {
-	if tickSize <= 0 {
-		return price
-	}
-	// Calculate number of decimal places from tick size
-	// For tick size 0.0001, we need 4 decimal places
-	decimals := getDecimalPlacesFromTickSize(tickSize)
-
-	// Round using ROUND_HALF_UP (standard math.Round)
-	multiplier := 1.0
-	for i := 0; i < decimals; i++ {
-		multiplier *= 10
-	}
-	rounded := float64(int64(price*multiplier+0.5)) / multiplier
-	return rounded
-}
-
-// getDecimalPlacesFromTickSize calculates decimal places from tick size
-// tick_size 0.1 -> 1 decimal, 0.01 -> 2 decimals, 0.001 -> 3 decimals, 0.0001 -> 4 decimals
-func getDecimalPlacesFromTickSize(tickSize float64) int {
-	if tickSize >= 0.1 {
-		return 1
-	} else if tickSize >= 0.01 {
-		return 2
-	} else if tickSize >= 0.001 {
-		return 3
-	} else {
-		return 4 // Default for 0.0001
-	}
-}
-
-// roundDown rounds down to specified decimal places
-func roundDown(val float64, decimals int) float64 {
-	multiplier := 1.0
-	for i := 0; i < decimals; i++ {
-		multiplier *= 10
-	}
-	return float64(int64(val*multiplier)) / multiplier
-}
-
-// roundMakerAmount rounds maker/taker amount following Python's logic:
-// 1. Get round_config.amount based on tick size (6 for 0.0001, 5 for 0.001, etc.)
-// 2. If decimal places > amount, try round_up to (amount + 4)
-// 3. If still > amount, round_down to amount
-func roundMakerAmount(amount float64, tickSize float64) float64 {
-	// Determine round_config.amount from tick size (matching Python ROUNDING_CONFIG)
-	var amountDecimals int
-	if tickSize >= 0.1 {
-		amountDecimals = 3
-	} else if tickSize >= 0.01 {
-		amountDecimals = 4
-	} else if tickSize >= 0.001 {
-		amountDecimals = 5
-	} else {
-		amountDecimals = 6 // Default for 0.0001
-	}
-
-	// Count decimal places
-	decimalPlaces := countDecimalPlaces(amount)
-
-	// If decimal places <= amount, no rounding needed
-	if decimalPlaces <= amountDecimals {
-		return amount
-	}
-
-	// Try round_up to (amount + 4) first
-	roundedUp := roundUp(amount, amountDecimals+4)
-	decimalPlacesAfterRoundUp := countDecimalPlaces(roundedUp)
-
-	// If still > amount, round_down to amount
-	if decimalPlacesAfterRoundUp > amountDecimals {
-		return roundDown(amount, amountDecimals)
-	}
-
-	return roundedUp
-}
-
-// countDecimalPlaces counts the number of decimal places in a float
-func countDecimalPlaces(val float64) int {
-	// Convert to string to count decimal places
-	str := fmt.Sprintf("%.10f", val)
-	str = strings.TrimRight(str, "0")
-	str = strings.TrimRight(str, ".")
-	if !strings.Contains(str, ".") {
-		return 0
-	}
-	parts := strings.Split(str, ".")
-	if len(parts) != 2 {
-		return 0
-	}
-	return len(parts[1])
-}
-
-// roundUp rounds up to specified decimal places
-func roundUp(val float64, decimals int) float64 {
-	multiplier := 1.0
-	for i := 0; i < decimals; i++ {
-		multiplier *= 10
-	}
-	// Round up: add a small epsilon before truncating
-	epsilon := 0.5 / multiplier
-	return float64(int64((val+epsilon)*multiplier)) / multiplier
+	return sizeAmount, quoteAmount, nil
 }
