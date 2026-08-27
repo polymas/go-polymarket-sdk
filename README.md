@@ -109,9 +109,8 @@ V1 回退选项。
 | **Data**       | `data`       | 用户仓位、交易记录、活动数据           |
 | **Web3**       | `web3`       | 区块链交互、余额查询、代理钱包管理     |
 | **WebSocket**  | `websocket`  | 实时订单簿、订单、交易数据订阅         |
-| **RTDS**       | `rtds`       | 实时价格和评论更新                     |
-| **Subgraph**   | `subgraph`   | GraphQL 查询，市场数据、用户数据       |
-| **RFQ**        | `rfq`        | 请求报价（Request for Quote）功能      |
+| **RTDS**       | `rtds`       | Chainlink 30/60 秒 TWAP 实时订阅       |
+| **RFQ**        | `rfq`        | Combos RFQ maker REST 与 quoter WS     |
 | **Cache**      | `cache`      | 统一缓存管理（可选）                   |
 | **Middleware** | `middleware` | HTTP 中间件系统（可选）                |
 | **Errors**     | `errors`     | 统一错误处理（可选）                   |
@@ -173,15 +172,14 @@ V1 回退选项。
 | `GetTag`                       | 获取标签                         | `tagID`                                     | `*Tag`, `error`                |
 | `GetTagBySlug`                 | 通过slug获取标签                 | `slug`                                      | `*Tag`, `error`                |
 | `GetSeries`                    | 获取系列列表                     | `limit`, `offset`, `options...`             | `[]Series`, `error`            |
-| `GetSeriesBySlug`              | 通过slug获取系列                 | `slug`                                      | `*Series`, `error`             |
-| `GetComments`                  | 获取评论列表                     | `marketID`, `limit`, `offset`               | `[]Comment`, `error`           |
-| `GetComment`                   | 获取评论                         | `commentID`                                 | `*Comment`, `error`            |
+| `GetSeriesSummaryByID`         | 通过 ID 获取系列摘要             | `id`                                        | `*SeriesSummary`, `error`      |
+| `GetSeriesSummaryBySlug`       | 通过 slug 获取系列摘要           | `slug`                                      | `*SeriesSummary`, `error`      |
+| `GetComments`                  | 按父实体获取评论列表             | `parentType`, `parentID`, `limit`, `offset` | `[]Comment`, `error`           |
+| `GetComment`                   | 按 ID 获取评论（官方返回数组）   | `commentID`, `getPositions`                 | `[]Comment`, `error`           |
 | `GetProfile`                   | 获取用户资料                     | `address`                                   | `*Profile`, `error`            |
-| `GetProfileByUsername`         | 通过用户名获取用户资料           | `username`                                  | `*Profile`, `error`            |
 | `GetSamplingSimplifiedMarkets` | 获取采样简化市场                 | `limit`                                     | `[]SimplifiedMarket`, `error`  |
 | `GetSamplingMarkets`           | 获取采样市场                     | `limit`                                     | `[]GammaMarket`, `error`       |
 | `GetSimplifiedMarkets`         | 获取简化市场列表                 | `limit`, `offset`, `options...`             | `[]SimplifiedMarket`, `error`  |
-| `GetMarketTradesEvents`        | 获取市场交易事件                 | `marketID`, `limit`, `offset`               | `[]MarketTradesEvent`, `error` |
 
 说明：`GetMarket` 和 `GetMarketBySlug` 会默认发送 `include_tag=true`。
 
@@ -231,37 +229,21 @@ V1 回退选项。
 
 ### RTDS 客户端接口
 
-| 方法                  | 描述             | 参数        | 返回值  |
-| --------------------- | ---------------- | ----------- | ------- |
-| `SetOnPriceUpdate`    | 设置价格更新回调 | `callback`  | -       |
-| `SetOnCommentUpdate`  | 设置评论更新回调 | `callback`  | -       |
-| `SetAuth`             | 设置认证信息     | `auth`      | -       |
-| `Start`               | 启动连接         | -           | `error` |
-| `Stop`                | 停止连接         | -           | -       |
-| `IsRunning`           | 检查是否运行中   | -           | `bool`  |
-| `SubscribePrices`     | 订阅价格         | `tokenIDs`  | `error` |
-| `UnsubscribePrices`   | 取消订阅价格     | `tokenIDs`  | `error` |
-| `SubscribeComments`   | 订阅评论         | `marketIDs` | `error` |
-| `UnsubscribeComments` | 取消订阅评论     | `marketIDs` | `error` |
-
-### Subgraph 客户端接口
-
-| 方法                    | 描述              | 参数                               | 返回值                         |
-| ----------------------- | ----------------- | ---------------------------------- | ------------------------------ |
-| `Query`                 | 执行 GraphQL 查询 | `query`, `variables`               | `*GraphQLResponse`, `error`    |
-| `GetMarketVolume`       | 获取市场交易量    | `marketID`, `startTime`, `endTime` | `*MarketVolume`, `error`       |
-| `GetUserPositions`      | 获取用户仓位      | `userAddress`                      | `[]GQLPosition`, `error`       |
-| `GetMarketOpenInterest` | 获取市场未平仓量  | `marketID`                         | `*MarketOpenInterest`, `error` |
-| `GetUserPNL`            | 获取用户盈亏      | `userAddress`                      | `*UserPNL`, `error`            |
+| 方法               | 描述                          | 参数            | 返回值  |
+| ------------------ | ----------------------------- | --------------- | ------- |
+| `SetOnTWAPUpdate`  | 设置精确 TWAP 更新回调        | `callback`      | -       |
+| `Start`            | 启动连接并恢复订阅            | -               | `error` |
+| `Stop`             | 停止连接                      | -               | -       |
+| `IsRunning`        | 检查是否运行中                | -               | `bool`  |
+| `Subscribe`        | 订阅 30/60 秒窗口及可选 symbol | `subscriptions` | `error` |
+| `Unsubscribe`      | 取消订阅                      | `subscriptions` | `error` |
 
 ### RFQ 客户端接口
 
-| 方法            | 描述         | 参数        | 返回值                        |
-| --------------- | ------------ | ----------- | ----------------------------- |
-| `RequestQuote`  | 请求报价     | `request`   | `*RFQResponse`, `error`       |
-| `GetQuotes`     | 获取报价列表 | `requestID` | `[]RFQQuote`, `error`         |
-| `AcceptQuote`   | 接受报价     | `quoteID`   | `*RFQAcceptResponse`, `error` |
-| `CancelRequest` | 取消请求     | `requestID` | `error`                       |
+REST `Client` 提供公开的 `GetComboMarkets`，以及使用 CLOB L2 鉴权的
+`SubmitQuote`、`CancelQuote`、`Confirm`。`WebSocketClient` 负责 quoter 身份认证、
+重连和 `RFQ_REQUEST`/last-look/execution 等事件，并提供 `SendQuote`、
+`CancelQuote`、`Confirm`。旧 CLOB `/rfq/*` requester 方法已删除。
 
 ## 💡 使用示例
 
@@ -569,7 +551,7 @@ go test -cover ./...
     - **首次部署（v1.10.6+）**：新注册 EOA 的 DepositWallet 是 counter-factual 地址，发批量交易前需先部署。调用 `gaslessClient.DeployDepositWallet(false)` 走 `type=WALLET-CREATE`；force=false 时已部署的钱包会自动跳过。如果在未部署的钱包上直接调 batch 方法，会得到 sentinel `web3.ErrDepositWalletNotDeployed`，业务层可 `errors.Is` 判断并触发 deploy。
     - **POLY_1271 签名（v1.10.4+）**：CLOB v2 订单签名采用 solady ERC-1271 嵌套 TypedDataSign 格式（~317 字节，含 inner_sig + appDomainSep + contents_hash + ORDER_TYPE_STRING + uint16 长度），不是普通 EIP-712 ECDSA。已对照 py-clob-client-v2 字节级一致。
 - `OrderSide`: 订单方向（BUY/SELL）
-- `OrderType`: 订单类型（GTC/FOK/FAK/IOC）
+- `OrderType`: 订单类型（GTC/FOK/GTD/FAK）；GTD 至少提前 3 分钟，PostOnly 仅支持 GTC/GTD
 - `OrderArgs`: 订单参数
 - `OpenOrder`: 开放订单
 - `OrderBookSummary`: 订单簿摘要

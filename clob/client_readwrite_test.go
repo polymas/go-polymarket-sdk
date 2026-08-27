@@ -193,7 +193,7 @@ func TestCreateAndPostOrders(t *testing.T) {
 				TickSize: types.TickSize0_001,
 			},
 		}
-		orderTypes := []types.OrderType{types.OrderTypeGTC, types.OrderTypeIOC} // 长度不匹配
+		orderTypes := []types.OrderType{types.OrderTypeGTC, types.OrderTypeFAK} // 长度不匹配
 
 		_, err := client.CreateAndPostOrders(orderArgs, orderTypes)
 		if err == nil {
@@ -214,12 +214,12 @@ func TestCreateAndPostOrders(t *testing.T) {
 			},
 		}
 
-		orderTypes := []types.OrderType{types.OrderTypeIOC}
+		orderTypes := []types.OrderType{types.OrderTypeFAK}
 		responses, err := client.CreateAndPostOrders(orderArgs, orderTypes)
 		if err != nil {
-			t.Logf("CreateAndPostOrders with IOC failed (may be expected): %v", err)
+			t.Logf("CreateAndPostOrders with FAK failed (may be expected): %v", err)
 		} else if responses != nil && len(responses) > 0 {
-			t.Logf("CreateAndPostOrders with IOC succeeded")
+			t.Logf("CreateAndPostOrders with FAK succeeded")
 		}
 
 		orderTypes = []types.OrderType{types.OrderTypeFOK}
@@ -340,7 +340,7 @@ func TestPostOrder(t *testing.T) {
 
 		orderTypes := []types.OrderType{
 			types.OrderTypeGTC,
-			types.OrderTypeIOC,
+			types.OrderTypeFAK,
 			types.OrderTypeFOK,
 		}
 

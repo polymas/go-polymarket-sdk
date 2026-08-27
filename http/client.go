@@ -416,8 +416,11 @@ func buildSafeURL(baseURL, path string) (string, error) {
 
 	finalURL := base.ResolveReference(rel)
 
-	// 安全验证：只允许HTTPS协议
-	if finalURL.Scheme != "https" {
+	// 生产请求只允许 HTTPS；loopback HTTP 仅用于本地 mock/集成测试。
+	host := finalURL.Hostname()
+	ip := net.ParseIP(host)
+	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
+	if finalURL.Scheme != "https" && !(finalURL.Scheme == "http" && loopback) {
 		return "", fmt.Errorf("only HTTPS protocol is allowed, got: %s", finalURL.Scheme)
 	}
 

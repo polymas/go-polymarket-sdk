@@ -94,6 +94,9 @@ func (c *orderClientImpl) CreateAndPostOrders(
 	if err := validateOrderTokenIDs(orderArgsList); err != nil {
 		return nil, err
 	}
+	if err := validateOrderLifetimes(orderArgsList, orderTypes, time.Now()); err != nil {
+		return nil, err
+	}
 
 	const maxBatchSize = 15 // 每批最多15个订单
 	return runOrderBatches(orderArgsList, orderTypes, maxBatchSize, c.postOrdersBatchV2)

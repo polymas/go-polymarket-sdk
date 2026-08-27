@@ -15,9 +15,8 @@
 - `web3/gasless_split_merge_test.go` - Gasless Split/Merge 测试（读写，需要认证）
 - `websocket/client_test.go` - WebSocket客户端测试（只读）
 - `websocket/sports_client_test.go` - Sports WebSocket客户端测试（只读）
-- `rfq/client_test.go` - RFQ客户端测试（读写，需要认证）
-- `rtds/client_test.go` - RTDS客户端测试（只读）
-- `subgraph/client_test.go` - Subgraph客户端测试（只读）
+- `rfq/client_test.go` - Combos RFQ REST/WS mock 契约测试
+- `rtds/client_test.go` - RTDS TWAP 协议与精度测试（只读 mock）
 
 测试辅助函数位于 `test/helpers.go`，包含环境变量读取、客户端初始化等通用功能。
 
@@ -68,8 +67,6 @@ export POLY_TEST_MARKET_SLUG="test-market-slug"
 # 测试事件ID
 export POLY_TEST_EVENT_ID=12345
 
-# RTDS认证token（可选）
-export POLY_RTDS_TOKEN="your_rtds_token"
 ```
 
 ## 运行测试
@@ -86,7 +83,7 @@ go test ./...
 
 ```bash
 # 运行所有只读测试
-go test ./data/... ./gamma/... ./clob/... -run Readonly ./web3/... -run "^(?!.*Gasless)" ./websocket/... ./rtds/... ./subgraph/...
+go test ./data/... ./gamma/... ./clob/... -run Readonly ./web3/... -run "^(?!.*Gasless)" ./websocket/... ./rtds/...
 
 # 或者使用short标志（如果测试支持）
 go test -short ./...
@@ -119,14 +116,12 @@ go test ./web3/ -run TestSplitAndMergeBTC4H
 # WebSocket测试
 go test ./websocket/
 
-# RFQ测试（需要认证）
+# RFQ mock 契约测试
 go test ./rfq/
 
 # RTDS测试
 go test ./rtds/
 
-# Subgraph测试
-go test ./subgraph/
 ```
 
 ### 运行特定测试函数
@@ -256,12 +251,8 @@ go test -parallel 4 ./...
 
 | 测试函数                 | 状态   | 说明   |
 | ------------------------ | ------ | ------ |
-| `TestSetOnPriceUpdate`   | ✅ PASS | 已通过 |
-| `TestSetOnCommentUpdate` | ✅ PASS | 已通过 |
-| `TestSetAuth`            | ✅ PASS | 已通过 |
-| `TestStart`              | ✅ PASS | 已通过 |
-| `TestStop`               | ✅ PASS | 已通过 |
-| `TestIsRunning`          | ✅ PASS | 已通过 |
+| `TestProtocolHeartbeatAndExactTWAP` | ✅ PASS | 订阅、纯文本 PING、精确 E18、双时间戳 |
+| `TestFormatSignedE18`             | ✅ PASS | 正数、负数和极小值无精度损失        |
 
 ### Data包测试状态
 
@@ -288,15 +279,13 @@ go test -parallel 4 ./...
 | `TestGetTag`                       | ✅ PASS | 已通过                                                      |
 | `TestGetTagBySlug`                 | ✅ PASS | 已通过                                                      |
 | `TestGetSeries`                    | ✅ PASS | 已通过 - 已修复id字段字符串解析问题                         |
-| `TestGetSeriesBySlug`              | ⏭️ SKIP | API端点已废弃（自动跳过）                                   |
+| `TestGetSeriesSummaryBySlug`       | ✅ PASS | 使用当前 series-summary 端点                                |
 | `TestGetComments`                  | ⏭️ SKIP | 需要POLY_TEST_MARKET_ID                                     |
 | `TestGetComment`                   | ✅ PASS | 已通过                                                      |
 | `TestGetProfile`                   | ⏭️ SKIP | API端点已废弃（自动跳过）                                   |
-| `TestGetProfileByUsername`         | ⏭️ SKIP | API端点已废弃（自动跳过）                                   |
 | `TestGetSamplingSimplifiedMarkets` | ⏭️ SKIP | API端点已废弃（自动跳过）                                   |
 | `TestGetSamplingMarkets`           | ⏭️ SKIP | API端点已废弃（自动跳过）                                   |
 | `TestGetSimplifiedMarkets`         | ⏭️ SKIP | API端点已废弃（自动跳过）                                   |
-| `TestGetMarketTradesEvents`        | ⏭️ SKIP | 需要POLY_TEST_MARKET_ID                                     |
 
 ### Web3包测试状态
 
@@ -340,26 +329,7 @@ go test -parallel 4 ./...
 
 ### RFQ包测试状态
 
-所有测试需要 `POLY_PRIVATE_KEY` 和 `POLY_TEST_TOKEN_ID`：
-
-| 测试函数            | 状态   | 说明               |
-| ------------------- | ------ | ------------------ |
-| `TestRequestQuote`  | ⏭️ SKIP | 需要认证和测试数据 |
-| `TestGetQuotes`     | ⏭️ SKIP | 需要认证和测试数据 |
-| `TestAcceptQuote`   | ⏭️ SKIP | 需要认证和测试数据 |
-| `TestCancelRequest` | ⏭️ SKIP | 需要认证和测试数据 |
-
-### Subgraph包测试状态
-
-| 测试函数                    | 状态   | 说明                                  |
-| --------------------------- | ------ | ------------------------------------- |
-| `TestQuery`                 | ✅ PASS | 已通过 - 已添加端点移除检查，自动跳过 |
-| `TestGetMarketVolume`       | ⏭️ SKIP | 需要测试数据                          |
-| `TestGetUserPositions`      | ✅ PASS | 已通过 - 已添加端点移除检查，自动跳过 |
-| `TestGetMarketOpenInterest` | ⏭️ SKIP | 需要测试数据                          |
-| `TestGetUserPNL`            | ✅ PASS | 已通过 - 已添加端点移除检查，自动跳过 |
-
-**注意**：Subgraph API端点已被The Graph移除，相关测试会自动跳过。这是外部服务变更，无法修复。
+RFQ 测试不读取私钥，使用本地 HTTP/WebSocket server 锁定当前公开路径、认证首帧、事件透传和报价报文。
 
 ### 测试状态说明
 
@@ -384,7 +354,7 @@ go test -parallel 4 ./...
 - ✅ 通过：9个（包括市场频道和体育频道测试）
 
 **RTDS包**：
-- ✅ 通过：6个（包括价格和评论更新测试）
+- ✅ 通过：2个（TWAP 协议和 E18 精度测试）
 
 **总计**：
 - ✅ **通过**：54个测试
@@ -392,8 +362,7 @@ go test -parallel 4 ./...
   - Data包：4个（TestGetPositions, TestGetTrades, TestGetActivity, TestGetValue）
   - Gamma包：16个（包括TestGetSeries, TestSearch等）
   - WebSocket包：9个（市场频道和体育频道测试）
-  - RTDS包：6个（价格和评论更新测试）
-  - Subgraph包：3个（TestQuery, TestGetUserPositions, TestGetUserPNL - 自动跳过已移除的端点）
+  - RTDS包：2个（TWAP 协议和 E18 精度测试）
   - Web3包：4个（TestSplitAndMergeBTC4H及其子测试）
 - ⏭️ **跳过**：41个测试（需要认证或测试数据，或API端点已废弃 - 正常行为）
 - ❌ **失败**：0个测试
@@ -411,7 +380,7 @@ go test -parallel 4 ./...
 - ✅ 只读客户端功能已实现，无需私钥即可使用市场数据接口
 - ✅ **TestGetTrades已修复**：修复了时间戳解析问题（API返回数字时间戳而非字符串）
 - ✅ **TestGetTrades已修复**：修复了filterType参数值（使用"CASH"而非"amount"）
-- ✅ **Subgraph测试已修复**：添加了端点移除检查，相关测试会自动跳过（端点已被The Graph移除）
+- ✅ **失效 Subgraph client 已移除**：不再通过 Skip 掩盖已知失效端点
 - ✅ **TestGetAllMarkets已标记为不测试**：由于需要很长时间且容易超时，已添加`t.Skip()`跳过此测试
 - ✅ **TestGetMidpoint已修复**：现在支持从15分钟预测试数据中自动获取tokenID，测试通过
 - ✅ **所有需要tokenID的测试已优化**：所有标记为"需要POLY_TEST_TOKEN_ID或市场数据"的测试现在都支持自动从15分钟预测试数据中获取tokenID，不再强制依赖环境变量
@@ -441,15 +410,6 @@ go test -parallel 4 ./...
   3. 调整了limit边界测试的预期（API可能返回超过500的结果）
 - **状态**：✅ **已修复并通过**
 
-#### ✅ Subgraph包测试 - 已修复
-- **失败原因**：The Graph API端点已被移除（外部服务变更）
-- **修复方案**：为所有Subgraph测试添加了端点移除检查，当检测到端点已移除时自动跳过
-- **状态**：✅ **已修复** - 测试现在会正确跳过，不会失败
-- **影响的测试**：
-  - `TestQuery` - ✅ 现在通过（自动跳过）
-  - `TestGetUserPositions` - ✅ 现在通过（自动跳过）
-  - `TestGetUserPNL` - ✅ 现在通过（自动跳过）
-
 #### ⏭️ TestGetAllMarkets (Gamma包) - 已标记为不测试
 - **原因**：获取所有历史市场数据需要很长时间且容易超时，不适合常规测试
 - **处理方案**：已在测试函数中添加 `t.Skip()`，测试会自动跳过
@@ -470,12 +430,7 @@ go test -parallel 4 ./...
    - 修复：添加自定义UnmarshalJSON方法、修正参数值
    - 结果：✅ 所有子测试通过
 
-2. **✅ Subgraph包测试**
-   - 问题：API端点已被移除，导致测试失败
-   - 修复：添加端点移除检查，自动跳过
-   - 结果：✅ 3个测试现在通过（自动跳过）
-
-3. **⚠️ TestGetAllMarkets (Gamma包)**
+2. **⚠️ TestGetAllMarkets (Gamma包)**
    - 问题：网络超时
    - 修复：添加short模式跳过逻辑
    - 结果：⚠️ 需要特殊配置（使用`-short`或更长超时时间）

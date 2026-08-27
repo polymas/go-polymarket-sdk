@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/polymas/go-polymarket-sdk/types"
 )
@@ -120,6 +121,34 @@ func validateOrderTokenIDs(orderArgsList []types.OrderArgs) error {
 		if !ok || tokenID.Sign() <= 0 || tokenID.BitLen() > 256 {
 			return fmt.Errorf("订单 %d token=%s: tokenID 必须是有效的 uint256 十进制整数",
 				i+1, orderArgs.TokenID)
+		}
+	}
+	return nil
+}
+
+// validateOrderLifetimes validates order-type-specific fields before any order
+// is signed or any HTTP batch is submitted.
+func validateOrderLifetimes(orderArgsList []types.OrderArgs, orderTypes []types.OrderType, now time.Time) error {
+	const minimumGTDLeadTime = 3 * time.Minute
+	minimumExpiration := now.Unix() + int64(minimumGTDLeadTime/time.Second)
+
+	for i, orderType := range orderTypes {
+		args := orderArgsList[i]
+		switch orderType {
+		case types.OrderTypeGTC, types.OrderTypeFOK, types.OrderTypeFAK:
+			if args.Expiration != 0 {
+				return fmt.Errorf("订单 %d: %s 不允许设置 expiration", i+1, orderType)
+			}
+		case types.OrderTypeGTD:
+			if args.Expiration < minimumExpiration {
+				return fmt.Errorf("订单 %d: GTD expiration 必须至少为当前时间 3 分钟后", i+1)
+			}
+		default:
+			return fmt.Errorf("订单 %d: 不支持的订单类型 %q", i+1, orderType)
+		}
+
+		if args.PostOnly && orderType != types.OrderTypeGTC && orderType != types.OrderTypeGTD {
+			return fmt.Errorf("订单 %d: postOnly 仅支持 GTC 或 GTD", i+1)
 		}
 	}
 	return nil

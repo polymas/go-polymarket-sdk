@@ -140,8 +140,7 @@ const (
 
 // Events endpoints（Gamma）
 const (
-	Events       = "/events" // List events
-	GetMarketTradesEvents = "/live-activity/events/"
+	Events = "/events" // List events
 )
 
 // Markets endpoints
@@ -163,8 +162,9 @@ const (
 
 // Series endpoints
 const (
-	GetSeries       = "/series"
-	GetSeriesBySlug = "/series/slug/"
+	GetSeries              = "/series"
+	GetSeriesSummary       = "/series-summary/"
+	GetSeriesSummaryBySlug = "/series-summary/slug/"
 )
 
 // Comments endpoints
@@ -175,8 +175,7 @@ const (
 
 // Profiles endpoints
 const (
-	GetProfile           = "/profiles/"
-	GetProfileByUsername = "/profiles/username/"
+	GetProfile = "/public-profile"
 )
 
 // Market Data endpoints

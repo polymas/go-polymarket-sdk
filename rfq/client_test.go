@@ -1,295 +1,224 @@
 package rfq
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
-	"github.com/polymas/go-polymarket-sdk/test"
+	"github.com/gorilla/websocket"
+	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-func TestRequestQuote(t *testing.T) {
-	client := NewClient()
-	config := test.LoadTestConfig()
+func TestGetComboMarkets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rfq/combo-markets" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("limit"); got != "25" {
+			t.Errorf("limit = %s", got)
+		}
+		if got := r.URL.Query().Get("cursor"); got != "next" {
+			t.Errorf("cursor = %s", got)
+		}
+		if got := r.URL.Query().Get("exclude"); got != "a,b" {
+			t.Errorf("exclude = %s", got)
+		}
+		_, _ = w.Write([]byte(`{"markets":[{"id":"1","condition_id":"c","position_ids":["y","n"],"slug":"s","title":"t","outcomes":["Yes","No"],"outcome_prices":[".5",".5"],"image":"","volume":1,"tags":[]}],"next_cursor":null}`))
+	}))
+	defer server.Close()
 
-	test.SkipIfNoAuth(t, config)
-
-	if config.TestTokenID == "" {
-		t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set")
+	result, err := newClient(server.URL, Config{}).GetComboMarkets(25, "next", []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// 注意：这个测试会实际请求报价，需要谨慎
-	t.Run("Basic", func(t *testing.T) {
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    10.0,
-		}
-
-		response, err := client.RequestQuote(request)
-		if err != nil {
-			t.Fatalf("RequestQuote failed: %v", err)
-		}
-		if response == nil {
-			t.Fatal("RequestQuote returned nil")
-		}
-		t.Logf("RequestQuote returned: %+v", response)
-	})
-
-	// 测试无效tokenID
-	t.Run("InvalidTokenID", func(t *testing.T) {
-		request := types.RFQRequest{
-			TokenID: "invalid-token-id",
-			Side:    types.OrderSideBUY,
-			Size:    10.0,
-		}
-
-		_, err := client.RequestQuote(request)
-		if err != nil {
-			t.Logf("RequestQuote with invalid tokenID returned error (expected): %v", err)
-		} else {
-			t.Error("Expected error for invalid tokenID")
-		}
-	})
-
-	// 测试负数size
-	t.Run("NegativeSize", func(t *testing.T) {
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    -10.0,
-		}
-
-		_, err := client.RequestQuote(request)
-		if err != nil {
-			t.Logf("RequestQuote with negative size returned error (expected): %v", err)
-		} else {
-			t.Error("Expected error for negative size")
-		}
-	})
-
-	// 测试0 size
-	t.Run("ZeroSize", func(t *testing.T) {
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    0.0,
-		}
-
-		_, err := client.RequestQuote(request)
-		if err != nil {
-			t.Logf("RequestQuote with zero size returned error (expected): %v", err)
-		} else {
-			t.Error("Expected error for zero size")
-		}
-	})
-
-	// 测试极大size
-	t.Run("LargeSize", func(t *testing.T) {
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    1e15,
-		}
-
-		response, err := client.RequestQuote(request)
-		if err != nil {
-			t.Logf("RequestQuote with large size returned error (may be expected): %v", err)
-		} else if response != nil {
-			t.Logf("RequestQuote with large size succeeded")
-		}
-	})
+	if len(result.Markets) != 1 || result.NextCursor != nil {
+		t.Fatalf("unexpected response: %+v", result)
+	}
 }
 
-func TestGetQuotes(t *testing.T) {
-	client := NewClient()
-	config := test.LoadTestConfig()
+func TestMakerRESTRequiresCredentials(t *testing.T) {
+	_, err := NewClient(Config{}).SubmitQuote(Quote{})
+	if err == nil || !strings.Contains(err.Error(), "requires signer") {
+		t.Fatalf("error = %v", err)
+	}
+}
 
-	test.SkipIfNoAuth(t, config)
-
-	// 注意：这个测试需要有效的请求ID
-	t.Run("Basic", func(t *testing.T) {
-		// 先创建一个请求
-		if config.TestTokenID == "" {
-			t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set")
+func TestMakerRESTUsesL2HeadersAndConfiguredIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/maker/quotes" {
+			t.Errorf("path = %s", r.URL.Path)
 		}
-
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    10.0,
-		}
-
-		requestResponse, err := client.RequestQuote(request)
-		if err != nil {
-			t.Fatalf("RequestQuote failed: %v", err)
-		}
-		if requestResponse == nil || requestResponse.RequestID == "" {
-			t.Skip("Skipping test: No request ID returned")
-		}
-
-		// 获取报价
-		quotes, err := client.GetQuotes(requestResponse.RequestID)
-		if err != nil {
-			t.Fatalf("GetQuotes failed: %v", err)
-		}
-		if quotes == nil {
-			t.Fatal("GetQuotes returned nil")
-		}
-		t.Logf("GetQuotes returned %d quotes", len(quotes))
-	})
-
-	// 测试无效requestID
-	t.Run("InvalidRequestID", func(t *testing.T) {
-		_, err := client.GetQuotes("invalid-request-id")
-		if err != nil {
-			t.Logf("GetQuotes with invalid requestID returned error (expected): %v", err)
-		} else {
-			t.Error("Expected error for invalid requestID")
-		}
-	})
-
-	// 测试不存在的requestID
-	t.Run("NonExistentRequestID", func(t *testing.T) {
-		nonExistentID := "00000000-0000-0000-0000-000000000000"
-		quotes, err := client.GetQuotes(nonExistentID)
-		if err != nil {
-			t.Logf("GetQuotes with non-existent requestID returned error: %v", err)
-		} else if quotes != nil {
-			if len(quotes) == 0 {
-				t.Logf("GetQuotes with non-existent requestID returned empty array (expected)")
-			} else {
-				t.Logf("GetQuotes with non-existent requestID returned %d quotes", len(quotes))
+		for _, header := range []string{"POLY_API_KEY", "POLY_ADDRESS", "POLY_SIGNATURE", "POLY_PASSPHRASE", "POLY_TIMESTAMP"} {
+			if r.Header.Get(header) == "" {
+				t.Errorf("missing %s", header)
 			}
 		}
+		body, _ := io.ReadAll(r.Body)
+		var quote Quote
+		if err := json.Unmarshal(body, &quote); err != nil {
+			t.Fatal(err)
+		}
+		if quote.SignerAddress != "configured-signer" || quote.MakerAddress != "configured-maker" || quote.PriceE6 != "500000" {
+			t.Errorf("quote = %+v", quote)
+		}
+		_, _ = w.Write([]byte(`{"request":{"rfq_id":"r1","leg_position_ids":[],"direction":"BUY","side":"YES"},"status":"COLLECTING_QUOTES"}`))
+	}))
+	defer server.Close()
+	signer, err := signing.NewSigner(strings.Repeat("1", 64), types.Polygon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newClient(server.URL, Config{
+		Signer:      signer,
+		Credentials: &types.ApiCreds{Key: "key", Secret: "c2VjcmV0", Passphrase: "pass"},
+		Identity:    Identity{SignerAddress: "configured-signer", MakerAddress: "configured-maker", SignatureType: types.SafeSignatureType},
 	})
+	result, err := client.SubmitQuote(Quote{RFQID: "r1", QuoteID: "q1", PriceE6: "500000", SizeE6: "1000000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "COLLECTING_QUOTES" {
+		t.Fatalf("result = %+v", result)
+	}
 }
 
-func TestAcceptQuote(t *testing.T) {
-	client := NewClient()
-	config := test.LoadTestConfig()
-
-	test.SkipIfNoAuth(t, config)
-
-	// 注意：这个测试需要有效的报价ID
-	t.Run("Basic", func(t *testing.T) {
-		// 先创建一个请求并获取报价
-		if config.TestTokenID == "" {
-			t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set")
-		}
-
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    10.0,
-		}
-
-		requestResponse, err := client.RequestQuote(request)
+func TestRFQWebSocketAuthEventAndQuote(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	received := make(chan map[string]any, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Fatalf("RequestQuote failed: %v", err)
-		}
-		if requestResponse == nil || requestResponse.RequestID == "" {
-			t.Skip("Skipping test: No request ID returned")
-		}
-
-		// 获取报价
-		quotes, err := client.GetQuotes(requestResponse.RequestID)
-		if err != nil {
-			t.Fatalf("GetQuotes failed: %v", err)
-		}
-		if len(quotes) == 0 {
-			t.Skip("Skipping test: No quotes available")
-		}
-
-		// 接受第一个报价
-		response, err := client.AcceptQuote(quotes[0].QuoteID)
-		if err != nil {
-			t.Fatalf("AcceptQuote failed: %v", err)
-		}
-		if response == nil {
-			t.Fatal("AcceptQuote returned nil")
-		}
-		t.Logf("AcceptQuote returned: %+v", response)
-	})
-}
-
-func TestCancelRequest(t *testing.T) {
-	client := NewClient()
-	config := test.LoadTestConfig()
-
-	test.SkipIfNoAuth(t, config)
-
-	// 注意：这个测试需要有效的请求ID
-	t.Run("Basic", func(t *testing.T) {
-		// 先创建一个请求
-		if config.TestTokenID == "" {
-			t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set")
-		}
-
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    10.0,
-		}
-
-		requestResponse, err := client.RequestQuote(request)
-		if err != nil {
-			t.Fatalf("RequestQuote failed: %v", err)
-		}
-		if requestResponse == nil || requestResponse.RequestID == "" {
-			t.Skip("Skipping test: No request ID returned")
-		}
-
-		// 取消请求
-		err = client.CancelRequest(requestResponse.RequestID)
-		if err != nil {
-			t.Fatalf("CancelRequest failed: %v", err)
-		}
-		t.Logf("CancelRequest succeeded")
-	})
-
-	// 测试无效requestID
-	t.Run("InvalidRequestID", func(t *testing.T) {
-		err := client.CancelRequest("invalid-request-id")
-		if err != nil {
-			t.Logf("CancelRequest with invalid requestID returned error (expected): %v", err)
-		} else {
-			t.Logf("CancelRequest with invalid requestID succeeded (may be acceptable)")
-		}
-	})
-
-	// 测试已取消的请求
-	t.Run("AlreadyCanceled", func(t *testing.T) {
-		if config.TestTokenID == "" {
-			t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set")
-		}
-
-		request := types.RFQRequest{
-			TokenID: config.TestTokenID,
-			Side:    types.OrderSideBUY,
-			Size:    10.0,
-		}
-
-		requestResponse, err := client.RequestQuote(request)
-		if err != nil {
-			t.Fatalf("RequestQuote failed: %v", err)
-		}
-		if requestResponse == nil || requestResponse.RequestID == "" {
-			t.Skip("Skipping test: No request ID returned")
-		}
-
-		// 第一次取消
-		err = client.CancelRequest(requestResponse.RequestID)
-		if err != nil {
-			t.Logf("First cancel failed: %v", err)
 			return
 		}
+		defer conn.Close()
+		for i := 0; i < 2; i++ {
+			var message map[string]any
+			if err := conn.ReadJSON(&message); err != nil {
+				return
+			}
+			received <- message
+			if i == 0 {
+				_ = conn.WriteJSON(map[string]any{"type": "RFQ_REQUEST", "rfq_id": "r1"})
+			}
+		}
+	}))
+	defer server.Close()
 
-		// 再次尝试取消同一个请求
-		err = client.CancelRequest(requestResponse.RequestID)
+	config := Config{
+		Credentials: &types.ApiCreds{Key: "key", Secret: "secret", Passphrase: "pass"},
+		Identity:    Identity{SignerAddress: "signer", MakerAddress: "maker", SignatureType: types.EOASignatureType},
+	}
+	client := NewWebSocketClient(config, 10*time.Millisecond, WithWebSocketURL("ws"+strings.TrimPrefix(server.URL, "http")))
+	events := make(chan Event, 1)
+	client.SetOnEvent(func(event Event) { events <- event })
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Stop()
+
+	select {
+	case auth := <-received:
+		if auth["type"] != "auth" {
+			t.Fatalf("auth = %#v", auth)
+		}
+		identity := auth["identity"].(map[string]any)
+		if identity["maker_address"] != "maker" {
+			t.Fatalf("identity = %#v", identity)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("auth timeout")
+	}
+	select {
+	case event := <-events:
+		if event.Type != "RFQ_REQUEST" || !json.Valid(event.Payload) {
+			t.Fatalf("event = %+v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("event timeout")
+	}
+	if err := client.SendQuote(WSQuote{RFQID: "r1", PriceE6: "500000", SizeE6: "1000000"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case quote := <-received:
+		if quote["type"] != "RFQ_QUOTE" || quote["rfq_id"] != "r1" {
+			t.Fatalf("quote = %#v", quote)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("quote timeout")
+	}
+}
+
+func TestRFQWebSocketReconnectsWithoutResendingQuote(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var mu sync.Mutex
+	connections := 0
+	firstQuote := make(chan struct{}, 1)
+	verified := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Logf("CancelRequest with already canceled request returned error (expected): %v", err)
-		} else {
-			t.Logf("CancelRequest with already canceled request succeeded (may be acceptable)")
+			return
+		}
+		defer conn.Close()
+		mu.Lock()
+		connections++
+		current := connections
+		mu.Unlock()
+		var auth map[string]any
+		if conn.ReadJSON(&auth) != nil || auth["type"] != "auth" {
+			return
+		}
+		if current == 1 {
+			_ = conn.WriteJSON(map[string]any{"type": "RFQ_REQUEST", "rfq_id": "r1"})
+			var quote map[string]any
+			if conn.ReadJSON(&quote) == nil && quote["type"] == "RFQ_QUOTE" {
+				firstQuote <- struct{}{}
+			}
+			return
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		if _, _, err := conn.ReadMessage(); err != nil {
+			verified <- struct{}{}
+		}
+	}))
+	defer server.Close()
+	client := NewWebSocketClient(Config{
+		Credentials: &types.ApiCreds{Key: "key", Secret: "secret", Passphrase: "pass"},
+		Identity:    Identity{SignerAddress: "signer", MakerAddress: "maker"},
+	}, 5*time.Millisecond, WithWebSocketURL("ws"+strings.TrimPrefix(server.URL, "http")))
+	request := make(chan struct{}, 1)
+	client.SetOnEvent(func(event Event) {
+		if event.Type == "RFQ_REQUEST" {
+			request <- struct{}{}
 		}
 	})
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Stop()
+	select {
+	case <-request:
+	case <-time.After(time.Second):
+		t.Fatal("request timeout")
+	}
+	if err := client.SendQuote(WSQuote{RFQID: "r1", PriceE6: "1", SizeE6: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstQuote:
+	case <-time.After(time.Second):
+		t.Fatal("first quote timeout")
+	}
+	select {
+	case <-verified:
+	case <-time.After(time.Second):
+		t.Fatal("reconnect/no-resend verification timeout")
+	}
 }

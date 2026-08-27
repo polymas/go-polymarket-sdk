@@ -159,8 +159,9 @@ type OrderType string
 
 const (
 	OrderTypeGTC OrderType = "GTC" // Good Till Cancel
-	OrderTypeIOC OrderType = "IOC" // Immediate Or Cancel
 	OrderTypeFOK OrderType = "FOK" // Fill Or Kill
+	OrderTypeGTD OrderType = "GTD" // Good Till Date
+	OrderTypeFAK OrderType = "FAK" // Fill And Kill
 )
 
 // OrderSide 表示订单方向
@@ -541,40 +542,4 @@ type Notification struct {
 	Message   string    `json:"message"`
 	Read      bool      `json:"read"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-// RFQRequest 表示 RFQ 请求
-type RFQRequest struct {
-	TokenID string    `json:"token_id"`
-	Side    OrderSide `json:"side"` // BUY or SELL
-	Size    float64   `json:"size"`
-	Price   *float64  `json:"price,omitempty"` // Optional: desired price
-}
-
-// RFQResponse 表示 RFQ 请求响应
-type RFQResponse struct {
-	RequestID string    `json:"request_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// RFQQuote 表示 RFQ 报价
-type RFQQuote struct {
-	QuoteID   string    `json:"quote_id"`
-	RequestID string    `json:"request_id"`
-	TokenID   string    `json:"token_id"`
-	Side      OrderSide `json:"side"`
-	Price     float64   `json:"price"`
-	Size      float64   `json:"size"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
-// RFQAcceptResponse 表示接受报价的响应
-type RFQAcceptResponse struct {
-	QuoteID    string    `json:"quote_id"`
-	OrderID    Keccak256 `json:"order_id,omitempty"`
-	Status     string    `json:"status"`
-	AcceptedAt time.Time `json:"accepted_at"`
 }

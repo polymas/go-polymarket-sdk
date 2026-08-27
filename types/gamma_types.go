@@ -185,32 +185,32 @@ type Event struct {
 	// 创建和更新信息
 	CreatedAt *time.Time `json:"createdAt,omitempty"`
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
-	CreatedBy string    `json:"createdBy,omitempty"`
-	UpdatedBy string    `json:"updatedBy,omitempty"`
+	CreatedBy string     `json:"createdBy,omitempty"`
+	UpdatedBy string     `json:"updatedBy,omitempty"`
 
 	// 事件状态标志
-	New                 bool `json:"new,omitempty"`
-	Featured            bool `json:"featured,omitempty"`
-	Restricted          bool `json:"restricted,omitempty"`
-	CYOM                bool `json:"cyom,omitempty"`
-	ShowAllOutcomes     bool `json:"showAllOutcomes,omitempty"`
-	ShowMarketImages    bool `json:"showMarketImages,omitempty"`
-	EnableNegRisk       bool `json:"enableNegRisk,omitempty"`
-	NegRiskAugmented    bool `json:"negRiskAugmented,omitempty"`
-	RequiresTranslation bool `json:"requiresTranslation,omitempty"`
-	PendingDeployment   bool `json:"pendingDeployment,omitempty"`
-	Deploying           bool `json:"deploying,omitempty"`
-	IsTemplate          bool `json:"isTemplate,omitempty"`
+	New                   bool `json:"new,omitempty"`
+	Featured              bool `json:"featured,omitempty"`
+	Restricted            bool `json:"restricted,omitempty"`
+	CYOM                  bool `json:"cyom,omitempty"`
+	ShowAllOutcomes       bool `json:"showAllOutcomes,omitempty"`
+	ShowMarketImages      bool `json:"showMarketImages,omitempty"`
+	EnableNegRisk         bool `json:"enableNegRisk,omitempty"`
+	NegRiskAugmented      bool `json:"negRiskAugmented,omitempty"`
+	RequiresTranslation   bool `json:"requiresTranslation,omitempty"`
+	PendingDeployment     bool `json:"pendingDeployment,omitempty"`
+	Deploying             bool `json:"deploying,omitempty"`
+	IsTemplate            bool `json:"isTemplate,omitempty"`
 	AutomaticallyResolved bool `json:"automaticallyResolved,omitempty"`
 	AutomaticallyActive   bool `json:"automaticallyActive,omitempty"`
 
 	// 数值字段
-	OpenInterest  *float64 `json:"openInterest,omitempty"`
-	Competitive   *float64 `json:"competitive,omitempty"`
-	LiquidityAmm  *float64 `json:"liquidityAmm,omitempty"`
-	LiquidityClob *float64 `json:"liquidityClob,omitempty"`
-	CommentCount  *int     `json:"commentCount,omitempty"`
-	CommentsEnabled *bool  `json:"commentsEnabled,omitempty"`
+	OpenInterest    *float64 `json:"openInterest,omitempty"`
+	Competitive     *float64 `json:"competitive,omitempty"`
+	LiquidityAmm    *float64 `json:"liquidityAmm,omitempty"`
+	LiquidityClob   *float64 `json:"liquidityClob,omitempty"`
+	CommentCount    *int     `json:"commentCount,omitempty"`
+	CommentsEnabled *bool    `json:"commentsEnabled,omitempty"`
 
 	// 交易量统计（24小时、1周、1月、1年）
 	Volume24hr *float64 `json:"volume24hr,omitempty"`
@@ -219,57 +219,57 @@ type Event struct {
 	Volume1yr  *float64 `json:"volume1yr,omitempty"`
 
 	// 扩展字段（List events API）
-	DisqusThread       string   `json:"disqusThread,omitempty"`
-	ParentEvent        string   `json:"parentEvent,omitempty"`
-	EnableOrderBook    *bool    `json:"enableOrderBook,omitempty"`
-	NegRisk            *bool    `json:"negRisk,omitempty"`
-	NegRiskMarketID    string   `json:"negRiskMarketID,omitempty"`
-	NegRiskFeeBips     *int     `json:"negRiskFeeBips,omitempty"`
-	ImageOptimized     *ImageOptimization `json:"imageOptimized,omitempty"`
-	IconOptimized      *ImageOptimization `json:"iconOptimized,omitempty"`
-	FeaturedImageOptimized *ImageOptimization `json:"featuredImageOptimized,omitempty"`
-	SubEvents          []string `json:"subEvents,omitempty"`
-	Series             []Series `json:"series,omitempty"`
-	Categories         []Category `json:"categories,omitempty"`
-	Collections        []Collection `json:"collections,omitempty"`
-	EventDate          string    `json:"eventDate,omitempty"`
-	StartTime          *time.Time `json:"startTime,omitempty"`
-	EventWeek          *int      `json:"eventWeek,omitempty"`
-	SeriesSlug         string    `json:"seriesSlug,omitempty"`
-	Score              string    `json:"score,omitempty"`
-	Elapsed            string    `json:"elapsed,omitempty"`
-	Period             string    `json:"period,omitempty"`
-	Live               *bool     `json:"live,omitempty"`
-	Ended              *bool     `json:"ended,omitempty"`
-	FinishedTimestamp  *time.Time `json:"finishedTimestamp,omitempty"`
-	GmpChartMode       string    `json:"gmpChartMode,omitempty"`
-	TweetCount         *int      `json:"tweetCount,omitempty"`
-	FeaturedOrder      *int      `json:"featuredOrder,omitempty"`
-	EstimateValue      *bool     `json:"estimateValue,omitempty"`
-	CantEstimate       *bool     `json:"cantEstimate,omitempty"`
-	EstimatedValue     string    `json:"estimatedValue,omitempty"`
-	SpreadsMainLine    *float64  `json:"spreadsMainLine,omitempty"`
-	TotalsMainLine     *float64  `json:"totalsMainLine,omitempty"`
-	CarouselMap        string    `json:"carouselMap,omitempty"`
-	DeployingTimestamp *time.Time `json:"deployingTimestamp,omitempty"`
-	ScheduledDeploymentTimestamp *time.Time `json:"scheduledDeploymentTimestamp,omitempty"`
-	GameStatus         string    `json:"gameStatus,omitempty"`
-	TemplateVariables  string   `json:"templateVariables,omitempty"`
+	DisqusThread                 string             `json:"disqusThread,omitempty"`
+	ParentEvent                  string             `json:"parentEvent,omitempty"`
+	EnableOrderBook              *bool              `json:"enableOrderBook,omitempty"`
+	NegRisk                      *bool              `json:"negRisk,omitempty"`
+	NegRiskMarketID              string             `json:"negRiskMarketID,omitempty"`
+	NegRiskFeeBips               *int               `json:"negRiskFeeBips,omitempty"`
+	ImageOptimized               *ImageOptimization `json:"imageOptimized,omitempty"`
+	IconOptimized                *ImageOptimization `json:"iconOptimized,omitempty"`
+	FeaturedImageOptimized       *ImageOptimization `json:"featuredImageOptimized,omitempty"`
+	SubEvents                    []string           `json:"subEvents,omitempty"`
+	Series                       []Series           `json:"series,omitempty"`
+	Categories                   []Category         `json:"categories,omitempty"`
+	Collections                  []Collection       `json:"collections,omitempty"`
+	EventDate                    string             `json:"eventDate,omitempty"`
+	StartTime                    *time.Time         `json:"startTime,omitempty"`
+	EventWeek                    *int               `json:"eventWeek,omitempty"`
+	SeriesSlug                   string             `json:"seriesSlug,omitempty"`
+	Score                        string             `json:"score,omitempty"`
+	Elapsed                      string             `json:"elapsed,omitempty"`
+	Period                       string             `json:"period,omitempty"`
+	Live                         *bool              `json:"live,omitempty"`
+	Ended                        *bool              `json:"ended,omitempty"`
+	FinishedTimestamp            *time.Time         `json:"finishedTimestamp,omitempty"`
+	GmpChartMode                 string             `json:"gmpChartMode,omitempty"`
+	TweetCount                   *int               `json:"tweetCount,omitempty"`
+	FeaturedOrder                *int               `json:"featuredOrder,omitempty"`
+	EstimateValue                *bool              `json:"estimateValue,omitempty"`
+	CantEstimate                 *bool              `json:"cantEstimate,omitempty"`
+	EstimatedValue               string             `json:"estimatedValue,omitempty"`
+	SpreadsMainLine              *float64           `json:"spreadsMainLine,omitempty"`
+	TotalsMainLine               *float64           `json:"totalsMainLine,omitempty"`
+	CarouselMap                  string             `json:"carouselMap,omitempty"`
+	DeployingTimestamp           *time.Time         `json:"deployingTimestamp,omitempty"`
+	ScheduledDeploymentTimestamp *time.Time         `json:"scheduledDeploymentTimestamp,omitempty"`
+	GameStatus                   string             `json:"gameStatus,omitempty"`
+	TemplateVariables            string             `json:"templateVariables,omitempty"`
 }
 
 // ImageOptimization 表示图片优化信息（List markets API 中的 imageOptimized/iconOptimized）
 // 参考: https://docs.polymarket.com/api-reference/markets/list-markets
 type ImageOptimization struct {
-	ID                     string   `json:"id,omitempty"`
-	ImageURLSource         string   `json:"imageUrlSource,omitempty"`
-	ImageURLOptimized      string   `json:"imageUrlOptimized,omitempty"`
-	ImageSizeKbSource      *float64 `json:"imageSizeKbSource,omitempty"`
-	ImageSizeKbOptimized   *float64 `json:"imageSizeKbOptimized,omitempty"`
-	ImageOptimizedComplete *bool    `json:"imageOptimizedComplete,omitempty"`
-	ImageOptimizedLastUpdated string `json:"imageOptimizedLastUpdated,omitempty"`
-	RelID                  *int    `json:"relID,omitempty"`
-	Field                  string  `json:"field,omitempty"`
-	Relname                string  `json:"relname,omitempty"`
+	ID                        string   `json:"id,omitempty"`
+	ImageURLSource            string   `json:"imageUrlSource,omitempty"`
+	ImageURLOptimized         string   `json:"imageUrlOptimized,omitempty"`
+	ImageSizeKbSource         *float64 `json:"imageSizeKbSource,omitempty"`
+	ImageSizeKbOptimized      *float64 `json:"imageSizeKbOptimized,omitempty"`
+	ImageOptimizedComplete    *bool    `json:"imageOptimizedComplete,omitempty"`
+	ImageOptimizedLastUpdated string   `json:"imageOptimizedLastUpdated,omitempty"`
+	RelID                     *int     `json:"relID,omitempty"`
+	Field                     string   `json:"field,omitempty"`
+	Relname                   string   `json:"relname,omitempty"`
 }
 
 // GammaMarket 表示Gamma市场（与 List markets API 的 Market schema 对齐）
@@ -298,45 +298,45 @@ type GammaMarket struct {
 	OutcomePrices []float64   `json:"outcomePrices,omitempty"` // Parsed from JSON string array if needed
 
 	// 市场元数据
-	ResolutionSource   string `json:"resolutionSource,omitempty"`
-	Category            string `json:"category,omitempty"`
-	MarketType          string `json:"marketType,omitempty"`
-	FormatType          string `json:"formatType,omitempty"`
-	AmmType             string `json:"ammType,omitempty"`
-	Fee                 string `json:"fee,omitempty"`
-	LowerBound          string `json:"lowerBound,omitempty"`
-	UpperBound          string `json:"upperBound,omitempty"`
-	LowerBoundDate      string `json:"lowerBoundDate,omitempty"`
-	UpperBoundDate      string `json:"upperBoundDate,omitempty"`
-	TwitterCardImage    string `json:"twitterCardImage,omitempty"`
-	XAxisValue          string `json:"xAxisValue,omitempty"`
-	YAxisValue          string `json:"yAxisValue,omitempty"`
-	DenominationToken   string `json:"denominationToken,omitempty"`
-	SponsorName         string `json:"sponsorName,omitempty"`
-	SponsorImage        string `json:"sponsorImage,omitempty"`
-	ShortOutcomes       string `json:"shortOutcomes,omitempty"`
-	DisqusThread        string `json:"disqusThread,omitempty"`
+	ResolutionSource  string `json:"resolutionSource,omitempty"`
+	Category          string `json:"category,omitempty"`
+	MarketType        string `json:"marketType,omitempty"`
+	FormatType        string `json:"formatType,omitempty"`
+	AmmType           string `json:"ammType,omitempty"`
+	Fee               string `json:"fee,omitempty"`
+	LowerBound        string `json:"lowerBound,omitempty"`
+	UpperBound        string `json:"upperBound,omitempty"`
+	LowerBoundDate    string `json:"lowerBoundDate,omitempty"`
+	UpperBoundDate    string `json:"upperBoundDate,omitempty"`
+	TwitterCardImage  string `json:"twitterCardImage,omitempty"`
+	XAxisValue        string `json:"xAxisValue,omitempty"`
+	YAxisValue        string `json:"yAxisValue,omitempty"`
+	DenominationToken string `json:"denominationToken,omitempty"`
+	SponsorName       string `json:"sponsorName,omitempty"`
+	SponsorImage      string `json:"sponsorImage,omitempty"`
+	ShortOutcomes     string `json:"shortOutcomes,omitempty"`
+	DisqusThread      string `json:"disqusThread,omitempty"`
 
 	// 创建和更新信息
-	CreatedAt                *time.Time `json:"createdAt,omitempty"`
-	UpdatedAt                *time.Time `json:"updatedAt,omitempty"`
-	CreatedBy                *int       `json:"createdBy,omitempty"`
-	UpdatedBy                *int       `json:"updatedBy,omitempty"`
-	SubmittedBy              string     `json:"submitted_by,omitempty"`
-	ResolvedBy               string     `json:"resolvedBy,omitempty"`
-	DeployingTimestamp       *time.Time `json:"deployingTimestamp,omitempty"`
+	CreatedAt                    *time.Time `json:"createdAt,omitempty"`
+	UpdatedAt                    *time.Time `json:"updatedAt,omitempty"`
+	CreatedBy                    *int       `json:"createdBy,omitempty"`
+	UpdatedBy                    *int       `json:"updatedBy,omitempty"`
+	SubmittedBy                  string     `json:"submitted_by,omitempty"`
+	ResolvedBy                   string     `json:"resolvedBy,omitempty"`
+	DeployingTimestamp           *time.Time `json:"deployingTimestamp,omitempty"`
 	ScheduledDeploymentTimestamp *time.Time `json:"scheduledDeploymentTimestamp,omitempty"`
-	AcceptingOrdersTimestamp *time.Time `json:"acceptingOrdersTimestamp,omitempty"`
-	ReadyTimestamp           *time.Time `json:"readyTimestamp,omitempty"`
-	FundedTimestamp          *time.Time `json:"fundedTimestamp,omitempty"`
-	CurationOrder            *int       `json:"curationOrder,omitempty"`
-	CommentsEnabled          *bool      `json:"commentsEnabled,omitempty"`
-	NotificationsEnabled     *bool      `json:"notificationsEnabled,omitempty"`
-	MakerBaseFee             *int       `json:"makerBaseFee,omitempty"`
-	TakerBaseFee             *int       `json:"takerBaseFee,omitempty"`
-	Score                    *int       `json:"score,omitempty"`
-	PastSlugs                string     `json:"pastSlugs,omitempty"`
-	EventStartTime           *time.Time `json:"eventStartTime,omitempty"`
+	AcceptingOrdersTimestamp     *time.Time `json:"acceptingOrdersTimestamp,omitempty"`
+	ReadyTimestamp               *time.Time `json:"readyTimestamp,omitempty"`
+	FundedTimestamp              *time.Time `json:"fundedTimestamp,omitempty"`
+	CurationOrder                *int       `json:"curationOrder,omitempty"`
+	CommentsEnabled              *bool      `json:"commentsEnabled,omitempty"`
+	NotificationsEnabled         *bool      `json:"notificationsEnabled,omitempty"`
+	MakerBaseFee                 *int       `json:"makerBaseFee,omitempty"`
+	TakerBaseFee                 *int       `json:"takerBaseFee,omitempty"`
+	Score                        *int       `json:"score,omitempty"`
+	PastSlugs                    string     `json:"pastSlugs,omitempty"`
+	EventStartTime               *time.Time `json:"eventStartTime,omitempty"`
 
 	// 市场状态标志
 	New                          bool `json:"new,omitempty"`
@@ -450,14 +450,14 @@ type GammaMarket struct {
 	Events                   []Event `json:"events,omitempty"`
 
 	// 体育/游戏相关（List markets API）
-	GameStartTime     string   `json:"gameStartTime,omitempty"`
-	SecondsDelay      *int     `json:"secondsDelay,omitempty"`
-	TeamAID           string   `json:"teamAID,omitempty"`
-	TeamBID           string   `json:"teamBID,omitempty"`
-	GameId            string   `json:"gameId,omitempty"`
-	SportsMarketType  string   `json:"sportsMarketType,omitempty"`
-	Line              *float64 `json:"line,omitempty"`
-	GroupItemRange    string   `json:"groupItemRange,omitempty"`
+	GameStartTime    string   `json:"gameStartTime,omitempty"`
+	SecondsDelay     *int     `json:"secondsDelay,omitempty"`
+	TeamAID          string   `json:"teamAID,omitempty"`
+	TeamBID          string   `json:"teamBID,omitempty"`
+	GameId           string   `json:"gameId,omitempty"`
+	SportsMarketType string   `json:"sportsMarketType,omitempty"`
+	Line             *float64 `json:"line,omitempty"`
+	GroupItemRange   string   `json:"groupItemRange,omitempty"`
 
 	// 图片优化（嵌套对象）
 	ImageOptimized *ImageOptimization `json:"imageOptimized,omitempty"`
@@ -596,15 +596,15 @@ func GetOutcomeNames(m *GammaMarket) map[string]string {
 
 // Category 表示分类（Event/Market 等嵌套）
 type Category struct {
-	ID             string     `json:"id"`
-	Label          string     `json:"label,omitempty"`
-	ParentCategory string     `json:"parentCategory,omitempty"`
-	Slug           string     `json:"slug,omitempty"`
-	PublishedAt    string     `json:"publishedAt,omitempty"`
-	CreatedBy      string     `json:"createdBy,omitempty"`
-	UpdatedBy      string     `json:"updatedBy,omitempty"`
-	CreatedAt      string     `json:"createdAt,omitempty"`
-	UpdatedAt      string     `json:"updatedAt,omitempty"`
+	ID             string `json:"id"`
+	Label          string `json:"label,omitempty"`
+	ParentCategory string `json:"parentCategory,omitempty"`
+	Slug           string `json:"slug,omitempty"`
+	PublishedAt    string `json:"publishedAt,omitempty"`
+	CreatedBy      string `json:"createdBy,omitempty"`
+	UpdatedBy      string `json:"updatedBy,omitempty"`
+	CreatedAt      string `json:"createdAt,omitempty"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
 }
 
 // Collection 表示合集（Event 嵌套）
@@ -726,13 +726,13 @@ func (s *Series) UnmarshalJSON(data []byte) error {
 	// 使用临时结构体来解析JSON
 	var temp struct {
 		ID          interface{} `json:"id"` // 可能是字符串或数字
-		Slug        string       `json:"slug"`
-		Title       string       `json:"title"`
-		Description string       `json:"description"`
-		Recurrence  string       `json:"recurrence"`
-		Closed      bool         `json:"closed"`
-		CreatedAt   time.Time    `json:"created_at"`
-		UpdatedAt   time.Time    `json:"updated_at"`
+		Slug        string      `json:"slug"`
+		Title       string      `json:"title"`
+		Description string      `json:"description"`
+		Recurrence  string      `json:"recurrence"`
+		Closed      bool        `json:"closed"`
+		CreatedAt   time.Time   `json:"created_at"`
+		UpdatedAt   time.Time   `json:"updated_at"`
 	}
 
 	if err := json.Unmarshal(data, &temp); err != nil {
@@ -804,33 +804,88 @@ type SportsEvent struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// EncryptedPriceUpdate 表示加密的价格更新
-type EncryptedPriceUpdate struct {
-	TokenID   string    `json:"token_id"`
-	Price     string    `json:"price"` // Encrypted price data
-	Timestamp time.Time `json:"timestamp"`
-	Data      string    `json:"data,omitempty"` // Additional encrypted data
+type SeriesSummary struct {
+	ID               string   `json:"id"`
+	Title            *string  `json:"title"`
+	Slug             *string  `json:"slug"`
+	EventDates       []string `json:"eventDates"`
+	EventWeeks       []int    `json:"eventWeeks"`
+	EarliestOpenWeek *int     `json:"earliest_open_week"`
+	EarliestOpenDate *string  `json:"earliest_open_date"`
 }
 
-// Comment 表示评论
+type CommentParentEntityType string
+
+const (
+	CommentParentEvent  CommentParentEntityType = "Event"
+	CommentParentSeries CommentParentEntityType = "Series"
+	CommentParentMarket CommentParentEntityType = "market"
+)
+
+type CommentPosition struct {
+	TokenID      *string `json:"tokenId"`
+	PositionSize *string `json:"positionSize"`
+}
+
+type CommentProfile struct {
+	Name                  *string            `json:"name"`
+	Pseudonym             *string            `json:"pseudonym"`
+	DisplayUsernamePublic *bool              `json:"displayUsernamePublic"`
+	Bio                   *string            `json:"bio"`
+	IsMod                 *bool              `json:"isMod"`
+	IsCreator             *bool              `json:"isCreator"`
+	ProxyWallet           *string            `json:"proxyWallet"`
+	BaseAddress           *string            `json:"baseAddress"`
+	ProfileImage          *string            `json:"profileImage"`
+	ProfileImageOptimized *ImageOptimization `json:"profileImageOptimized"`
+	Positions             []CommentPosition  `json:"positions"`
+}
+
+type Reaction struct {
+	ID           string          `json:"id"`
+	CommentID    *int            `json:"commentID"`
+	ReactionType *string         `json:"reactionType"`
+	Icon         *string         `json:"icon"`
+	UserAddress  *string         `json:"userAddress"`
+	CreatedAt    *time.Time      `json:"createdAt"`
+	Profile      *CommentProfile `json:"profile"`
+}
+
+// Comment 与当前 Gamma camelCase 响应一致。
 type Comment struct {
-	CommentID        string     `json:"id"`
-	ParentEntityType string     `json:"parent_entity_type"` // Event, Series, market
-	ParentEntityID   int        `json:"parent_entity_id"`
-	UserAddress      EthAddress `json:"user_address"`
-	Content          string     `json:"content"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID               string          `json:"id"`
+	Body             *string         `json:"body"`
+	ParentEntityType *string         `json:"parentEntityType"`
+	ParentEntityID   *int            `json:"parentEntityID"`
+	ParentCommentID  *string         `json:"parentCommentID"`
+	UserAddress      *string         `json:"userAddress"`
+	ReplyAddress     *string         `json:"replyAddress"`
+	CreatedAt        *time.Time      `json:"createdAt"`
+	UpdatedAt        *time.Time      `json:"updatedAt"`
+	Profile          *CommentProfile `json:"profile"`
+	Reactions        []Reaction      `json:"reactions"`
+	ReportCount      *int            `json:"reportCount"`
+	ReactionCount    *int            `json:"reactionCount"`
 }
 
-// Profile 表示用户资料
+type PublicProfileUser struct {
+	ID      string `json:"id"`
+	Creator bool   `json:"creator"`
+	Mod     bool   `json:"mod"`
+}
+
+// Profile 表示 /public-profile 的公开资料响应。
 type Profile struct {
-	Address   EthAddress `json:"address"`
-	Username  string     `json:"username,omitempty"`
-	Bio       string     `json:"bio,omitempty"`
-	Avatar    string     `json:"avatar,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedAt             *time.Time          `json:"createdAt"`
+	ProxyWallet           *string             `json:"proxyWallet"`
+	ProfileImage          *string             `json:"profileImage"`
+	DisplayUsernamePublic *bool               `json:"displayUsernamePublic"`
+	Bio                   *string             `json:"bio"`
+	Pseudonym             *string             `json:"pseudonym"`
+	Name                  *string             `json:"name"`
+	Users                 []PublicProfileUser `json:"users"`
+	XUsername             *string             `json:"xUsername"`
+	VerifiedBadge         *bool               `json:"verifiedBadge"`
 }
 
 // SimplifiedMarket 表示简化市场（只包含基本字段）
@@ -844,19 +899,6 @@ type SimplifiedMarket struct {
 	ConditionID Keccak256 `json:"conditionId"`
 	TokenIDs    []string  `json:"clobTokenIds"`
 	Outcomes    []string  `json:"outcomes,omitempty"`
-}
-
-// MarketTradesEvent 表示市场交易事件
-type MarketTradesEvent struct {
-	EventID     string      `json:"event_id"`
-	Type        string      `json:"type"` // TRADE, ORDER_PLACED, ORDER_CANCELLED, etc.
-	MarketID    string      `json:"market_id"`
-	TokenID     string      `json:"token_id,omitempty"`
-	Price       *float64    `json:"price,omitempty"`
-	Size        *float64    `json:"size,omitempty"`
-	Side        *string     `json:"side,omitempty"` // BUY or SELL
-	Timestamp   time.Time   `json:"timestamp"`
-	UserAddress *EthAddress `json:"user_address,omitempty"`
 }
 
 // HasDispute 检查市场是否有dispute状态

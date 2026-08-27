@@ -214,7 +214,7 @@
 - [ ] 支持 initial dump、订阅 level 和 custom feature。
 - [ ] 重连时恢复订阅并处理重复快照/增量事件。
 
-### [ ] P0-10：废弃当前 RFQ 旧端点，避免暴露看似可用但官方已不存在的方法
+### [x] P0-10：废弃当前 RFQ 旧端点，避免暴露看似可用但官方已不存在的方法
 
 当前 `rfq` 包请求 CLOB 主域下的：
 
@@ -229,12 +229,12 @@
 
 建议验收：
 
-- [ ] 立即给旧 `rfq.Client` 和全部方法添加 Deprecated/unsupported 标记，默认不要自动调用旧端点。
-- [ ] 根据官方 requester 与 maker 模型重新设计包，不在旧类型上硬补字段。
-- [ ] 支持 quote 的六位定点字符串、签名类型、last-look confirmation 和 execution update。
-- [ ] REST 与 WS 共用身份配置，但分别实现各自鉴权和重连逻辑。
+- [x] 直接删除旧 `rfq.Client` 方法与旧模型，不再保留会访问失效端点的兼容壳。
+- [x] 按公开的 Combos RFQ maker 模型重建 REST/WS；未虚构公开文档不存在的 requester REST 方法。
+- [x] 支持 quote 的六位定点字符串、签名类型、last-look confirmation 和 execution update。
+- [x] REST 与 WS 共用身份配置，分别实现 L2 鉴权、WS 首帧认证和只重连不重发写命令。
 
-### [ ] P0-11：修正 Gamma 中已失效或返回形状不匹配的端点
+### [x] P0-11：修正 Gamma 中已失效或返回形状不匹配的端点
 
 已确认冲突：
 
@@ -248,12 +248,12 @@
 
 建议验收：
 
-- [ ] 迁移 profile 地址查询；username 查询明确删除、Deprecated 或通过有官方依据的搜索流程实现。
-- [ ] 新建 `GetSeriesSummaryBySlug/ID`，保留正确返回类型。
-- [ ] Comments API 改为通用 parent entity 参数。
-- [ ] 删除或迁移 `GetMarketTradesEvents` 到 CLOB live-activity client。
-- [ ] `GetAllMarkets` 的 keyset page size 改为不超过 100，并只依据 `next_cursor` 终止，不用“返回数量少于请求值”替代游标语义。
-- [ ] 旧端点测试不能再遇到 404 后直接 `Skip`；必须用契约测试锁定现行路径。
+- [x] `GetProfile` 迁移到 `/public-profile?address=`，删除无官方依据的 username 查询。
+- [x] 新建 `GetSeriesSummaryBySlug/ID`，使用正确返回类型。
+- [x] Comments API 改为通用 parent entity 参数，单评论按官方数组响应解码。
+- [x] 删除 Gamma 中无官方路径的 `GetMarketTradesEvents`。
+- [x] `GetAllMarkets` keyset page size 为 100，并只依据 `next_cursor` 终止。
+- [x] 用本地契约测试锁定当前路径、参数、返回形状和游标分页。
 
 ### [ ] P0-12：扩展下单响应并实现成交结算对账
 
@@ -274,7 +274,7 @@
 - [ ] 提供 `WaitForOrderFillSettlement(ctx, ...)`，区分 matched、mined、confirmed、failed、timeout。
 - [ ] 网络超时后将订单状态标记为 unknown，并按确定性 order hash/订单查询做 reconciliation，禁止直接无脑重下。
 
-### [ ] P0-13：迁移 RTDS URL、订阅协议和心跳
+### [x] P0-13：迁移 RTDS URL、订阅协议和心跳
 
 当前实现连接 `wss://rtds.polymarket.com/ws`，用 `{type:"subscribe", stream, ids}` 订阅 prices/comments，并每 15 秒 `WriteJSON("PING")`。
 
@@ -284,36 +284,36 @@
 
 建议验收：
 
-- [ ] 更换当前官方 URL，并支持可注入 URL 便于 mock 测试。
-- [ ] 改成 action/subscriptions 协议；filters 必须按官方要求生成紧凑 JSON 字符串。
-- [ ] 用 `WriteMessage(TextMessage, []byte("PING"))` 每 5 秒发纯文本心跳。
-- [ ] 新建精确 decimal string 的 TWAP event，区分 outer publish timestamp 与 payload observation timestamp。
-- [ ] 旧 prices/comments stream 先确认服务是否仍支持；无法从当前官方文档确认的接口移入 legacy 并 Deprecated。
-- [ ] 重连自动恢复全部 topic/window/filter，增加 30s/60s 和无 symbol filter 的协议测试。
+- [x] 更换当前官方 URL，并支持可注入 URL 便于 mock 测试。
+- [x] 改成 action/subscriptions 协议；filters 按官方要求生成紧凑 JSON 字符串。
+- [x] 用 `WriteMessage(TextMessage, []byte("PING"))` 每 5 秒发纯文本心跳。
+- [x] 新建保留 E18 原值和精确十进制字符串的 TWAP event，区分 publish/observation timestamp。
+- [x] 删除当前官方文档无法确认的旧 prices/comments/auth 接口，不保留误导性的 legacy 能力。
+- [x] 重连自动恢复全部 topic/window/filter；mock 覆盖 30s/60s、无 symbol filter、心跳和精度。
 
-### [ ] P0-14：移除或隔离已经失效的 The Graph Subgraph client
+### [x] P0-14：移除或隔离已经失效的 The Graph Subgraph client
 
 当前 `subgraph` 包硬编码 `https://api.thegraph.com/subgraphs/name/polymarket/clob-v2`；仓库测试已经明确备注该端点被移除，并在请求失败时 Skip。当前官方文档目录也不再提供这组 Subgraph API。
 
 风险：README 仍把它当作 SDK 能力，调用方运行后才发现端点不可用；测试 Skip 又掩盖了长期失效。
 
-- [ ] 从默认公开能力/README 中删除，或者整体标记 Deprecated + unsupported。
-- [ ] volume、positions、OI、PnL 等功能优先迁移到当前 Data API；链上独有数据再使用可配置的 indexer/RPC。
-- [ ] 禁止对已知失效端点用 Skip 维持“绿灯”；测试应明确断言 legacy client 已禁用。
-- [ ] 如果保留通用 GraphQL client，URL 必须由调用方注入，且不能再承诺旧 Polymarket schema。
+- [x] 删除 `subgraph` 包、README 公开能力和仅供旧 schema 使用的 GraphQL 类型。
+- [x] positions/PnL/value 使用现有 Data API；旧端点独有的 OI 等能力不伪造替代实现，调用方应使用 indexer/RPC。
+- [x] 删除用 Skip 掩盖失效端点的测试。
+- [x] 不保留绑定旧 Polymarket schema 的通用 GraphQL client。
 
 ---
 
 ## P1：核心流程不完整或行为不安全
 
-### [ ] P1-1：对齐订单类型和 GTD 规则
+### [x] P1-1：对齐订单类型和 GTD 规则
 
 当前常量为 `GTC/IOC/FOK`；官方当前枚举为 `GTC/FOK/GTD/FAK`。
 
-- [ ] 移除或 Deprecated `IOC`，明确迁移到 `FAK`。
-- [ ] 增加 `GTD`、`FAK`。
-- [ ] GTD 必须带合法 expiration，并满足官方最小提前时间规则。
-- [ ] FOK/FAK/PostOnly 的互斥与响应语义做表驱动测试。
+- [x] 移除 `IOC`，现有调用迁移到 `FAK`。
+- [x] 增加 `GTD`、`FAK`。
+- [x] GTD 必须带至少提前 3 分钟的 Unix 秒 expiration，其他类型禁止携带 expiration。
+- [x] PostOnly 仅允许 GTC/GTD；使用表驱动测试覆盖 GTC/GTD/FOK/FAK、expiration 和非法类型。
 
 ### [ ] P1-2：实现官方市价单构造流程
 

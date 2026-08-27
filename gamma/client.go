@@ -29,18 +29,17 @@ type Client interface {
 	GetTagBySlug(slug string) (*types.Tag, error)
 	// 系列相关方法
 	GetSeries(limit int, offset int, options ...GetSeriesOption) ([]types.Series, error)
-	GetSeriesBySlug(slug string) (*types.Series, error)
+	GetSeriesSummaryByID(id string) (*types.SeriesSummary, error)
+	GetSeriesSummaryBySlug(slug string) (*types.SeriesSummary, error)
 	// 评论相关方法
-	GetComments(marketID string, limit int, offset int) ([]types.Comment, error)
-	GetComment(commentID string) (*types.Comment, error)
+	GetComments(parentType types.CommentParentEntityType, parentID int, limit int, offset int, options ...GetCommentsOption) ([]types.Comment, error)
+	GetComment(commentID int, getPositions bool) ([]types.Comment, error)
 	// 用户资料相关方法
 	GetProfile(address types.EthAddress) (*types.Profile, error)
-	GetProfileByUsername(username string) (*types.Profile, error)
 	// 市场扩展方法
 	GetSamplingSimplifiedMarkets(limit int) ([]types.SimplifiedMarket, error)
 	GetSamplingMarkets(limit int) ([]types.GammaMarket, error)
 	GetSimplifiedMarkets(limit int, offset int, options ...GetMarketsOption) ([]types.SimplifiedMarket, error)
-	GetMarketTradesEvents(marketID string, limit int, offset int) ([]types.MarketTradesEvent, error)
 
 	// URL 构建方法：根据市场标识获取 Polymarket 前端事件页 URL
 	// URL 形式: https://polymarket.com/event/{event_slug}/{market_slug}

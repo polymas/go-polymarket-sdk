@@ -66,7 +66,12 @@ func (c *polymarketGammaClient) GetSeries(limit int, offset int, options ...GetS
 	return *result, nil
 }
 
-// GetSeriesBySlug 通过 slug 获取系列
-func (c *polymarketGammaClient) GetSeriesBySlug(slug string) (*types.Series, error) {
-	return http.Get[types.Series](c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesBySlug, slug), nil)
+// GetSeriesSummaryByID 通过 ID 获取系列摘要。
+func (c *polymarketGammaClient) GetSeriesSummaryByID(id string) (*types.SeriesSummary, error) {
+	return http.Get[types.SeriesSummary](c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesSummary, id), nil)
+}
+
+// GetSeriesSummaryBySlug 通过 slug 获取系列摘要。
+func (c *polymarketGammaClient) GetSeriesSummaryBySlug(slug string) (*types.SeriesSummary, error) {
+	return http.Get[types.SeriesSummary](c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesSummaryBySlug, slug), nil)
 }

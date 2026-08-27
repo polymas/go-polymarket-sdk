@@ -254,7 +254,7 @@ func (c *polymarketGammaClient) GetDisputeMarkets() ([]types.GammaMarket, error)
 // 过滤条件：active=true, closed=false, uma_resolution_status=proposed, 按 endDate 升序排序
 // 自动分页获取全部结果（单次 API 最多 500 条）
 func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, error) {
-	const pageSize = 500
+	const pageSize = 100
 	volumeNumMin := 100.0
 	opts := []GetMarketsOption{
 		WithOrder("endDate", true),
@@ -278,7 +278,7 @@ func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, erro
 			return nil, err
 		}
 		allMarkets = append(allMarkets, markets...)
-		if nextCursor == "" || len(markets) < pageSize {
+		if nextCursor == "" {
 			break
 		}
 		afterCursor = nextCursor
@@ -304,7 +304,7 @@ func (c *polymarketGammaClient) GetMarkets(limit int, options ...GetMarketsOptio
 // GetAllMarkets 获取所有历史市场数据（自动分页）
 // 自动处理分页，返回所有市场数据，不限制状态（包括活跃、关闭、归档等所有市场）
 func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
-	const pageSize = 500 // 每页500条，减少请求次数
+	const pageSize = 100 // /markets/keyset 官方最大值
 	allMarkets := make([]types.GammaMarket, 0)
 	var afterCursor string
 
@@ -325,11 +325,6 @@ func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
 		}
 
 		allMarkets = append(allMarkets, markets...)
-
-		// 如果返回的数据少于 pageSize，说明已经是最后一页
-		if len(markets) < pageSize {
-			break
-		}
 
 		if nextCursor == "" {
 			break
@@ -363,6 +358,9 @@ func (c *polymarketGammaClient) getMarketsPage(limit int, options ...GetMarketsO
 	// 应用所有选项
 	for _, option := range options {
 		option(opts)
+	}
+	if opts.Offset == nil && limit > 100 {
+		limit = 100
 	}
 
 	// 单个值参数（与 List markets API 对齐）
@@ -589,25 +587,6 @@ func (c *polymarketGammaClient) GetSimplifiedMarkets(limit int, offset int, opti
 
 	if result == nil {
 		return []types.SimplifiedMarket{}, nil
-	}
-
-	return *result, nil
-}
-
-// GetMarketTradesEvents 获取市场交易事件
-func (c *polymarketGammaClient) GetMarketTradesEvents(marketID string, limit int, offset int) ([]types.MarketTradesEvent, error) {
-	params := map[string]string{
-		"limit":  strconv.Itoa(limit),
-		"offset": strconv.Itoa(offset),
-	}
-
-	result, err := http.Get[[]types.MarketTradesEvent](c.baseURL, fmt.Sprintf("%s%s", internal.GetMarketTradesEvents, marketID), params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get market trades events: %w", err)
-	}
-
-	if result == nil {
-		return []types.MarketTradesEvent{}, nil
 	}
 
 	return *result, nil

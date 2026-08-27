@@ -1,10 +1,12 @@
 package gamma
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/polymas/go-polymarket-sdk/test"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 func TestGetMarket(t *testing.T) {
@@ -222,7 +224,7 @@ func TestGetDisputeMarkets(t *testing.T) {
 func TestGetAllMarkets(t *testing.T) {
 	// 此测试已被标记为不测试，因为获取所有历史市场数据需要很长时间且容易超时
 	t.Skip("TestGetAllMarkets is disabled - requires very long timeout and large dataset")
-	
+
 	client := NewClient()
 
 	// 基本功能测试（这个测试可能很慢，所以只在非short模式下运行）
@@ -510,28 +512,28 @@ func TestGetSeries(t *testing.T) {
 	})
 }
 
-func TestGetSeriesBySlug(t *testing.T) {
+func TestGetSeriesSummaryBySlug(t *testing.T) {
 	client := NewClient()
 
 	// 基本功能测试（使用一个常见的series slug）
 	t.Run("Basic", func(t *testing.T) {
-		series, err := client.GetSeriesBySlug("us-presidential-election")
+		series, err := client.GetSeriesSummaryBySlug("us-presidential-election")
 		if err != nil {
 			// 如果API端点不存在（404），跳过测试
 			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "Not Found") {
-				t.Skip("Skipping test: GetSeriesBySlug API endpoint not found (may be deprecated)")
+				t.Skip("Skipping test: series summary not found")
 				return
 			}
 			// 如果series不存在，跳过测试
 			if err.Error() == "series not found" {
 				t.Skip("Series 'us-presidential-election' not found")
 			}
-			t.Fatalf("GetSeriesBySlug failed: %v", err)
+			t.Fatalf("GetSeriesSummaryBySlug failed: %v", err)
 		}
 		if series == nil {
-			t.Fatal("GetSeriesBySlug returned nil")
+			t.Fatal("GetSeriesSummaryBySlug returned nil")
 		}
-		t.Logf("GetSeriesBySlug returned series: %s", series.Slug)
+		t.Logf("GetSeriesSummaryBySlug returned series: %v", series.Slug)
 	})
 }
 
@@ -545,7 +547,11 @@ func TestGetComments(t *testing.T) {
 
 	// 基本功能测试
 	t.Run("Basic", func(t *testing.T) {
-		comments, err := client.GetComments(config.TestMarketID, 10, 0)
+		marketID, parseErr := strconv.Atoi(config.TestMarketID)
+		if parseErr != nil {
+			t.Skip("POLY_TEST_MARKET_ID is not a Gamma integer ID")
+		}
+		comments, err := client.GetComments(types.CommentParentMarket, marketID, 10, 0)
 		if err != nil {
 			t.Fatalf("GetComments failed: %v", err)
 		}
@@ -565,7 +571,7 @@ func TestGetComment(t *testing.T) {
 	// 基本功能测试（需要一个有效的comment ID）
 	t.Run("Basic", func(t *testing.T) {
 		// 使用一个示例comment ID，实际测试中应该使用真实的ID
-		comment, err := client.GetComment("test-comment-id")
+		comment, err := client.GetComment(1, false)
 		if err != nil {
 			// 如果comment不存在，这是预期的
 			if err.Error() == "comment not found" {
@@ -591,8 +597,8 @@ func TestGetProfile(t *testing.T) {
 		profile, err := client.GetProfile(userAddr)
 		if err != nil {
 			// 如果API端点不存在（404/405），跳过测试
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "405") || 
-			   strings.Contains(err.Error(), "Not Found") || strings.Contains(err.Error(), "Method Not Allowed") {
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "405") ||
+				strings.Contains(err.Error(), "Not Found") || strings.Contains(err.Error(), "Method Not Allowed") {
 				t.Skip("Skipping test: GetProfile API endpoint not found or method not allowed (may be deprecated)")
 				return
 			}
@@ -602,31 +608,6 @@ func TestGetProfile(t *testing.T) {
 			t.Fatal("GetProfile returned nil")
 		}
 		t.Logf("GetProfile returned profile for address: %s", userAddr)
-	})
-}
-
-func TestGetProfileByUsername(t *testing.T) {
-	client := NewClient()
-
-	// 基本功能测试（使用一个已知的用户名）
-	t.Run("Basic", func(t *testing.T) {
-		profile, err := client.GetProfileByUsername("polymarket")
-		if err != nil {
-			// 如果API端点不存在（404），跳过测试
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "Not Found") {
-				t.Skip("Skipping test: GetProfileByUsername API endpoint not found (may be deprecated)")
-				return
-			}
-			// 如果用户不存在，跳过测试
-			if err.Error() == "profile not found" {
-				t.Skip("Profile 'polymarket' not found")
-			}
-			t.Fatalf("GetProfileByUsername failed: %v", err)
-		}
-		if profile == nil {
-			t.Fatal("GetProfileByUsername returned nil")
-		}
-		t.Logf("GetProfileByUsername returned profile")
 	})
 }
 
@@ -699,29 +680,5 @@ func TestGetSimplifiedMarkets(t *testing.T) {
 			t.Errorf("Expected at most 10 markets, got %d", len(markets))
 		}
 		t.Logf("GetSimplifiedMarkets returned %d markets", len(markets))
-	})
-}
-
-func TestGetMarketTradesEvents(t *testing.T) {
-	client := NewClient()
-	config := test.LoadTestConfig()
-
-	if config.TestMarketID == "" {
-		t.Skip("Skipping test: POLY_TEST_MARKET_ID not set")
-	}
-
-	// 基本功能测试
-	t.Run("Basic", func(t *testing.T) {
-		events, err := client.GetMarketTradesEvents(config.TestMarketID, 10, 0)
-		if err != nil {
-			t.Fatalf("GetMarketTradesEvents failed: %v", err)
-		}
-		if events == nil {
-			t.Fatal("GetMarketTradesEvents returned nil")
-		}
-		if len(events) > 10 {
-			t.Errorf("Expected at most 10 events, got %d", len(events))
-		}
-		t.Logf("GetMarketTradesEvents returned %d events", len(events))
 	})
 }
