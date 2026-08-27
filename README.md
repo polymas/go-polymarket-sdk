@@ -194,6 +194,7 @@ V1 回退选项。
 | `GetTotalValue` | 获取仓位价值合计         | `user`, `conditionIDs`                  | `float64`, `error`         |
 
 `Trade.Timestamp` 和 `Activity.Timestamp` 是官方返回的 Unix 秒 `int64`。Activity 类型应优先使用 `types.ActivityType*` 常量；查询充值或提现时还需传入 `data.WithActivityExcludeDepositsWithdrawals(false)`。
+`GetTrades` 默认使用官方的 `takerOnly=true`，可用 `WithTradesTakerOnly(false)` 覆盖；深层历史分页可配合 `WithTradesDateRange(start, end)` 使用独立时间窗口。
 
 ### Web3 客户端接口
 

@@ -155,7 +155,7 @@
 - [x] `ValueResponse` 改为 `{user, value}`；`GetValue` 返回完整 `[]ValueResponse`，新增 `GetTotalValue` 显式求和，不再默认取第一项。
 - [x] Trade/Activity timestamp 直接按官方 Unix 秒整数解码；字符串和浮点坏值返回 JSON 错误，不再使用当前时间兜底。
 - [x] 用官方 schema 与生产只读响应制作 JSON golden tests，断言关键字段非零且可回序列化；真实请求验证 `/trades`、`/activity`、`/value` 字段与模型一致。
-- [x] `GetTrades` 的 limit 上限由错误的 500 修正为官方 10000，并恢复官方 `takerOnly=true` 默认值；业务仍可显式传 false。
+- [x] `GetTrades` 的 limit 上限由错误的 500 修正为官方 10000，保留官方 `takerOnly=true` 默认值，并支持 `start/end` 时间窗口；查询 1000 条不再被 SDK 擅自截断。
 
 ### [ ] P0-7：重做 User WebSocket 鉴权和订阅报文
 

@@ -192,6 +192,8 @@ type GetTradesOptions struct {
 	EventID      interface{}
 	User         *string
 	Side         *types.OrderSide
+	Start        *time.Time
+	End          *time.Time
 }
 
 // GetTradesOption 函数选项类型
@@ -237,6 +239,15 @@ func WithTradesUser(user string) GetTradesOption {
 func WithTradesSide(side types.OrderSide) GetTradesOption {
 	return func(opts *GetTradesOptions) {
 		opts.Side = &side
+	}
+}
+
+// WithTradesDateRange 按 Unix 秒时间窗口筛选成交记录。
+// nil 表示不发送对应参数，使用 Data API 的默认时间范围。
+func WithTradesDateRange(start, end *time.Time) GetTradesOption {
+	return func(opts *GetTradesOptions) {
+		opts.Start = start
+		opts.End = end
 	}
 }
 
@@ -293,6 +304,12 @@ func (c *polymarketDataClient) GetTrades(limit int, offset int, options ...GetTr
 	}
 	if opts.Side != nil {
 		params["side"] = string(*opts.Side)
+	}
+	if opts.Start != nil {
+		params["start"] = strconv.FormatInt(opts.Start.Unix(), 10)
+	}
+	if opts.End != nil {
+		params["end"] = strconv.FormatInt(opts.End.Unix(), 10)
 	}
 
 	return http.GetSlice[types.Trade](c.baseURL, "/trades", params)
