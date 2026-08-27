@@ -258,7 +258,7 @@
 - [x] `GetAllMarkets` keyset page size 为 100，并只依据 `next_cursor` 终止。
 - [x] 用本地契约测试锁定当前路径、参数、返回形状和游标分页。
 
-### [ ] P0-12：扩展下单响应并实现成交结算对账
+### [x] P0-12：扩展下单响应并实现成交结算对账
 
 当前 `OrderPostResponse` 只有 `orderID/status/errorMsg`，会丢失官方响应中的：
 
@@ -272,10 +272,12 @@
 
 建议验收：
 
-- [ ] 完整建模 `SendOrderResponse`，金额优先使用十进制定点字符串。
-- [ ] 实现已认证的 `GetTrades`，并能按 trade/order ID 查询。
-- [ ] 提供 `WaitForOrderFillSettlement(ctx, ...)`，区分 matched、mined、confirmed、failed、timeout。
-- [ ] 网络超时后将订单状态标记为 unknown，并按确定性 order hash/订单查询做 reconciliation，禁止直接无脑重下。
+- [x] 完整建模 `SendOrderResponse`，金额使用十进制定点字符串；保留 `OrderPostResponse` 名称兼容现有调用方。
+- [x] 实现已认证的 `GetTrades` 游标分页和官方过滤器；trade ID 走 `/data/trades?id=`，order ID 走 `/data/order/{orderID}`。
+- [x] 提供 `WaitForOrderFillSettlement(ctx, ...)`，区分 matched、mined、confirmed、failed、timeout。
+- [x] matched 响应缺少交易哈希时由 SDK 自动等待，批次共享 30 秒窗口并以 4 路并发查询 trade；业务层无需二次调用。
+- [x] 网络结果不明确时保留 unknown，并按本地 V2 EIP-712 order hash 自动查询单订单；只在对账仍无法确认时返回 unknown，禁止自动重下。
+- [x] 每笔响应暴露 POST、order-hash 对账、settlement 和总耗时，以及轮询/查询错误/超时统计；生产 PostOnly 实测本地 hash 与 CLOB orderID 一致。
 
 ### [x] P0-13：迁移 RTDS URL、订阅协议和心跳
 
@@ -338,7 +340,7 @@
 
 ### [ ] P1-4：补齐单订单查询、撤单过滤与限制校验
 
-- [ ] 实现官方 `GET /data/order/{orderID}`，不要只用 GetOrders 的筛选参数替代。
+- [x] 实现官方 `GET /data/order/{orderID}`，不要只用 GetOrders 的筛选参数替代。（已随 P0-12 完成）
 - [ ] `CancelMarketOrders` 同时支持官方的 market/asset 过滤组合，而不是只接 condition ID。
 - [ ] `CancelOrders` 本地校验或自动分块遵循官方单次最多 1000 个 order ID。
 - [ ] 对 canceled/not_canceled 提供稳定 typed result。
@@ -414,7 +416,7 @@
 
 ### [ ] P2-2：CLOB 认证交易与 Builder 数据
 
-- [ ] `GET /data/trades`：已认证成交查询、游标分页和过滤器。
+- [x] `GET /data/trades`：已认证成交查询、游标分页和过滤器。（已随 P0-12 完成）
 - [ ] `GET /builder/trades`。
 - [ ] Builder API key：创建、列举、删除。
 - [ ] closed-only/ban status 查询。
@@ -574,13 +576,13 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 
 ## 建议实施批次
 
-### [ ] 第一批：阻断错误交易请求
+### [x] 第一批：阻断错误交易请求
 
-P0-1 至 P0-5 已完成；继续处理 P0-12。业务层现在必须为每笔订单显式提供 tick size，非网格价格或 size 小于默认值 5 都会在整批提交前失败；批量返回会区分已关闭、确定未提交、结果未知和逐单业务拒绝。
+P0-1 至 P0-5、P0-12 已完成。业务层必须为每笔订单显式提供 tick size；批量返回区分已关闭、确定未提交、结果未知和逐单业务拒绝。matched 响应由 SDK 自动补全异步交易哈希，网络结果不明确时先按确定性 order hash 对账，不会直接重下。
 
 ### [ ] 第二批：修复返回数据和实时连接
 
-P0-6 至 P0-11、P0-13、P0-14，然后完成 P1-3、P1-4、P1-8、P1-10。
+P0-6 至 P0-14 已完成；下一项是 P1-3，然后继续 P1-4、P1-8、P1-10。
 
 ### [ ] 第三批：稳定性和可恢复性
 

@@ -350,9 +350,127 @@ type OpenOrder struct {
 // OrderPostResponse 表示提交订单的响应
 // API返回camelCase格式：errorMsg, orderID
 type OrderPostResponse struct {
-	OrderID  Keccak256 `json:"orderID"`
-	Status   string    `json:"status"`
-	ErrorMsg string    `json:"errorMsg"`
+	Success            bool                 `json:"success"`
+	OrderID            Keccak256            `json:"orderID"`
+	Status             string               `json:"status"`
+	MakingAmount       string               `json:"makingAmount"`
+	TakingAmount       string               `json:"takingAmount"`
+	TransactionsHashes []Keccak256          `json:"transactionsHashes,omitempty"`
+	TradeIDs           []string             `json:"tradeIDs,omitempty"`
+	ErrorMsg           string               `json:"errorMsg"`
+	ExpectedOrderID    Keccak256            `json:"-"`
+	SettlementState    OrderSettlementState `json:"-"`
+	ResolvedTrades     []ClobTrade          `json:"-"`
+	Timing             OrderResponseTiming  `json:"-"`
+}
+
+// SendOrderResponse 是官方文档中的响应名称。保留 OrderPostResponse 作为主类型，
+// 避免破坏现有调用方。
+type SendOrderResponse = OrderPostResponse
+
+// OrderResponseTiming 记录 SDK 从提交到补全异步成交信息的本地耗时。
+// 这些字段不参与 CLOB JSON 编解码，便于调用方汇总 p50/p95/p99。
+type OrderResponseTiming struct {
+	PostDuration               time.Duration
+	ReconciliationWaitDuration time.Duration
+	SettlementWaitDuration     time.Duration
+	TotalDuration              time.Duration
+	ReconciliationPollCount    int
+	PollCount                  int
+	ReconciliationQueryErrors  int
+	QueryErrors                int
+	Reconciled                 bool
+	ReconciliationTimedOut     bool
+	SettlementTimedOut         bool
+}
+
+// ClobTradeParams 是认证 GET /data/trades 支持的官方过滤器。
+type ClobTradeParams struct {
+	ID           string
+	MakerAddress EthAddress
+	Market       ConditionID
+	AssetID      TokenID
+	Before       int64
+	After        int64
+}
+
+// ClobTradeStatus 表示 CLOB 成交执行状态。
+type ClobTradeStatus string
+
+// UnmarshalJSON 同时兼容官方文档中的 TRADE_STATUS_CONFIRMED 形式和生产
+// SDK 当前使用的 CONFIRMED 形式，并统一为短枚举值。
+func (s *ClobTradeStatus) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	value = strings.TrimPrefix(strings.ToUpper(value), "TRADE_STATUS_")
+	*s = ClobTradeStatus(value)
+	return nil
+}
+
+const (
+	ClobTradeStatusMatched   ClobTradeStatus = "MATCHED"
+	ClobTradeStatusMined     ClobTradeStatus = "MINED"
+	ClobTradeStatusConfirmed ClobTradeStatus = "CONFIRMED"
+	ClobTradeStatusRetrying  ClobTradeStatus = "RETRYING"
+	ClobTradeStatusFailed    ClobTradeStatus = "FAILED"
+)
+
+// ClobMakerOrder 是一笔成交中参与撮合的 maker 订单。
+type ClobMakerOrder struct {
+	OrderID       Keccak256  `json:"order_id"`
+	Owner         string     `json:"owner"`
+	MakerAddress  EthAddress `json:"maker_address"`
+	MatchedAmount string     `json:"matched_amount"`
+	Price         string     `json:"price"`
+	FeeRateBPS    string     `json:"fee_rate_bps"`
+	AssetID       TokenID    `json:"asset_id"`
+	Outcome       string     `json:"outcome"`
+	Side          OrderSide  `json:"side"`
+}
+
+// ClobTrade 表示认证 CLOB GET /data/trades 返回的一笔成交。金额与价格保留
+// 官方十进制定点字符串，避免 float64 精度损失。
+type ClobTrade struct {
+	ID              string           `json:"id"`
+	TakerOrderID    Keccak256        `json:"taker_order_id"`
+	Market          ConditionID      `json:"market"`
+	AssetID         TokenID          `json:"asset_id"`
+	Side            OrderSide        `json:"side"`
+	Size            string           `json:"size"`
+	FeeRateBPS      string           `json:"fee_rate_bps"`
+	Price           string           `json:"price"`
+	Status          ClobTradeStatus  `json:"status"`
+	MatchTime       string           `json:"match_time"`
+	LastUpdate      string           `json:"last_update"`
+	Outcome         string           `json:"outcome"`
+	BucketIndex     int              `json:"bucket_index"`
+	Owner           string           `json:"owner"`
+	MakerAddress    EthAddress       `json:"maker_address"`
+	TransactionHash Keccak256        `json:"transaction_hash"`
+	TraderSide      string           `json:"trader_side"`
+	ErrorMsg        string           `json:"err_msg"`
+	MakerOrders     []ClobMakerOrder `json:"maker_orders"`
+}
+
+// OrderSettlementState 是 SDK 观察到的订单成交结算阶段。
+type OrderSettlementState string
+
+const (
+	OrderSettlementMatched   OrderSettlementState = "matched"
+	OrderSettlementMined     OrderSettlementState = "mined"
+	OrderSettlementConfirmed OrderSettlementState = "confirmed"
+	OrderSettlementFailed    OrderSettlementState = "failed"
+	OrderSettlementTimeout   OrderSettlementState = "timeout"
+)
+
+// OrderFillSettlement 汇总一笔订单关联的全部成交及当前结算阶段。
+type OrderFillSettlement struct {
+	State              OrderSettlementState
+	Trades             []ClobTrade
+	TransactionsHashes []Keccak256
+	Timing             OrderResponseTiming
 }
 
 // OrderCancelResponse 表示取消订单的响应

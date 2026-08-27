@@ -111,6 +111,7 @@ const (
 	CancelOrders       = "/orders"
 	CancelAll          = "/cancel-all"
 	CancelMarketOrders = "/cancel-market-orders"
+	GetOrder           = "/data/order/"
 	Orders             = "/data/orders"
 )
 

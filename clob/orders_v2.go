@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,8 @@ import (
 	"math/big"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/polymas/go-polymarket-sdk/http"
@@ -76,6 +79,15 @@ func newBatchNotSubmittedError(format string, args ...interface{}) error {
 	return &batchNotSubmittedError{err: fmt.Errorf(format, args...)}
 }
 
+type batchPostError struct {
+	err              error
+	expectedOrderIDs []types.Keccak256
+	timing           types.OrderResponseTiming
+}
+
+func (e *batchPostError) Error() string { return e.err.Error() }
+func (e *batchPostError) Unwrap() error { return e.err }
+
 // postOrdersBatchV2 始终返回与输入等长、同序的结果。
 // orderbook 不存在时不重试：该 token 标记 market_closed，同一
 // 原始 HTTP 子批的其他订单标记 not_submitted。
@@ -99,6 +111,8 @@ func resolveV2BatchAttempt(
 	if err == nil {
 		return normalizeV2BatchResponses(resp, n)
 	}
+	var postErr *batchPostError
+	errors.As(err, &postErr)
 	if len(resp) > 0 {
 		aligned, alignErr := normalizeV2BatchResponses(resp, n)
 		if alignErr != nil {
@@ -125,8 +139,10 @@ func resolveV2BatchAttempt(
 			allClosed = false
 		}
 		if matched == 0 {
-			return makeBatchStatusResults(n, OrderUnknownStatus, err.Error()), fmt.Errorf("CLOB reported closed orderbook(s) %v that are not present in the submitted batch: %w", badTokens, err)
+			results = applyBatchPostMetadata(results, postErr)
+			return results, fmt.Errorf("CLOB reported closed orderbook(s) %v that are not present in the submitted batch: %w", badTokens, err)
 		}
+		results = applyBatchPostMetadata(results, postErr)
 		if allClosed {
 			return results, nil
 		}
@@ -140,7 +156,20 @@ func resolveV2BatchAttempt(
 		status = OrderNotSubmittedStatus
 		message = err.Error()
 	}
-	return makeBatchStatusResults(n, status, message), err
+	return applyBatchPostMetadata(makeBatchStatusResults(n, status, message), postErr), err
+}
+
+func applyBatchPostMetadata(results []types.OrderPostResponse, postErr *batchPostError) []types.OrderPostResponse {
+	if postErr == nil {
+		return results
+	}
+	for i := range results {
+		if i < len(postErr.expectedOrderIDs) {
+			results[i].ExpectedOrderID = postErr.expectedOrderIDs[i]
+		}
+		results[i].Timing = postErr.timing
+	}
+	return results
 }
 
 func normalizeV2BatchResponses(resp []types.OrderPostResponse, expected int) ([]types.OrderPostResponse, error) {
@@ -209,6 +238,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
+	batchStart := time.Now()
 	isRetryCall := len(isRetry) > 0 && isRetry[0]
 	if len(orderArgsList) == 0 {
 		return []types.OrderPostResponse{}, nil
@@ -223,6 +253,7 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	}
 
 	requestBody := make([]orderRequestV2, 0, len(orderArgsList))
+	expectedOrderIDs := make([]types.Keccak256, 0, len(orderArgsList))
 
 	// 非重试路径：并发预取本批中未传入、未缓存的 token 的 NegRisk 状态，把签名
 	// 循环里逐个串行 GET /neg-risk 压成约 1 次往返的墙钟时间。重试路径强制 true，
@@ -252,6 +283,11 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		if err != nil {
 			return nil, newBatchNotSubmittedError("订单 %d token=%s 本地构造/签名失败: %w", i+1, orderArgs.TokenID, err)
 		}
+		expectedOrderID, err := c.v2OrderID(signed, perOrderNegRisk)
+		if err != nil {
+			return nil, newBatchNotSubmittedError("订单 %d token=%s 本地计算 order hash 失败: %w", i+1, orderArgs.TokenID, err)
+		}
+		expectedOrderIDs = append(expectedOrderIDs, expectedOrderID)
 
 		requestBody = append(requestBody, orderRequestV2{
 			Order:     signedOrderToJSONV2(signed, orderArgs.Side, orderArgs.Expiration),
@@ -286,15 +322,62 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		return nil, newBatchNotSubmittedError("failed to create headers: %w", err)
 	}
 
+	postStart := time.Now()
 	responseBody, err := http.PostRaw(c.baseClient.baseURL, internal.PostOrders, bodyJSON, http.WithHeaders(headers))
+	postDuration := time.Since(postStart)
 	if err != nil {
-		return nil, err
+		if !topLevelHTTP4xxRegex.MatchString(err.Error()) {
+			if reconciled, complete := c.reconcileAmbiguousPost(
+				expectedOrderIDs, requestBody, batchStart, postDuration,
+			); len(reconciled) > 0 {
+				if complete {
+					return reconciled, nil
+				}
+				return reconciled, &batchPostError{
+					err:              err,
+					expectedOrderIDs: expectedOrderIDs,
+					timing:           reconciled[0].Timing,
+				}
+			}
+		}
+		return nil, &batchPostError{
+			err:              err,
+			expectedOrderIDs: expectedOrderIDs,
+			timing: types.OrderResponseTiming{
+				PostDuration:  postDuration,
+				TotalDuration: time.Since(batchStart),
+			},
+		}
 	}
 
 	var resp []types.OrderPostResponse
 	if len(responseBody) > 0 {
 		if err := json.Unmarshal(responseBody, &resp); err != nil {
-			return nil, fmt.Errorf("failed to parse response: %w", err)
+			if reconciled, complete := c.reconcileAmbiguousPost(
+				expectedOrderIDs, requestBody, batchStart, postDuration,
+			); len(reconciled) > 0 {
+				if complete {
+					return reconciled, nil
+				}
+				return reconciled, &batchPostError{
+					err:              fmt.Errorf("failed to parse response: %w", err),
+					expectedOrderIDs: expectedOrderIDs,
+					timing:           reconciled[0].Timing,
+				}
+			}
+			return nil, &batchPostError{
+				err:              fmt.Errorf("failed to parse response: %w", err),
+				expectedOrderIDs: expectedOrderIDs,
+				timing: types.OrderResponseTiming{
+					PostDuration:  postDuration,
+					TotalDuration: time.Since(batchStart),
+				},
+			}
+		}
+	}
+	for i := range resp {
+		if i < len(expectedOrderIDs) {
+			resp[i].ExpectedOrderID = expectedOrderIDs[i]
 		}
 	}
 	// 对可能签错 exchange 域的订单执行一次 NegRisk 重签重试。
@@ -327,7 +410,107 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 		}
 	}
 
+	needsSettlement := make([]bool, len(resp))
+	for i := range resp {
+		needsSettlement[i] = len(resp[i].TradeIDs) > 0 && len(resp[i].TransactionsHashes) == 0
+	}
+	settlementStart := time.Now()
+	c.resolveOrderTransactions(resp, orderSettlementTimeout)
+	settlementDuration := time.Since(settlementStart)
+	for i := range resp {
+		resp[i].Timing.PostDuration = postDuration
+		if needsSettlement[i] && resp[i].Timing.SettlementWaitDuration == 0 {
+			resp[i].Timing.SettlementWaitDuration = settlementDuration
+		}
+		resp[i].Timing.TotalDuration = time.Since(batchStart)
+	}
+	internal.LogDebug(
+		"V2 批量下单返回耗时: orders=%d post=%v settlement=%v total=%v",
+		len(resp), postDuration, settlementDuration, time.Since(batchStart),
+	)
+
 	return resp, nil
+}
+
+func (c *orderClientImpl) reconcileAmbiguousPost(
+	expectedOrderIDs []types.Keccak256,
+	requestBody []orderRequestV2,
+	batchStart time.Time,
+	postDuration time.Duration,
+) ([]types.OrderPostResponse, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), orderSettlementTimeout)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	orders, timing, _ := c.reconcileExpectedOrders(ctx, expectedOrderIDs, orderSettlementPollInterval)
+	if len(orders) == 0 {
+		return nil, false
+	}
+
+	results := makeBatchStatusResults(
+		len(expectedOrderIDs),
+		OrderUnknownStatus,
+		"submission outcome remains unknown after order-hash reconciliation",
+	)
+	for i, expectedOrderID := range expectedOrderIDs {
+		results[i].ExpectedOrderID = expectedOrderID
+		results[i].Timing = timing
+		results[i].Timing.PostDuration = postDuration
+		results[i].Timing.TotalDuration = time.Since(batchStart)
+		order, found := orders[expectedOrderID]
+		if !found {
+			continue
+		}
+		results[i].Success = true
+		results[i].OrderID = order.OrderID
+		results[i].Status = normalizeOrderStatus(order.Status)
+		results[i].ErrorMsg = ""
+		results[i].TradeIDs = append([]string(nil), order.AssociateTrades...)
+		results[i].Timing.Reconciled = true
+		if i < len(requestBody) {
+			results[i].MakingAmount = requestBody[i].Order.MakerAmount
+			results[i].TakingAmount = requestBody[i].Order.TakerAmount
+		}
+	}
+
+	settlementStart := time.Now()
+	remaining := time.Until(deadline)
+	if remaining < 0 {
+		remaining = 0
+	}
+	c.resolveOrderTransactions(results, remaining)
+	settlementDuration := time.Since(settlementStart)
+	for i := range results {
+		if len(results[i].TradeIDs) > 0 && results[i].Timing.SettlementWaitDuration == 0 {
+			results[i].Timing.SettlementWaitDuration = settlementDuration
+		}
+		results[i].Timing.TotalDuration = time.Since(batchStart)
+	}
+	internal.LogWarn(
+		"下单响应不明确后按本地 order hash 对账: found=%d total=%d wait=%v polls=%d query_errors=%d",
+		len(orders), len(expectedOrderIDs), timing.ReconciliationWaitDuration,
+		timing.ReconciliationPollCount, timing.ReconciliationQueryErrors,
+	)
+	return results, len(orders) == len(uniqueOrderIDs(expectedOrderIDs))
+}
+
+func normalizeOrderStatus(status string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.ToUpper(status), "ORDER_STATUS_"))
+}
+
+func (c *orderClientImpl) v2OrderID(signed *signing.V2SignedOrder, negRisk bool) (types.Keccak256, error) {
+	exchangeAddrHex := internal.PolygonExchangeV2
+	if negRisk {
+		exchangeAddrHex = internal.PolygonNegRiskExchangeV2
+	}
+	digest, err := signing.V2OrderDigest(
+		&signed.V2Order,
+		big.NewInt(int64(c.baseClient.web3Client.GetChainID())),
+		common.HexToAddress(exchangeAddrHex),
+	)
+	if err != nil {
+		return "", err
+	}
+	return types.Keccak256(digest.Hex()), nil
 }
 
 // createSignedOrderV2 构建并签名一笔 V2 订单，返回 signing.V2SignedOrder。

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/polymas/go-polymarket-sdk/gamma"
 	"github.com/polymas/go-polymarket-sdk/types"
@@ -147,6 +148,24 @@ func TestExplicitTickSizeLivePostAndCancel(t *testing.T) {
 	if response == nil || response.ErrorMsg != "" || response.OrderID == "" {
 		t.Fatalf("order was not accepted: %+v", response)
 	}
+	if response.ExpectedOrderID != response.OrderID {
+		t.Fatalf("local expected order hash %s does not match CLOB order ID %s", response.ExpectedOrderID, response.OrderID)
+	}
+	var queried *types.OpenOrder
+	queryDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(queryDeadline) {
+		queried, err = client.GetOrder(response.OrderID)
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("query live order %s: %v", response.OrderID, err)
+	}
+	if queried.OrderID != response.OrderID {
+		t.Fatalf("queried order ID = %s, want %s", queried.OrderID, response.OrderID)
+	}
 
 	canceled := false
 	defer func() {
@@ -171,7 +190,7 @@ func TestExplicitTickSizeLivePostAndCancel(t *testing.T) {
 	if !canceled {
 		t.Fatalf("order %s not confirmed canceled: %+v", response.OrderID, cancelResponse)
 	}
-	t.Logf("live explicit-tick order %s posted and canceled", response.OrderID)
+	t.Logf("live explicit-tick order %s posted and canceled; timing=%+v", response.OrderID, response.Timing)
 }
 
 func defaultEnv(key, fallback string) string {

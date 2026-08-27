@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -17,7 +18,10 @@ const negRiskPrefetchConcurrency = 8
 
 // OrderClient 订单相关操作的轻量接口
 type OrderClient interface {
+	GetOrder(orderID types.Keccak256) (*types.OpenOrder, error)
 	GetOrders(orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error)
+	GetTrades(params *types.ClobTradeParams) ([]types.ClobTrade, error)
+	WaitForOrderFillSettlement(ctx context.Context, response types.OrderPostResponse) (*types.OrderFillSettlement, error)
 	CreateAndPostOrders(orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
 	CancelOrders(orderIDs []types.Keccak256) (*types.OrderCancelResponse, error)
 	CancelAll() (*types.OrderCancelResponse, error)

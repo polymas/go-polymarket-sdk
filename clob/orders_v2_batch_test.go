@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/polymas/go-polymarket-sdk/types"
 )
@@ -110,6 +111,30 @@ func TestResolveV2BatchClassifiesRequestLevelErrors(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestResolveV2BatchPreservesExpectedOrderIDOnAmbiguousFailure(t *testing.T) {
+	args := []types.OrderArgs{{TokenID: "111"}, {TokenID: "222"}}
+	typesList := []types.OrderType{types.OrderTypeGTC, types.OrderTypeGTC}
+	expected := []types.Keccak256{
+		"0x1111111111111111111111111111111111111111111111111111111111111111",
+		"0x2222222222222222222222222222222222222222222222222222222222222222",
+	}
+	results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+		return nil, &batchPostError{
+			err:              fmt.Errorf("request failed: timeout"),
+			expectedOrderIDs: expected,
+			timing:           types.OrderResponseTiming{PostDuration: time.Second},
+		}
+	})
+	if err == nil {
+		t.Fatal("expected ambiguous submission error")
+	}
+	for i := range results {
+		if results[i].Status != OrderUnknownStatus || results[i].ExpectedOrderID != expected[i] || results[i].Timing.PostDuration != time.Second {
+			t.Fatalf("result[%d] = %+v", i, results[i])
+		}
+	}
 }
 
 func TestNormalizeV2BatchResponsesRequiresExactAlignment(t *testing.T) {
