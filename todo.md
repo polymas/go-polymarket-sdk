@@ -506,23 +506,26 @@
 - [x] Gamma 新增过滤器与字段：decimalized、rfq_enabled、tag_match、locale 等；同时补齐 search、tags、series 过滤器和按地址 profile 路径。
 - [x] 单元契约测试覆盖 query、multi-query、keyset cursor、只读 POST body 和纯文本 status；生产只读联调通过 status、teams、events keyset、markets keyset、sports market types。
 
-### [ ] P2-5：Data API 补全
+### [x] P2-5：Data API 补全
 
-- [ ] health。
-- [ ] accounting snapshot。
-- [ ] approvals。
-- [ ] combo activity、combo positions。
-- [ ] holders。
-- [ ] traded / markets traded。
-- [ ] revisions。
-- [ ] open interest。
-- [ ] live volume。
-- [ ] closed positions。
-- [ ] other positions。
-- [ ] market positions。
-- [ ] builder leaderboard、builder volume。
-- [ ] user leaderboard。
-- [ ] positions 的 `includeArchived`、grossInitialValue、entryFeesUsdc 等当前字段。
+- [x] health。
+- [x] accounting snapshot（直接返回官方 ZIP 字节，不错误地按 JSON 解码）。
+- [x] approvals。
+- [x] combo activity、combo positions，包括 cursor、offset 和当前嵌套模型。
+- [x] holders。
+- [x] traded / markets traded。
+- [x] revisions。
+- [x] open interest。
+- [x] live volume。
+- [x] closed positions。
+- [x] other positions。
+- [x] market positions。
+- [x] builder leaderboard、builder volume。
+- [x] user leaderboard。
+- [x] positions 的 `includeArchived`、grossInitialValue、entryFeesUsdc、eventId 等当前字段。
+- [x] 所有新增网络方法均提供 `...Context` 与兼容的 background 包装；列表上限和官方默认排序在 SDK 边界统一处理。
+- [x] 单元契约测试覆盖 ZIP、multi-query、cursor、分页上限和新增字段；生产只读正向联调通过 health、snapshot、combos、positions、traded、OI、holders、live volume、closed/other/market positions、builder/user leaderboard。
+- [x] 官方 OpenAPI 已声明但生产暂无法正向验证：`/v1/approvals` 对有效活跃地址返回 500，`/revisions` 返回 404；SDK 保留官方契约实现和 mock 正向测试，未伪造替代端点。
 
 ### [ ] P2-6：Bridge API 独立模块
 

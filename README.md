@@ -211,16 +211,30 @@ V1 回退选项。
 
 ### Data 客户端接口
 
-| 方法            | 描述                     | 参数                                    | 返回值                     |
-| --------------- | ------------------------ | --------------------------------------- | -------------------------- |
-| `GetPositions`  | 获取用户仓位             | `user`, `options...`                    | `[]Position`, `error`      |
-| `GetTrades`     | 获取交易记录             | `limit`, `offset`, `options...`         | `[]Trade`, `error`         |
-| `GetActivity`   | 获取用户活动             | `user`, `limit`, `offset`, `options...` | `[]Activity`, `error`      |
-| `GetValue`      | 获取完整仓位价值响应数组 | `user`, `conditionIDs`                  | `[]ValueResponse`, `error` |
-| `GetTotalValue` | 获取仓位价值合计         | `user`, `conditionIDs`                  | `float64`, `error`         |
+| 方法                              | 描述                         | 参数                                    | 返回值                     |
+| --------------------------------- | ---------------------------- | --------------------------------------- | -------------------------- |
+| `GetHealth`                       | Data API 健康状态            | -                                       | `*DataHealth`, `error`      |
+| `GetAccountingSnapshot`           | 下载 accounting ZIP 快照     | `user`                                  | `[]byte`, `error`           |
+| `GetApprovals`                    | 查询钱包授权状态             | `user`                                  | `*ApprovalsResponse`        |
+| `GetPositions`                    | 获取用户仓位                 | `user`, `options...`                    | `[]Position`, `error`       |
+| `GetTrades`                       | 获取交易记录                 | `limit`, `offset`, `options...`         | `[]Trade`, `error`          |
+| `GetActivity`                     | 获取用户活动                 | `user`, `limit`, `offset`, `options...` | `[]Activity`, `error`       |
+| `GetComboActivity/Positions`      | 获取 Combo 活动或仓位        | `user`, `options`                       | 分页响应                    |
+| `GetHolders`                      | 按 condition ID 获取持有人   | `conditionIDs`, `limit`, `minBalance`   | `[]MarketHolders`, `error`  |
+| `GetTradedMarkets`                | 获取用户交易过的市场数       | `user`                                  | `*TradedMarkets`, `error`   |
+| `GetRevisions`                    | 获取问题修订记录             | `questionID`, `limit`                   | `[]RevisionPayload`         |
+| `GetOpenInterest/GetLiveVolume`   | 获取 OI 或事件实时成交量     | condition IDs 或 event ID               | 对应数组                    |
+| `GetClosedPositions`              | 获取已关闭仓位               | `user`, `options`                       | `[]ClosedPosition`          |
+| `GetOtherPositions`               | 获取同事件其他仓位规模       | `eventID`, `user`                       | `[]OtherPositionSize`       |
+| `GetMarketPositions`              | 获取市场持仓排名             | `conditionID`, `options`                | `[]MarketPositions`         |
+| `GetBuilderLeaderboard/Volume`    | 获取 Builder 排名或成交量    | 时间窗口与分页                          | 对应数组                    |
+| `GetTraderLeaderboard`            | 获取交易者排行榜             | `options`                               | `[]TraderLeaderboardEntry`  |
+| `GetValue`                        | 获取完整仓位价值响应数组     | `user`, `conditionIDs`                  | `[]ValueResponse`, `error`  |
+| `GetTotalValue`                   | 获取仓位价值合计             | `user`, `conditionIDs`                  | `float64`, `error`          |
 
 `Trade.Timestamp` 和 `Activity.Timestamp` 是官方返回的 Unix 秒 `int64`。Activity 类型应优先使用 `types.ActivityType*` 常量；查询充值或提现时还需传入 `data.WithActivityExcludeDepositsWithdrawals(false)`。
 `GetTrades` 默认使用官方的 `takerOnly=true`，可用 `WithTradesTakerOnly(false)` 覆盖；深层历史分页可配合 `WithTradesDateRange(start, end)` 使用独立时间窗口。
+`GetAccountingSnapshot` 返回原始 ZIP 字节。当前生产环境中，官方 OpenAPI 已列出的 `/v1/approvals` 可能返回 500、`/revisions` 可能返回 404；SDK 按官方契约提供接口，但调用方应正常处理对应的 `APIError`。
 
 ### Web3 客户端接口
 

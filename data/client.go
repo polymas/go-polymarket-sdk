@@ -14,6 +14,12 @@ import (
 
 // Client 定义数据客户端的接口，供外部包使用
 type Client interface {
+	GetHealth() (*types.DataHealth, error)
+	GetHealthContext(ctx context.Context) (*types.DataHealth, error)
+	GetAccountingSnapshot(user types.EthAddress) ([]byte, error)
+	GetAccountingSnapshotContext(ctx context.Context, user types.EthAddress) ([]byte, error)
+	GetApprovals(user types.EthAddress) (*types.ApprovalsResponse, error)
+	GetApprovalsContext(ctx context.Context, user types.EthAddress) (*types.ApprovalsResponse, error)
 	GetPositions(user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error)
 	GetPositionsContext(ctx context.Context, user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error)
 	GetTrades(limit int, offset int, options ...GetTradesOption) ([]types.Trade, error)
@@ -24,6 +30,32 @@ type Client interface {
 	GetValueContext(ctx context.Context, user types.EthAddress, conditionIDs interface{}) ([]types.ValueResponse, error)
 	GetTotalValue(user types.EthAddress, conditionIDs interface{}) (float64, error)
 	GetTotalValueContext(ctx context.Context, user types.EthAddress, conditionIDs interface{}) (float64, error)
+	GetComboActivity(user types.EthAddress, options ComboActivityOptions) (*types.ComboActivityResponse, error)
+	GetComboActivityContext(ctx context.Context, user types.EthAddress, options ComboActivityOptions) (*types.ComboActivityResponse, error)
+	GetComboPositions(user types.EthAddress, options ComboPositionsOptions) (*types.ComboPositionsResponse, error)
+	GetComboPositionsContext(ctx context.Context, user types.EthAddress, options ComboPositionsOptions) (*types.ComboPositionsResponse, error)
+	GetHolders(tokenIDs []string, limit, minBalance int) ([]types.MarketHolders, error)
+	GetHoldersContext(ctx context.Context, tokenIDs []string, limit, minBalance int) ([]types.MarketHolders, error)
+	GetTradedMarkets(user types.EthAddress) (*types.TradedMarkets, error)
+	GetTradedMarketsContext(ctx context.Context, user types.EthAddress) (*types.TradedMarkets, error)
+	GetRevisions(questionID types.Keccak256, limit int) ([]types.RevisionPayload, error)
+	GetRevisionsContext(ctx context.Context, questionID types.Keccak256, limit int) ([]types.RevisionPayload, error)
+	GetOpenInterest(conditionIDs []string) ([]types.OpenInterest, error)
+	GetOpenInterestContext(ctx context.Context, conditionIDs []string) ([]types.OpenInterest, error)
+	GetLiveVolume(eventID int) ([]types.LiveVolume, error)
+	GetLiveVolumeContext(ctx context.Context, eventID int) ([]types.LiveVolume, error)
+	GetClosedPositions(user types.EthAddress, options ClosedPositionsOptions) ([]types.ClosedPosition, error)
+	GetClosedPositionsContext(ctx context.Context, user types.EthAddress, options ClosedPositionsOptions) ([]types.ClosedPosition, error)
+	GetOtherPositions(eventID int, user types.EthAddress) ([]types.OtherPositionSize, error)
+	GetOtherPositionsContext(ctx context.Context, eventID int, user types.EthAddress) ([]types.OtherPositionSize, error)
+	GetMarketPositions(market types.Keccak256, options MarketPositionsOptions) ([]types.MarketPositions, error)
+	GetMarketPositionsContext(ctx context.Context, market types.Keccak256, options MarketPositionsOptions) ([]types.MarketPositions, error)
+	GetBuilderLeaderboard(options BuilderLeaderboardOptions) ([]types.BuilderLeaderboardEntry, error)
+	GetBuilderLeaderboardContext(ctx context.Context, options BuilderLeaderboardOptions) ([]types.BuilderLeaderboardEntry, error)
+	GetBuilderVolume(period LeaderboardTimePeriod) ([]types.BuilderVolumeEntry, error)
+	GetBuilderVolumeContext(ctx context.Context, period LeaderboardTimePeriod) ([]types.BuilderVolumeEntry, error)
+	GetTraderLeaderboard(options TraderLeaderboardOptions) ([]types.TraderLeaderboardEntry, error)
+	GetTraderLeaderboardContext(ctx context.Context, options TraderLeaderboardOptions) ([]types.TraderLeaderboardEntry, error)
 }
 
 // polymarketDataClient 处理数据API操作
@@ -42,16 +74,17 @@ func NewClient() Client {
 
 // GetPositionsOptions 包含 GetPositions 的所有可选参数
 type GetPositionsOptions struct {
-	Limit         int         // limit, 默认值为 500
-	Offset        int         // offset, 默认值为 0
-	ConditionID   interface{} // string, []string, or nil
-	EventID       interface{} // int, []int, or nil
-	SizeThreshold float64
-	Redeemable    *bool
-	Mergeable     *bool
-	Title         *string
-	SortBy        string
-	SortDirection string
+	Limit           int         // limit, 默认值为 500
+	Offset          int         // offset, 默认值为 0
+	ConditionID     interface{} // string, []string, or nil
+	EventID         interface{} // int, []int, or nil
+	SizeThreshold   float64
+	Redeemable      *bool
+	Mergeable       *bool
+	IncludeArchived *bool
+	Title           *string
+	SortBy          string
+	SortDirection   string
 }
 
 // GetPositionsOption 函数选项类型
@@ -90,6 +123,10 @@ func WithPositionsMergeable(mergeable bool) GetPositionsOption {
 	return func(opts *GetPositionsOptions) {
 		opts.Mergeable = &mergeable
 	}
+}
+
+func WithPositionsIncludeArchived(include bool) GetPositionsOption {
+	return func(opts *GetPositionsOptions) { opts.IncludeArchived = &include }
 }
 
 // WithPositionsTitle 设置title过滤
@@ -179,6 +216,9 @@ func (c *polymarketDataClient) GetPositionsContext(ctx context.Context, user typ
 	}
 	if opts.Mergeable != nil {
 		params["mergeable"] = strconv.FormatBool(*opts.Mergeable)
+	}
+	if opts.IncludeArchived != nil {
+		params["includeArchived"] = strconv.FormatBool(*opts.IncludeArchived)
 	}
 	if opts.Title != nil {
 		params["title"] = *opts.Title
