@@ -129,7 +129,7 @@ V1 回退选项。
 | `CancelAll`              | 取消所有订单           | -                                          | `*OrderCancelResponse`, `error`       |
 | `CancelMarketOrders`     | 取消指定市场的所有订单 | `conditionID`                              | `*OrderCancelResponse`, `error`       |
 | `GetOrderBook`           | 获取订单簿             | `tokenID`                                  | `*OrderBookSummary`, `error`          |
-| `GetMultipleOrderBooks`  | 批量获取订单簿         | `requests`                                 | `[]OrderBookSummaryResponse`, `error` |
+| `GetMultipleOrderBooks`  | 批量获取订单簿         | `requests`                                 | `[]OrderBookSummary`, `error`         |
 | `GetMidpoint`            | 获取中间价             | `tokenID`                                  | `*Midpoint`, `error`                  |
 | `GetMidpoints`           | 批量获取中间价         | `tokenIDs`                                 | `[]Midpoint`, `error`                 |
 | `GetPrice`               | 获取指定方向的价格     | `tokenID`, `side`                          | `*Price`, `error`                     |
@@ -350,7 +350,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-booksByToken := make(map[types.TokenID]types.OrderBookSummaryResponse, len(books))
+booksByToken := make(map[types.TokenID]types.OrderBookSummary, len(books))
 for _, book := range books {
     tokenID, err := types.ParseTokenID(book.AssetID)
     if err != nil {
@@ -360,6 +360,11 @@ for _, book := range books {
     booksByToken[tokenID] = book
 }
 ```
+
+`GetOrderBook` 与 `GetMultipleOrderBooks` 共用完整的 `OrderBookSummary`；旧的
+`OrderBookSummaryResponse` 名称保留为类型别名。盘口的 price/size、最小下单量和
+最后成交价使用 `DecimalString` 保留原始十进制精度；需要浮点运算时显式调用
+`value.Float64()` 并处理错误。`LastTradePrice == nil` 表示该 token 尚无成交价。
 
 `String()` 会恢复官方规范字符串：`ConditionID` 输出小写 `0x` + 64 位 hex，`TokenID` 输出无前导零的 uint256 十进制；二者均支持文本/JSON 值和 JSON map key 编解码。现有请求与响应字段继续使用字符串，业务可只在需要构建字典时转换，不破坏旧代码。
 

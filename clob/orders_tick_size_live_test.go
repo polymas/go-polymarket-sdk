@@ -92,7 +92,10 @@ func TestExplicitTickSizeLivePostAndCancel(t *testing.T) {
 			}
 			bestAsk := 2.0
 			for _, ask := range book.Asks {
-				price := float64(ask.Price)
+				price, err := ask.Price.Float64()
+				if err != nil {
+					continue
+				}
 				if price > 0 && price < bestAsk {
 					bestAsk = price
 				}

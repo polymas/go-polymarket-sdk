@@ -332,14 +332,14 @@
 - [ ] 提交前基于订单簿估算可成交量；深度不足时在本地返回明确错误。
 - [ ] 实现官方建议的 market price estimation，并覆盖 FOK/FAK。
 
-### [ ] P1-3：扩展订单簿模型并统一单个/批量返回类型
+### [x] P1-3：扩展订单簿模型并统一单个/批量返回类型
 
 单个 `OrderBookSummary` 目前只保留 token/bids/asks，丢失 market、timestamp、hash、min_order_size、tick_size、last_trade_price；批量模型字段又不同。
 
-- [ ] 单个与批量共用一个完整 `OrderBookSummary`。
-- [ ] 价格和数量使用精确十进制类型。
-- [ ] 将 `min_order_size/tick_size` 完整暴露给业务层，用于构造显式的下单参数和预校验配置。
-- [ ] 针对空订单簿、null last trade 和未交易 token 建立测试。
+- [x] 单个与批量共用一个完整 `OrderBookSummary`；旧 `OrderBookSummaryResponse` 保留为类型别名。
+- [x] 价格和数量使用保留 JSON 原文的 `DecimalString`，需要浮点运算时显式转换。
+- [x] 将 `min_order_size/tick_size/neg_risk` 完整暴露给业务层，用于构造显式的下单参数和预校验配置。
+- [x] 针对空订单簿、null/空字符串/缺项 last trade 和高精度价格数量建立测试；生产只读请求确认未交易 token 当前会返回 `last_trade_price: ""`。
 
 ### [ ] P1-4：补齐单订单查询、撤单过滤与限制校验
 
@@ -585,7 +585,7 @@ P0-1 至 P0-5、P0-12 已完成。业务层必须为每笔订单显式提供 tic
 
 ### [ ] 第二批：修复返回数据和实时连接
 
-P0-6 至 P0-14 已完成；下一项是 P1-3，然后继续 P1-4、P1-8、P1-10。
+P0-6 至 P0-14、P1-3 已完成；下一项是 P1-4，然后继续 P1-8、P1-10。
 
 ### [ ] 第三批：稳定性和可恢复性
 

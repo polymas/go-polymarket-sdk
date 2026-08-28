@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -253,6 +254,60 @@ func (fs FloatString) MarshalJSON() ([]byte, error) {
 // Float64 返回float64值
 func (fs FloatString) Float64() float64 {
 	return float64(fs)
+}
+
+// DecimalString 保存 API 返回的十进制原文，避免订单簿价格和数量在 JSON
+// 解码时经过 float64 而丢失精度。其 JSON 表示始终是字符串。
+type DecimalString string
+
+var decimalStringPattern = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$`)
+
+// ParseDecimalString 校验并保留一个普通十进制字符串。它不接受 NaN、Inf、
+// 科学计数法或分数形式。
+func ParseDecimalString(value string) (DecimalString, error) {
+	if !decimalStringPattern.MatchString(value) {
+		return "", fmt.Errorf("invalid decimal string %q", value)
+	}
+	return DecimalString(value), nil
+}
+
+func (d DecimalString) String() string { return string(d) }
+
+// Float64 为确实需要浮点运算的业务提供显式转换。原始 DecimalString 本身仍
+// 保留完整精度；调用方应处理转换错误。
+func (d DecimalString) Float64() (float64, error) {
+	value, err := strconv.ParseFloat(string(d), 64)
+	if err != nil {
+		return 0, fmt.Errorf("convert decimal %q to float64: %w", d, err)
+	}
+	return value, nil
+}
+
+func (d DecimalString) MarshalJSON() ([]byte, error) {
+	if _, err := ParseDecimalString(string(d)); err != nil {
+		return nil, err
+	}
+	return json.Marshal(string(d))
+}
+
+func (d *DecimalString) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return fmt.Errorf("decimal value cannot be null")
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		var number json.Number
+		if numberErr := json.Unmarshal(data, &number); numberErr != nil {
+			return err
+		}
+		value = number.String()
+	}
+	parsed, err := ParseDecimalString(value)
+	if err != nil {
+		return err
+	}
+	*d = parsed
+	return nil
 }
 
 // NullableTime 包装*time.Time以处理JSON中的"0"或空字符串
@@ -520,32 +575,52 @@ type OrderCancelResponse struct {
 	NotCanceled map[Keccak256]string `json:"not_canceled,omitempty"`
 }
 
-// OrderBookSummary 表示订单簿摘要
+// OrderBookSummary 是 GET /book 与 POST /books 共用的完整订单簿快照。
 type OrderBookSummary struct {
-	TokenID string       `json:"token_id"`
-	Bids    []OrderLevel `json:"bids,omitempty"`
-	Asks    []OrderLevel `json:"asks,omitempty"`
+	Market         string         `json:"market"`
+	AssetID        string         `json:"asset_id"`
+	Timestamp      string         `json:"timestamp"`
+	Hash           string         `json:"hash"`
+	Bids           []OrderLevel   `json:"bids"`
+	Asks           []OrderLevel   `json:"asks"`
+	MinOrderSize   DecimalString  `json:"min_order_size"`
+	TickSize       TickSize       `json:"tick_size"`
+	NegRisk        bool           `json:"neg_risk"`
+	LastTradePrice *DecimalString `json:"last_trade_price"`
 }
 
-// OrderLevel 表示订单簿中的价格层级
-// price和size使用FloatString类型，可自动处理JSON中的数字或字符串格式
+// UnmarshalJSON 兼容生产 CLOB 对“尚无成交价”的三种表达：null、空字符串和
+// 缺项；三者统一为 nil。字符串 "0" 仍是一个有效十进制值，不会被吞掉。
+func (o *OrderBookSummary) UnmarshalJSON(data []byte) error {
+	type orderBookSummaryAlias OrderBookSummary
+	wire := struct {
+		LastTradePrice json.RawMessage `json:"last_trade_price"`
+		*orderBookSummaryAlias
+	}{orderBookSummaryAlias: (*orderBookSummaryAlias)(o)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	o.LastTradePrice = nil
+	if len(wire.LastTradePrice) == 0 || string(wire.LastTradePrice) == "null" || string(wire.LastTradePrice) == `""` {
+		return nil
+	}
+	var value DecimalString
+	if err := json.Unmarshal(wire.LastTradePrice, &value); err != nil {
+		return fmt.Errorf("invalid last_trade_price: %w", err)
+	}
+	o.LastTradePrice = &value
+	return nil
+}
+
+// OrderLevel 表示订单簿中的一个精确价格层级。
 type OrderLevel struct {
-	Price FloatString `json:"price"` // 价格（支持数字或字符串格式）
-	Size  FloatString `json:"size"`  // 数量（支持数字或字符串格式）
+	Price DecimalString `json:"price"`
+	Size  DecimalString `json:"size"`
 }
 
-// OrderBookSummaryResponse 表示批量获取订单簿API的响应
-// 根据 POST /books API 文档：https://docs.polymarket.com/api-reference/orderbook/get-multiple-order-books-summaries-by-request
-type OrderBookSummaryResponse struct {
-	AssetID      string       `json:"asset_id"`       // 资产ID
-	Market       string       `json:"market"`         // 市场ID（condition_id）
-	Timestamp    string       `json:"timestamp"`      // 时间戳
-	Hash         string       `json:"hash"`           // 订单簿哈希
-	MinOrderSize string       `json:"min_order_size"` // 最小订单大小
-	TickSize     string       `json:"tick_size"`      // tick大小
-	Bids         []OrderLevel `json:"bids,omitempty"` // 买盘
-	Asks         []OrderLevel `json:"asks,omitempty"` // 卖盘
-}
+// OrderBookSummaryResponse 保留为源码兼容别名。新代码统一使用
+// OrderBookSummary；单查和批量返回同一模型。
+type OrderBookSummaryResponse = OrderBookSummary
 
 // ClobMarket 表示CLOB市场
 type ClobMarket struct {

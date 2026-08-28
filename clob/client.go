@@ -39,7 +39,7 @@ type OrderClient interface {
 // MarketDataClient 市场数据相关操作的轻量接口
 type MarketDataClient interface {
 	GetOrderBook(tokenID string) (*types.OrderBookSummary, error)
-	GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error)
+	GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummary, error)
 	GetMidpoint(tokenID string) (*types.Midpoint, error)
 	GetMidpoints(tokenIDs []string) ([]types.Midpoint, error)
 	GetPrice(tokenID string, side types.OrderSide) (*types.Price, error)

@@ -221,12 +221,12 @@ func (c *readonlyMarketDataClientImpl) GetOrderBook(tokenID string) (*types.Orde
 // requests: 请求数组，每个元素包含 token_id（必需）和可选的 side（BUY/SELL）
 // 最大数组长度: 500
 // 返回: 订单簿摘要数组
-func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error) {
+func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummary, error) {
 	cleaned := sanitizeBookParams(requests)
 	// 与 GetMidpoints/GetSpreads/GetLastTradesPrices 行为对齐：sanitize 后为空
 	// 直接返回空切片，不发请求也不报错，让业务层透明处理坏 tokenId。
 	if len(cleaned) == 0 {
-		return []types.OrderBookSummaryResponse{}, nil
+		return []types.OrderBookSummary{}, nil
 	}
 	if len(cleaned) > 500 {
 		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
@@ -254,7 +254,7 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 		return nil, fmt.Errorf("批量获取订单簿失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
-	var result []types.OrderBookSummaryResponse
+	var result []types.OrderBookSummary
 	if err := json.Unmarshal(rawBytes, &result); err != nil {
 		return nil, fmt.Errorf("批量获取订单簿失败: failed to decode response: %w", err)
 	}
@@ -262,10 +262,10 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 }
 
 // GetMultipleOrderBooks 批量获取多个订单簿摘要（只读客户端实现）
-func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummaryResponse, error) {
+func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummary, error) {
 	cleaned := sanitizeBookParams(requests)
 	if len(cleaned) == 0 {
-		return []types.OrderBookSummaryResponse{}, nil
+		return []types.OrderBookSummary{}, nil
 	}
 	if len(cleaned) > 500 {
 		return nil, fmt.Errorf("请求数组长度不能超过500，当前: %d", len(cleaned))
@@ -293,7 +293,7 @@ func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.Bo
 		return nil, fmt.Errorf("批量获取订单簿失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
-	var result []types.OrderBookSummaryResponse
+	var result []types.OrderBookSummary
 	if err := json.Unmarshal(rawBytes, &result); err != nil {
 		return nil, fmt.Errorf("批量获取订单簿失败: failed to decode response: %w", err)
 	}

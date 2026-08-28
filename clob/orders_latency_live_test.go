@@ -202,7 +202,10 @@ func selectLatencyCandidates(t *testing.T, client Client, limit int, maxNotional
 			}
 			bestAsk := math.Inf(1)
 			for _, ask := range book.Asks {
-				askPrice := float64(ask.Price)
+				askPrice, conversionErr := ask.Price.Float64()
+				if conversionErr != nil {
+					continue
+				}
 				if askPrice > 0 && askPrice < bestAsk {
 					bestAsk = askPrice
 				}

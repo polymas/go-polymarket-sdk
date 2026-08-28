@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -283,6 +284,80 @@ func TestGetMultipleOrderBooksAllBadInput(t *testing.T) {
 	}
 	if atomic.LoadInt32(&hits) != 0 {
 		t.Fatalf("expected zero HTTP calls, got %d", hits)
+	}
+}
+
+func TestGetOrderBookDecodesCompleteSnapshotAndNullLastTrade(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/book" || r.URL.Query().Get("token_id") != "42" {
+			t.Fatalf("unexpected request: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"market":"0x1111111111111111111111111111111111111111111111111111111111111111",
+			"asset_id":"42","timestamp":"1234567890","hash":"snapshot-hash",
+			"bids":[],"asks":[],"min_order_size":"5.000000",
+			"tick_size":"0.001","neg_risk":true,"last_trade_price":""
+		}`))
+	}))
+	defer server.Close()
+
+	book, err := newReadonlyMarketDataAt(server.URL).GetOrderBook("42")
+	if err != nil {
+		t.Fatalf("GetOrderBook: %v", err)
+	}
+	if book.AssetID != "42" || book.Market == "" || book.Timestamp != "1234567890" || book.Hash != "snapshot-hash" {
+		t.Fatalf("incomplete snapshot: %+v", book)
+	}
+	if book.MinOrderSize.String() != "5.000000" || book.TickSize != types.TickSize0_001 || !book.NegRisk {
+		t.Fatalf("market configuration was not preserved: %+v", book)
+	}
+	if book.LastTradePrice != nil || book.Bids == nil || book.Asks == nil {
+		t.Fatalf("empty/null semantics were not preserved: %+v", book)
+	}
+}
+
+func TestGetMultipleOrderBooksUsesSamePreciseModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/books" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body []types.BookParams
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(body) != 1 || body[0].TokenID != "42" {
+			t.Fatalf("body = %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{
+			"market":"0x1111111111111111111111111111111111111111111111111111111111111111",
+			"asset_id":"42","timestamp":"1234567890","hash":"snapshot-hash",
+			"bids":[{"price":"0.123456789012345678","size":"987654321.123456789"}],
+			"asks":[{"price":"0.9","size":"5"}],"min_order_size":"5",
+			"tick_size":"0.001","neg_risk":false,"last_trade_price":"0.123456789012345678"
+		}]`))
+	}))
+	defer server.Close()
+
+	books, err := newReadonlyMarketDataAt(server.URL).GetMultipleOrderBooks([]types.BookParams{{TokenID: "42"}})
+	if err != nil {
+		t.Fatalf("GetMultipleOrderBooks: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("books = %+v", books)
+	}
+	book := books[0]
+	if len(book.Bids) != 1 || book.Bids[0].Price.String() != "0.123456789012345678" ||
+		book.Bids[0].Size.String() != "987654321.123456789" {
+		t.Fatalf("decimal precision was lost: %+v", book.Bids)
+	}
+	if book.LastTradePrice == nil || book.LastTradePrice.String() != "0.123456789012345678" {
+		t.Fatalf("last trade price = %v", book.LastTradePrice)
+	}
+	var legacyName types.OrderBookSummaryResponse = book
+	if legacyName.AssetID != book.AssetID {
+		t.Fatal("OrderBookSummaryResponse compatibility alias changed the value")
 	}
 }
 
