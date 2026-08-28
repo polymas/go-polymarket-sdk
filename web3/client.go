@@ -67,6 +67,9 @@ func NewClient(
 	chainID types.ChainID,
 	rpcURLs ...string,
 ) (Client, error) {
+	if !signatureType.ValidV2() {
+		return nil, fmt.Errorf("unsupported CLOB V2 signature type %d", signatureType)
+	}
 	// 根据 chainID 或调用方传入选择 RPC 节点列表（未传入时使用内置列表）
 	var list []string
 	if len(rpcURLs) > 0 {
@@ -143,7 +146,7 @@ func NewClient(
 	// For non-proxy types, proxy address equals base address
 	if signatureType != types.ProxySignatureType &&
 		signatureType != types.SafeSignatureType &&
-		signatureType != types.CWIASignatureType {
+		signatureType != types.DepositWalletSignatureType {
 		web3Client.proxyAddress = baseAddress
 	}
 
@@ -433,7 +436,7 @@ func (c *baseClient) GetPolyProxyAddress() (types.EthAddress, error) {
 		proxyAddr, err = c.getPolyProxyWalletAddress(c.baseAddress)
 	case types.SafeSignatureType:
 		proxyAddr, err = c.getSafeProxyAddress(c.baseAddress)
-	case types.CWIASignatureType:
+	case types.DepositWalletSignatureType:
 		proxyAddr, err = c.getCWIAProxyAddress(c.baseAddress)
 	default:
 		// For EOA or unknown types, return the base address

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -148,5 +149,18 @@ func sampleV2OrderData(priv *ecdsa.PrivateKey) *V2OrderData {
 		SignatureType: types.EOASignatureType,
 		TimestampMS:   1_714_305_600_000,
 		Salt:          big.NewInt(1),
+	}
+}
+
+func TestBuildSignedV2OrderRejectsUnknownSignatureType(t *testing.T) {
+	priv, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := sampleV2OrderData(priv)
+	data.SignatureType = types.SignatureType(4)
+	_, err = BuildSignedV2Order(priv, data, big.NewInt(137), common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	if err == nil || !strings.Contains(err.Error(), "unsupported CLOB V2 signature type 4") {
+		t.Fatalf("err=%v", err)
 	}
 }

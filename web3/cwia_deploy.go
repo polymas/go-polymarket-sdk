@@ -37,7 +37,7 @@ type CWIADeployBody struct {
 
 // DeployDepositWallet 通过 Polymarket relayer 部署当前 EOA 对应的 DepositWallet。
 //
-// 仅 CWIASignatureType 客户端可用。返回 relayer 已确认的链上 receipt。
+// 仅 DepositWalletSignatureType 客户端可用。返回 relayer 已确认的链上 receipt。
 //
 // 部署是幂等的：如果链上已经部署，本方法会直接返回 nil（无 receipt），
 // 避免重复 POST 浪费配额。要强制走 relayer 一次（比如调试），传 force=true。
@@ -49,8 +49,8 @@ func (c *GaslessClient) DeployDepositWallet(force bool) (*types.TransactionRecei
 }
 
 func (c *GaslessClient) DeployDepositWalletContext(ctx context.Context, force bool) (*types.TransactionReceipt, error) {
-	if c.signatureType != types.CWIASignatureType {
-		return nil, fmt.Errorf("DeployDepositWallet 只支持 CWIASignatureType (=3)，当前=%d", c.signatureType)
+	if c.signatureType != types.DepositWalletSignatureType {
+		return nil, fmt.Errorf("DeployDepositWallet 只支持 DepositWalletSignatureType/POLY_1271 (=3)，当前=%d", c.signatureType)
 	}
 
 	walletHex, err := c.GetPolyProxyAddress()

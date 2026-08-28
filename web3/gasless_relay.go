@@ -101,7 +101,7 @@ func (c *GaslessClient) executeGaslessBatchOnceContext(ctx context.Context, prox
 	switch c.signatureType {
 	case types.ProxySignatureType:
 		body, err = c.buildProxyRelayTransactionBatchContext(ctx, proxyTxns, metadata)
-	case types.CWIASignatureType:
+	case types.DepositWalletSignatureType:
 		body, err = c.buildCWIARelayTransactionBatchContext(ctx, proxyTxns, metadata)
 	case types.SafeSignatureType:
 		// Convert proxyTxns to Safe transaction format

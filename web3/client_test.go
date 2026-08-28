@@ -1,11 +1,19 @@
 package web3
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/polymas/go-polymarket-sdk/test"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
+
+func TestNewClientRejectsUnknownSignatureTypeBeforeRPC(t *testing.T) {
+	_, err := NewClient("", types.SignatureType(4), types.Polygon, "http://127.0.0.1:1")
+	if err == nil || !strings.Contains(err.Error(), "unsupported CLOB V2 signature type 4") {
+		t.Fatalf("err=%v", err)
+	}
+}
 
 // newTestWeb3Client 创建测试用的Web3客户端
 func newTestWeb3Client(t *testing.T) Client {

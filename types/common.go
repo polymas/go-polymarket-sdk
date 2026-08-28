@@ -93,12 +93,46 @@ const (
 	ProxySignatureType SignatureType = 1
 	// SafeSignatureType - Safe/Gnosis wallet
 	SafeSignatureType SignatureType = 2
-	// CWIASignatureType - Polymarket Deposit Wallet (ERC-7760 / ERC-1967 with
-	// immutable args). Used by accounts created after Polymarket switched to
-	// the new DepositWalletFactory. Coexists with the older PolyProxy / Safe
-	// types — old accounts are not migrated.
-	CWIASignatureType SignatureType = 3
+	// Poly1271SignatureType is the official CLOB V2 POLY_1271 signature type.
+	// It describes ERC-1271 signature verification, not a particular wallet
+	// implementation. Polymarket Deposit Wallet/CWIA accounts currently use it.
+	// Some CLOB OpenAPI enum locations still list only 0/1/2; the official
+	// py-clob-client-v2 and current wallet APIs include type 3.
+	Poly1271SignatureType SignatureType = 3
+
+	// DepositWalletSignatureType is the wallet-oriented name for type 3.
+	DepositWalletSignatureType = Poly1271SignatureType
+
+	// Deprecated: use Poly1271SignatureType for signing semantics or
+	// DepositWalletSignatureType when selecting a Polymarket wallet type.
+	CWIASignatureType = Poly1271SignatureType
 )
+
+func (s SignatureType) String() string {
+	switch s {
+	case EOASignatureType:
+		return "EOA"
+	case ProxySignatureType:
+		return "POLY_PROXY"
+	case SafeSignatureType:
+		return "POLY_GNOSIS_SAFE"
+	case Poly1271SignatureType:
+		return "POLY_1271"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// ValidV2 reports whether the current CLOB V2 signing implementation supports
+// this value. It deliberately includes POLY_1271 even while older OpenAPI enum
+// fragments still stop at POLY_GNOSIS_SAFE.
+func (s SignatureType) ValidV2() bool {
+	return s >= EOASignatureType && s <= Poly1271SignatureType
+}
+
+func (s SignatureType) UsesContractSignature() bool {
+	return s == Poly1271SignatureType
+}
 
 // BookSnapshot 表示订单簿快照
 type BookSnapshot struct {

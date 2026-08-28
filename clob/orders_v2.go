@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -587,6 +586,10 @@ func (c *orderClientImpl) reconcileAmbiguousPostContext(
 		}
 		results[i].Success = true
 		results[i].OrderID = order.OrderID
+		results[i].RawStatus = order.RawStatus
+		if results[i].RawStatus == "" {
+			results[i].RawStatus = order.Status
+		}
 		results[i].Status = normalizeOrderStatus(order.Status)
 		results[i].ErrorMsg = ""
 		results[i].TradeIDs = append([]string(nil), order.AssociateTrades...)
@@ -619,7 +622,7 @@ func (c *orderClientImpl) reconcileAmbiguousPostContext(
 }
 
 func normalizeOrderStatus(status string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.ToUpper(status), "ORDER_STATUS_"))
+	return string(types.NormalizeOrderStatus(status))
 }
 
 func (c *orderClientImpl) v2OrderID(signed *signing.V2SignedOrder, negRisk bool) (types.Keccak256, error) {
@@ -677,7 +680,7 @@ func (c *orderClientImpl) createSignedOrderV2WithAmounts(
 	case types.ProxySignatureType, types.SafeSignatureType:
 		// Proxy/Safe：maker = proxy（资金来源），signer = EOA（API key 持有者）
 		makerAddr = string(c.baseClient.proxyAddress)
-	case types.CWIASignatureType:
+	case types.Poly1271SignatureType:
 		// V2 POLY_1271 (=3) 语义：合约钱包通过 EIP-1271 验证签名，
 		// 因此 signer 字段必须 = funder/proxy 地址，不能是 EOA。
 		// 对照 py-clob-client-v2/order_builder/builder.py 的 _v2_order_signer：

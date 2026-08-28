@@ -602,11 +602,15 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 
 这些项目不应在没有实测/官方确认的情况下直接按某一份 schema 硬改：
 
-### [ ] D-1：签名类型 3 的文档差异
+### [x] D-1：签名类型 3 的文档差异
 
 - Wallet/RFQ 等当前文档已出现签名类型 `3`（POLY_1271 / Deposit Wallet）。
 - CLOB OpenAPI 某些枚举位置仍只列 `0/1/2`。
-- 当前 SDK 已实现 type 3 的大量路径。建议保留，通过当前钱包文档、官方 SDK 和真实请求做 golden/integration test，并给官方文档差异留注释。
+- [x] 以官方名称新增 `Poly1271SignatureType`，以钱包语义提供 `DepositWalletSignatureType`；旧 `CWIASignatureType` 保留为 Deprecated 等值别名，避免破坏下游。
+- [x] `SignatureType.String/ValidV2/UsesContractSignature` 明确 0–3 的能力边界；Web3 和签名构建在网络/RPC 前拒绝未知值，不再把未知类型静默当 EOA。
+- [x] V2 maker/signer 和嵌套 ERC-1271 签名继续与官方 `py-clob-client-v2` 对齐，Python golden 签名测试保留。
+- [x] 生产只读负向验证：同一 EOA 临时使用 `signature_type=3` 查询时，CLOB 返回 `404 no deposit wallet found for owner`，而不是 `Invalid signature_type`，证明生产路由已识别 type 3；当前 `.env` 实际账户是 type 2，因此未伪造“已部署 Deposit Wallet 正向下单”结论。
+- [x] README 明确记录 OpenAPI 仍只列 0/1/2 的差异，SDK 不因旧 enum 回退 type 3。
 
 ### [x] D-2：批量下单的“逐单失败”与请求级失败边界
 
@@ -615,11 +619,15 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 - 客户端应按两层模型处理：先本地完成请求级 schema/tick 校验；发送后同时支持顶层错误和逐单结果，绝不能假设任何错误都只影响一单。
 - 已在 P0-5 / `v1.17.0` 落地：顶层错误按请求级处理，HTTP 200 逐单错误保持逐单语义，返回结果全程与输入对齐。
 
-### [ ] D-3：订单状态枚举/大小写
+### [x] D-3：订单状态枚举/大小写
 
 - OpenAPI 中部分 schema 使用 `ORDER_STATUS_LIVE` 一类名称。
 - 生产查询和历史代码中可见 `LIVE` 等值。
-- 建议保留原始 status，并提供兼容解析/归一化枚举；先录制当前真实响应再收紧校验。
+- [x] 新增 `types.OrderStatus` 规范枚举和 `NormalizeOrderStatus`，兼容小写、全大写、`ORDER_STATUS_*`、混合大小写及 `CANCELED/CANCELLED`。
+- [x] `OpenOrder`、`OrderPostResponse` 保留 wire 原值到 `RawStatus`，公开 `NormalizedStatus()`；现有 `Status string` 字段不改类型，避免下游源码破坏。
+- [x] `Known/IsOpen/IsTerminal` 提供分类；未知未来状态保留并规范化，不因 enum 扩展而 JSON 解码失败。
+- [x] Accepted、unknown、settlement、definitely-not-submitted 判断统一使用规范枚举；对账路径不会再丢失原始状态。
+- [x] 生产 PostOnly 挂单→查询→撤单实测：提交响应 `raw="live"`，订单查询 `raw="LIVE"`，两者均规范为 `live`；订单成功撤销，最大 maker 名义金额 0.05 USDC，未成交。
 
 ### [ ] D-4：Readonly API key 端点未出现在当前公开 OpenAPI 路径表
 

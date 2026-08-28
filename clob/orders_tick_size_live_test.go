@@ -151,6 +151,9 @@ func TestExplicitTickSizeLivePostAndCancel(t *testing.T) {
 	if response == nil || response.ErrorMsg != "" || response.OrderID == "" {
 		t.Fatalf("order was not accepted: %+v", response)
 	}
+	if response.RawStatus == "" || !response.NormalizedStatus().Known() || !response.Accepted() {
+		t.Fatalf("submission status raw=%q normalized=%q", response.RawStatus, response.NormalizedStatus())
+	}
 	if response.ExpectedOrderID != response.OrderID {
 		t.Fatalf("local expected order hash %s does not match CLOB order ID %s", response.ExpectedOrderID, response.OrderID)
 	}
@@ -169,6 +172,10 @@ func TestExplicitTickSizeLivePostAndCancel(t *testing.T) {
 	if queried.OrderID != response.OrderID {
 		t.Fatalf("queried order ID = %s, want %s", queried.OrderID, response.OrderID)
 	}
+	if queried.RawStatus == "" || !queried.NormalizedStatus().Known() || !queried.IsOpen() {
+		t.Fatalf("queried status raw=%q normalized=%q", queried.RawStatus, queried.NormalizedStatus())
+	}
+	t.Logf("status contract: submit raw=%q normalized=%q; query raw=%q normalized=%q", response.RawStatus, response.NormalizedStatus(), queried.RawStatus, queried.NormalizedStatus())
 
 	canceled := false
 	defer func() {

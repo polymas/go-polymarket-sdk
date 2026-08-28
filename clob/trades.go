@@ -237,6 +237,10 @@ func (c *orderClientImpl) AwaitOrderResults(
 			}
 			result[i].Success = true
 			result[i].OrderID = order.OrderID
+			result[i].RawStatus = order.RawStatus
+			if result[i].RawStatus == "" {
+				result[i].RawStatus = order.Status
+			}
 			result[i].Status = normalizeOrderStatus(order.Status)
 			result[i].ErrorMsg = ""
 			result[i].TradeIDs = append([]string(nil), order.AssociateTrades...)

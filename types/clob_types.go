@@ -395,10 +395,73 @@ func (nt NullableTime) MarshalJSON() ([]byte, error) {
 	return json.Marshal(nt.Time.Format(time.RFC3339))
 }
 
+// OrderStatus is the SDK's canonical, lowercase order status. The CLOB wire
+// API currently uses lowercase values for submission responses and
+// ORDER_STATUS_* values for order queries; NormalizeOrderStatus accepts both.
+type OrderStatus string
+
+const (
+	OrderStatusLive                   OrderStatus = "live"
+	OrderStatusMatched                OrderStatus = "matched"
+	OrderStatusDelayed                OrderStatus = "delayed"
+	OrderStatusInvalid                OrderStatus = "invalid"
+	OrderStatusCanceled               OrderStatus = "canceled"
+	OrderStatusCanceledMarketResolved OrderStatus = "canceled_market_resolved"
+	OrderStatusOpen                   OrderStatus = "open"
+	OrderStatusPartiallyFilled        OrderStatus = "partially_filled"
+	OrderStatusAccepted               OrderStatus = "accepted"
+	OrderStatusUnknown                OrderStatus = "unknown"
+	OrderStatusNotSubmitted           OrderStatus = "not_submitted"
+	OrderStatusMarketClosed           OrderStatus = "market_closed"
+	OrderStatusServerRejected         OrderStatus = "server_rejected"
+)
+
+func NormalizeOrderStatus(raw string) OrderStatus {
+	status := strings.ToUpper(strings.TrimSpace(raw))
+	status = strings.TrimPrefix(status, "ORDER_STATUS_")
+	if status == "CANCELLED" {
+		status = "CANCELED"
+	}
+	return OrderStatus(strings.ToLower(status))
+}
+
+func (s OrderStatus) Known() bool {
+	switch s {
+	case OrderStatusLive, OrderStatusMatched, OrderStatusDelayed, OrderStatusInvalid,
+		OrderStatusCanceled, OrderStatusCanceledMarketResolved, OrderStatusOpen,
+		OrderStatusPartiallyFilled, OrderStatusAccepted, OrderStatusUnknown,
+		OrderStatusNotSubmitted, OrderStatusMarketClosed, OrderStatusServerRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s OrderStatus) IsOpen() bool {
+	switch s {
+	case OrderStatusLive, OrderStatusOpen, OrderStatusPartiallyFilled, OrderStatusAccepted:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s OrderStatus) IsTerminal() bool {
+	switch s {
+	case OrderStatusMatched, OrderStatusInvalid, OrderStatusCanceled,
+		OrderStatusCanceledMarketResolved, OrderStatusNotSubmitted,
+		OrderStatusMarketClosed, OrderStatusServerRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // OpenOrder 表示开放订单
 type OpenOrder struct {
 	OrderID         Keccak256    `json:"id"` // alias: id
 	Status          string       `json:"status"`
+	RawStatus       string       `json:"-"`
 	Owner           string       `json:"owner"`
 	MakerAddress    string       `json:"maker_address"`
 	ConditionID     Keccak256    `json:"market"`   // alias: market
@@ -414,12 +477,35 @@ type OpenOrder struct {
 	CreatedAt       NullableTime `json:"created_at"`
 }
 
+func (o *OpenOrder) UnmarshalJSON(data []byte) error {
+	type alias OpenOrder
+	wire := struct {
+		*alias
+		Status string `json:"status"`
+	}{alias: (*alias)(o)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	o.Status, o.RawStatus = wire.Status, wire.Status
+	return nil
+}
+
+func (o OpenOrder) NormalizedStatus() OrderStatus {
+	if o.RawStatus != "" {
+		return NormalizeOrderStatus(o.RawStatus)
+	}
+	return NormalizeOrderStatus(o.Status)
+}
+
+func (o OpenOrder) IsOpen() bool { return o.NormalizedStatus().IsOpen() }
+
 // OrderPostResponse 表示提交订单的响应
 // API返回camelCase格式：errorMsg, orderID
 type OrderPostResponse struct {
 	Success            bool                 `json:"success"`
 	OrderID            Keccak256            `json:"orderID"`
 	Status             string               `json:"status"`
+	RawStatus          string               `json:"-"`
 	MakingAmount       string               `json:"makingAmount"`
 	TakingAmount       string               `json:"takingAmount"`
 	TransactionsHashes []Keccak256          `json:"transactionsHashes,omitempty"`
@@ -431,6 +517,26 @@ type OrderPostResponse struct {
 	Timing             OrderResponseTiming  `json:"-"`
 }
 
+func (r *OrderPostResponse) UnmarshalJSON(data []byte) error {
+	type alias OrderPostResponse
+	wire := struct {
+		*alias
+		Status string `json:"status"`
+	}{alias: (*alias)(r)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	r.Status, r.RawStatus = wire.Status, wire.Status
+	return nil
+}
+
+func (r OrderPostResponse) NormalizedStatus() OrderStatus {
+	if r.RawStatus != "" {
+		return NormalizeOrderStatus(r.RawStatus)
+	}
+	return NormalizeOrderStatus(r.Status)
+}
+
 // Accepted 表示 CLOB 已明确接收订单。它只判断接单结果，不代表订单已经成交。
 func (r OrderPostResponse) Accepted() bool {
 	if r.ErrorMsg != "" {
@@ -439,8 +545,8 @@ func (r OrderPostResponse) Accepted() bool {
 	if r.Success {
 		return true
 	}
-	switch strings.ToLower(r.Status) {
-	case "live", "matched", "delayed":
+	switch r.NormalizedStatus() {
+	case OrderStatusLive, OrderStatusMatched, OrderStatusDelayed:
 		return true
 	default:
 		return false
@@ -449,12 +555,12 @@ func (r OrderPostResponse) Accepted() bool {
 
 // IsUnknown 表示请求可能已经到达 CLOB，但当前无法确认接单结果。
 func (r OrderPostResponse) IsUnknown() bool {
-	return strings.EqualFold(r.Status, "unknown")
+	return r.NormalizedStatus() == OrderStatusUnknown
 }
 
 // NeedsSettlement 表示订单已撮合但 SDK 还没有取得交易哈希或明确失败结果。
 func (r OrderPostResponse) NeedsSettlement() bool {
-	return strings.EqualFold(r.Status, "matched") &&
+	return r.NormalizedStatus() == OrderStatusMatched &&
 		len(r.TradeIDs) > 0 &&
 		len(r.TransactionsHashes) == 0 &&
 		r.SettlementState != OrderSettlementFailed
@@ -467,8 +573,8 @@ func (r OrderPostResponse) NeedsFollowUp() bool {
 
 // DefinitelyNotSubmitted 表示 SDK 能确定该订单没有被 CLOB 接收。
 func (r OrderPostResponse) DefinitelyNotSubmitted() bool {
-	switch strings.ToLower(r.Status) {
-	case "not_submitted", "market_closed", "server_rejected":
+	switch r.NormalizedStatus() {
+	case OrderStatusNotSubmitted, OrderStatusMarketClosed, OrderStatusServerRejected:
 		return true
 	default:
 		return false

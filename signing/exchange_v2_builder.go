@@ -81,7 +81,7 @@ func BuildSignedV2Order(
 		return nil, err
 	}
 
-	if order.SignatureType == types.CWIASignatureType {
+	if order.SignatureType == types.Poly1271SignatureType {
 		signature, err := signV2OrderPoly1271(order, chainID, exchangeAddress, privateKey)
 		if err != nil {
 			return nil, err
@@ -208,13 +208,16 @@ func buildV2Order(d *V2OrderData) (*V2Order, error) {
 	if d == nil {
 		return nil, fmt.Errorf("order data is nil")
 	}
+	if !d.SignatureType.ValidV2() {
+		return nil, fmt.Errorf("unsupported CLOB V2 signature type %d", d.SignatureType)
+	}
 
 	makerAddr := common.HexToAddress(d.Maker)
 	signerAddr := makerAddr
 	if d.Signer != "" {
 		signerAddr = common.HexToAddress(d.Signer)
 	}
-	if d.SignatureType == types.CWIASignatureType && makerAddr != signerAddr {
+	if d.SignatureType == types.Poly1271SignatureType && makerAddr != signerAddr {
 		return nil, fmt.Errorf("POLY_1271 requires maker and signer to be the same Deposit Wallet (maker=%s signer=%s)", makerAddr.Hex(), signerAddr.Hex())
 	}
 

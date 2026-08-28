@@ -290,15 +290,23 @@ const (
 // 订单状态相关
 // ============================================================================
 
-// OpenOrderStatuses 开放状态的订单状态集合
-// 用于判断订单是否处于可取消状态
-// 这些状态的订单可以被取消：LIVE、OPEN、PARTIALLY_FILLED、ACCEPTED
-// 使用方式：internal.OpenOrderStatuses[order.Status]
+// OpenOrderStatuses is retained for compatibility. New code should call
+// IsOpenOrderStatus so ORDER_STATUS_*, lowercase and mixed-case values share
+// the same behavior.
 var OpenOrderStatuses = map[string]bool{
-	"LIVE":             true,
-	"OPEN":             true,
-	"PARTIALLY_FILLED": true,
-	"ACCEPTED":         true,
+	"LIVE":              true,
+	"ORDER_STATUS_LIVE": true,
+	"live":              true,
+	"OPEN":              true,
+	"open":              true,
+	"PARTIALLY_FILLED":  true,
+	"partially_filled":  true,
+	"ACCEPTED":          true,
+	"accepted":          true,
+}
+
+func IsOpenOrderStatus(status string) bool {
+	return types.NormalizeOrderStatus(status).IsOpen()
 }
 
 // ============================================================================

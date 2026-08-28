@@ -706,16 +706,23 @@ go test -cover ./...
   - `EOASignatureType` (0)：普通 EOA，maker == signer == EOA。
   - `ProxySignatureType` (1)：老版 PolyProxy，工厂 `0x4bFb…982E`，派生函数 `getPolyProxyWalletAddress(address)`。
   - `SafeSignatureType` (2)：Gnosis Safe，工厂 `0xaacF…541b`，派生函数 `computeProxyAddress(address)`。
-  - `CWIASignatureType` (3)：新版 Polymarket DepositWallet（ERC-7760 / ERC-1967 + immutable args，新注册账号默认走这套）。
+  - `Poly1271SignatureType` (3)：官方 CLOB V2 `POLY_1271`，通过 ERC-1271 合约签名验证；当前 Deposit Wallet 使用该机制。
+    - `DepositWalletSignatureType` 是面向钱包选择的等值名称。
+    - `CWIASignatureType` 是兼容旧代码的 Deprecated 等值别名。
     - 工厂：`0x00000000000Fb5C9ADea0298D729A0CB3823Cc07`
     - Legacy UUPS impl：`0x58cA52EbE0dAdFDf531CDe7062E76746de4Db1eB`；新钱包通过工厂 `BEACON()` 获取 Beacon 地址
     - 地址解析：本地分别派生 legacy UUPS 与新 BeaconProxy CREATE2 地址；若旧 UUPS 已部署则始终保留旧地址，只有未部署时才采用工厂 `BEACON()` 对应的新地址。
     - 与老两类型并存，老账号不迁移；签名仍走 EIP-1271（Exchange 调用代理 `isValidSignature`）。
     - **链上 gasless（v1.10.0+）**：`signing.SignCWIABatch` + `web3.BuildCWIABatchCalldata` 已对照真实链上 tx 字节级匹配，可直接广播 `DepositWalletFactory.proxy(Batch[],bytes[])`（需 operator 角色）。
-    - **走 Polymarket relayer 提交（v1.10.1+）**：`NewGaslessClient(..., CWIASignatureType, ...)` 已可创建；高层方法（SplitPosition / MergePositions / RedeemPositions / SetAutoClaim 等）会自动走 CWIA 分支。`CWIARelayBody` 已对照官方 [py-builder-relayer-client](https://github.com/Polymarket/py-builder-relayer-client) 中 `DepositWalletBatchRequest.to_dict()` 校准，包含 `depositWalletParams` 嵌套结构（depositWallet/deadline/calls）。
+    - **走 Polymarket relayer 提交（v1.10.1+）**：`NewGaslessClient(..., DepositWalletSignatureType, ...)` 已可创建；高层方法（SplitPosition / MergePositions / RedeemPositions / SetAutoClaim 等）会自动走 Deposit Wallet 分支。`CWIARelayBody` 已对照官方 [py-builder-relayer-client](https://github.com/Polymarket/py-builder-relayer-client) 中 `DepositWalletBatchRequest.to_dict()` 校准，包含 `depositWalletParams` 嵌套结构（depositWallet/deadline/calls）。
+
     - **首次部署（v1.10.6+）**：新注册 EOA 的 DepositWallet 是 counter-factual 地址，发批量交易前需先部署。调用 `gaslessClient.DeployDepositWallet(false)` 走 `type=WALLET-CREATE`；force=false 时已部署的钱包会自动跳过。如果在未部署的钱包上直接调 batch 方法，会得到 sentinel `web3.ErrDepositWalletNotDeployed`，业务层可 `errors.Is` 判断并触发 deploy。
     - **可恢复 onboarding**：`gaslessClient.OnboardDepositWallet(ctx, minimumPUSD)` 按链上状态执行 deploy → funding checkpoint → wrap/缺失 approvals → ready check。返回 `funding_required` 时，把 pUSD 或 USDC.e 转到 `result.Account.Wallet` 后重复调用；SDK 不自动从 EOA 转账，避免超时重试造成重复入金。
     - **POLY_1271 签名（v1.10.4+）**：CLOB v2 订单签名采用 solady ERC-1271 嵌套 TypedDataSign 格式（~317 字节，含 inner_sig + appDomainSep + contents_hash + ORDER_TYPE_STRING + uint16 长度），不是普通 EIP-712 ECDSA。已对照 py-clob-client-v2 字节级一致。
+
+当前 CLOB OpenAPI 的部分 `signatureType` enum 仍只列 0/1/2，但官方 `py-clob-client-v2` 和生产路由已经支持 3。SDK 以 `POLY_1271` 的当前实现为准，并保留该文档差异；`SignatureType.ValidV2()` 可用于调用前校验。
+
+订单状态在不同接口中的 wire 格式不一致：下单响应常见 `live/matched/delayed`，订单查询生产实测为 `LIVE`，OpenAPI 还声明了 `ORDER_STATUS_LIVE` 等形式。`OpenOrder.RawStatus` 和 `OrderPostResponse.RawStatus` 保留原值，使用 `NormalizedStatus()` 获取统一的小写 `types.OrderStatus`；未知未来状态也会保留，不会因严格枚举而解码失败。
 - `OrderSide`: 订单方向（BUY/SELL）
 - `OrderType`: 订单类型（GTC/FOK/GTD/FAK）；GTD 至少提前 3 分钟，PostOnly 仅支持 GTC/GTD
 - `OrderArgs`: 订单参数

@@ -58,7 +58,7 @@ func NewGaslessClient(
 	// 但 Polymarket relayer 仍在同一域名下，只是 type=WALLET。
 	if signatureType != types.ProxySignatureType &&
 		signatureType != types.SafeSignatureType &&
-		signatureType != types.CWIASignatureType {
+		signatureType != types.DepositWalletSignatureType {
 		return nil, fmt.Errorf("gaslessClient only supports signature_type=1 (proxy), 2 (safe), 3 (CWIA/DepositWallet)")
 	}
 

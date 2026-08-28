@@ -72,7 +72,7 @@ func (c *baseClient) ResolveWalletAccount(ctx context.Context) (*WalletAccount, 
 		WalletType:    WalletType(c.signatureType),
 		Deployed:      c.signatureType == types.EOASignatureType,
 	}
-	if c.signatureType == types.CWIASignatureType {
+	if c.signatureType == types.DepositWalletSignatureType {
 		account.OrderSigner = wallet
 	}
 	if c.signatureType != types.EOASignatureType {
@@ -162,8 +162,8 @@ func runDepositWalletOnboarding(ctx context.Context, minimumPUSD float64, ops de
 	if err != nil {
 		return nil, err
 	}
-	if account.WalletType != WalletTypeDepositWallet || account.SignatureType != types.CWIASignatureType {
-		return nil, fmt.Errorf("OnboardDepositWallet requires DEPOSIT_WALLET/CWIASignatureType, got %s/%d", account.WalletType, account.SignatureType)
+	if account.WalletType != WalletTypeDepositWallet || account.SignatureType != types.DepositWalletSignatureType {
+		return nil, fmt.Errorf("OnboardDepositWallet requires DEPOSIT_WALLET/POLY_1271 signature type, got %s/%d", account.WalletType, account.SignatureType)
 	}
 	result := &DepositWalletOnboardingResult{Account: *account, MinimumPUSD: minimumPUSD}
 	if !account.Deployed {

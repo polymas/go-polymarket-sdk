@@ -141,9 +141,9 @@ func (c *baseClient) BuildAndSignCWIABatch(
 	nonce *big.Int,
 	deadline *big.Int,
 ) (signing.CWIABatch, []byte, []byte, error) {
-	if c.signatureType != types.CWIASignatureType {
+	if c.signatureType != types.DepositWalletSignatureType {
 		return signing.CWIABatch{}, nil, nil, fmt.Errorf(
-			"BuildAndSignCWIABatch requires CWIASignatureType client, got %d", c.signatureType)
+			"BuildAndSignCWIABatch requires DepositWalletSignatureType/POLY_1271 client, got %d", c.signatureType)
 	}
 	if len(calls) == 0 {
 		return signing.CWIABatch{}, nil, nil, fmt.Errorf("calls must not be empty")
