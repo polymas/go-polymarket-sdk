@@ -137,7 +137,7 @@ func TestMarketClientProtocolAndEvents(t *testing.T) {
 	}
 
 	tick := received[MarketEventTickSizeChange].(*MarketTickSizeChangeEvent)
-	if tick.AssetID.String() != "1" || tick.OldTickSize != types.TickSize0_01 ||
+	if tick.TokenID.String() != "1" || tick.OldTickSize != types.TickSize0_01 ||
 		tick.NewTickSize != types.TickSize0_001 {
 		t.Fatalf("tick size event = %#v", tick)
 	}
@@ -152,7 +152,7 @@ func TestMarketClientProtocolAndEvents(t *testing.T) {
 		t.Fatalf("new market event = %#v", newMarket)
 	}
 	resolved := received[MarketEventMarketResolved].(*MarketResolvedEvent)
-	if resolved.WinningAssetID.String() != "1" || resolved.WinningOutcome != "Yes" {
+	if resolved.WinningTokenID.String() != "1" || resolved.WinningOutcome != "Yes" {
 		t.Fatalf("resolved event = %#v", resolved)
 	}
 
@@ -240,12 +240,12 @@ func TestMarketClientDynamicSubscriptionsAndReconnect(t *testing.T) {
 	assertMarketUpdate(t, updates, "subscribe", []string{"3"})
 	assertInitialMarketRequest(t, initialRequests, []string{"2", "3"})
 
-	if err := client.SubscribeAssets([]string{"4", "4"}); err != nil {
-		t.Fatalf("SubscribeAssets() error = %v", err)
+	if err := client.SubscribeTokens([]string{"4", "4"}); err != nil {
+		t.Fatalf("SubscribeTokens() error = %v", err)
 	}
 	assertMarketUpdate(t, updates, "subscribe", []string{"4"})
-	if err := client.UnsubscribeAssets([]string{"2"}); err != nil {
-		t.Fatalf("UnsubscribeAssets() error = %v", err)
+	if err := client.UnsubscribeTokens([]string{"2"}); err != nil {
+		t.Fatalf("UnsubscribeTokens() error = %v", err)
 	}
 	assertMarketUpdate(t, updates, "unsubscribe", []string{"2"})
 	if connections.Load() < 2 {

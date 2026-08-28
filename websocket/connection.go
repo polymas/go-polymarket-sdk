@@ -27,7 +27,7 @@ type marketSubscriptionUpdate struct {
 	CustomFeatureEnabled bool                    `json:"custom_feature_enabled"`
 }
 
-func (w *webSocketClient) Start(assetIDs []string) error {
+func (w *webSocketClient) Start(tokenIDs []string) error {
 	w.runningMutex.Lock()
 	if w.running {
 		w.runningMutex.Unlock()
@@ -39,7 +39,7 @@ func (w *webSocketClient) Start(assetIDs []string) error {
 	stop := w.stopChan
 	w.runningMutex.Unlock()
 
-	w.setSubscribedIDs(assetIDs)
+	w.setSubscribedIDs(tokenIDs)
 	conn, err := w.connect(stop)
 	if err != nil {
 		w.runningMutex.Lock()

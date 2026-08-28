@@ -18,14 +18,18 @@ const (
 // callers that only need the best bid/ask view; SetOnMarketEvent exposes the
 // complete typed protocol.
 type Client interface {
-	SetOnBookUpdate(callback func(assetID string, snapshot *types.BookSnapshot))
+	SetOnBookUpdate(callback func(tokenID string, snapshot *types.BookSnapshot))
 	SetOnMarketEvent(callback func(event MarketEvent))
-	Start(assetIDs []string) error
+	Start(tokenIDs []string) error
 	Stop()
 	IsRunning() bool
-	UpdateSubscription(assetIDs []string) error
-	SubscribeAssets(assetIDs []string) error
-	UnsubscribeAssets(assetIDs []string) error
+	UpdateSubscription(tokenIDs []string) error
+	SubscribeTokens(tokenIDs []string) error
+	UnsubscribeTokens(tokenIDs []string) error
+	// Deprecated: use SubscribeTokens.
+	SubscribeAssets(tokenIDs []string) error
+	// Deprecated: use UnsubscribeTokens.
+	UnsubscribeAssets(tokenIDs []string) error
 }
 
 // MarketSubscriptionLevel controls the depth/detail level requested from the
@@ -75,7 +79,7 @@ type webSocketClient struct {
 	subscribedIDs   map[string]struct{}
 	subscribedMutex sync.RWMutex
 
-	onBookUpdate  func(assetID string, snapshot *types.BookSnapshot)
+	onBookUpdate  func(tokenID string, snapshot *types.BookSnapshot)
 	onMarketEvent func(event MarketEvent)
 	callbackMutex sync.RWMutex
 
@@ -126,7 +130,7 @@ func newMarketClient(
 	}, nil
 }
 
-func (w *webSocketClient) SetOnBookUpdate(callback func(assetID string, snapshot *types.BookSnapshot)) {
+func (w *webSocketClient) SetOnBookUpdate(callback func(tokenID string, snapshot *types.BookSnapshot)) {
 	w.callbackMutex.Lock()
 	w.onBookUpdate = callback
 	w.callbackMutex.Unlock()

@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-// UpdateSubscription replaces the desired asset set. When connected it uses
+// UpdateSubscription replaces the desired token set. When connected it uses
 // official subscribe/unsubscribe delta messages; while reconnecting it queues
 // the new set for the next initial subscription.
-func (w *webSocketClient) UpdateSubscription(assetIDs []string) error {
-	desired := assetIDSet(assetIDs)
+func (w *webSocketClient) UpdateSubscription(tokenIDs []string) error {
+	desired := tokenIDSet(tokenIDs)
 
 	w.writeMutex.Lock()
 	defer w.writeMutex.Unlock()
@@ -22,8 +22,8 @@ func (w *webSocketClient) UpdateSubscription(assetIDs []string) error {
 	}
 
 	current := w.subscribedIDSet()
-	removed := assetIDSetDifference(current, desired)
-	added := assetIDSetDifference(desired, current)
+	removed := tokenIDSetDifference(current, desired)
+	added := tokenIDSetDifference(desired, current)
 	if len(removed) > 0 {
 		if err := w.writeSubscriptionUpdate(conn, "unsubscribe", removed); err != nil {
 			_ = conn.Close()
@@ -40,10 +40,10 @@ func (w *webSocketClient) UpdateSubscription(assetIDs []string) error {
 	return nil
 }
 
-func (w *webSocketClient) SubscribeAssets(assetIDs []string) error {
-	requested := assetIDSet(assetIDs)
+func (w *webSocketClient) SubscribeTokens(tokenIDs []string) error {
+	requested := tokenIDSet(tokenIDs)
 	if len(requested) == 0 {
-		return fmt.Errorf("at least one asset ID is required")
+		return fmt.Errorf("at least one token ID is required")
 	}
 
 	w.writeMutex.Lock()
@@ -54,7 +54,7 @@ func (w *webSocketClient) SubscribeAssets(assetIDs []string) error {
 	}
 
 	current := w.subscribedIDSet()
-	added := assetIDSetDifference(requested, current)
+	added := tokenIDSetDifference(requested, current)
 	if len(added) == 0 {
 		return nil
 	}
@@ -68,10 +68,10 @@ func (w *webSocketClient) SubscribeAssets(assetIDs []string) error {
 	return nil
 }
 
-func (w *webSocketClient) UnsubscribeAssets(assetIDs []string) error {
-	requested := assetIDSet(assetIDs)
+func (w *webSocketClient) UnsubscribeTokens(tokenIDs []string) error {
+	requested := tokenIDSet(tokenIDs)
 	if len(requested) == 0 {
-		return fmt.Errorf("at least one asset ID is required")
+		return fmt.Errorf("at least one token ID is required")
 	}
 
 	w.writeMutex.Lock()
@@ -101,14 +101,26 @@ func (w *webSocketClient) UnsubscribeAssets(assetIDs []string) error {
 	return nil
 }
 
+// SubscribeAssets is kept for source compatibility.
+// Deprecated: use SubscribeTokens.
+func (w *webSocketClient) SubscribeAssets(tokenIDs []string) error {
+	return w.SubscribeTokens(tokenIDs)
+}
+
+// UnsubscribeAssets is kept for source compatibility.
+// Deprecated: use UnsubscribeTokens.
+func (w *webSocketClient) UnsubscribeAssets(tokenIDs []string) error {
+	return w.UnsubscribeTokens(tokenIDs)
+}
+
 func (w *webSocketClient) writeSubscriptionUpdate(
 	conn interface{ WriteJSON(v interface{}) error },
 	operation string,
-	assetIDs map[string]struct{},
+	tokenIDs map[string]struct{},
 ) error {
 	request := marketSubscriptionUpdate{
 		Operation:            operation,
-		AssetIDs:             assetIDSetStrings(assetIDs),
+		AssetIDs:             tokenIDSetStrings(tokenIDs),
 		Level:                w.options.Level,
 		CustomFeatureEnabled: w.options.CustomFeatureEnabled,
 	}
@@ -118,13 +130,13 @@ func (w *webSocketClient) writeSubscriptionUpdate(
 	return nil
 }
 
-func (w *webSocketClient) setSubscribedIDs(assetIDs []string) {
-	w.replaceSubscribedIDs(assetIDSet(assetIDs))
+func (w *webSocketClient) setSubscribedIDs(tokenIDs []string) {
+	w.replaceSubscribedIDs(tokenIDSet(tokenIDs))
 }
 
-func (w *webSocketClient) replaceSubscribedIDs(assetIDs map[string]struct{}) {
+func (w *webSocketClient) replaceSubscribedIDs(tokenIDs map[string]struct{}) {
 	w.subscribedMutex.Lock()
-	w.subscribedIDs = assetIDs
+	w.subscribedIDs = tokenIDs
 	w.subscribedMutex.Unlock()
 }
 
@@ -139,12 +151,12 @@ func (w *webSocketClient) subscribedIDSet() map[string]struct{} {
 }
 
 func (w *webSocketClient) subscribedIDStrings() []string {
-	return assetIDSetStrings(w.subscribedIDSet())
+	return tokenIDSetStrings(w.subscribedIDSet())
 }
 
-func assetIDSet(assetIDs []string) map[string]struct{} {
-	result := make(map[string]struct{}, len(assetIDs))
-	for _, id := range assetIDs {
+func tokenIDSet(tokenIDs []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(tokenIDs))
+	for _, id := range tokenIDs {
 		id = strings.TrimSpace(id)
 		if id != "" {
 			result[id] = struct{}{}
@@ -153,7 +165,7 @@ func assetIDSet(assetIDs []string) map[string]struct{} {
 	return result
 }
 
-func assetIDSetDifference(left, right map[string]struct{}) map[string]struct{} {
+func tokenIDSetDifference(left, right map[string]struct{}) map[string]struct{} {
 	result := make(map[string]struct{})
 	for id := range left {
 		if _, exists := right[id]; !exists {
@@ -163,9 +175,9 @@ func assetIDSetDifference(left, right map[string]struct{}) map[string]struct{} {
 	return result
 }
 
-func assetIDSetStrings(assetIDs map[string]struct{}) []string {
-	result := make([]string, 0, len(assetIDs))
-	for id := range assetIDs {
+func tokenIDSetStrings(tokenIDs map[string]struct{}) []string {
+	result := make([]string, 0, len(tokenIDs))
+	for id := range tokenIDs {
 		result = append(result, id)
 	}
 	sort.Strings(result)

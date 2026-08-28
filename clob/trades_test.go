@@ -95,7 +95,7 @@ func TestGetTradesUsesOfficialFiltersAndPagination(t *testing.T) {
 	client := newAuthenticatedOrderClientForTest(t, server.URL)
 	trades, err := client.GetTrades(&types.ClobTradeParams{
 		Market:  conditionID,
-		AssetID: tokenID,
+		TokenID: tokenID,
 		After:   100,
 		Before:  200,
 	})
@@ -105,7 +105,7 @@ func TestGetTradesUsesOfficialFiltersAndPagination(t *testing.T) {
 	if len(trades) != 2 || trades[0].ID != "trade-1" || trades[1].ID != "trade-2" {
 		t.Fatalf("trades = %+v", trades)
 	}
-	if trades[0].Market.String() != testCondition || trades[0].AssetID.String() != testTokenID || trades[0].Price != "0.500000" {
+	if trades[0].Market.String() != testCondition || trades[0].TokenID.String() != testTokenID || trades[0].Price != "0.500000" {
 		t.Fatalf("trade precision/IDs were not preserved: %+v", trades[0])
 	}
 }

@@ -46,7 +46,7 @@ func TestGetTradesLiveReadOnly(t *testing.T) {
 	queryDuration := time.Since(queryStart)
 	serverLifecycleDelays := make([]time.Duration, 0, len(trades))
 	for i, trade := range trades {
-		if trade.ID == "" || trade.Market == (types.ConditionID{}) || trade.AssetID == (types.TokenID{}) {
+		if trade.ID == "" || trade.Market == (types.ConditionID{}) || trade.TokenID == (types.TokenID{}) {
 			t.Fatalf("trade[%d] missing required IDs: %+v", i, trade)
 		}
 		matchedAt, matchErr := strconv.ParseInt(trade.MatchTime, 10, 64)

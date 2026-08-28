@@ -30,7 +30,7 @@ type MarketBookLevel struct {
 
 type MarketBookEvent struct {
 	EventType MarketEventType   `json:"event_type"`
-	AssetID   types.TokenID     `json:"asset_id"`
+	TokenID   types.TokenID     `json:"asset_id"`
 	Market    types.ConditionID `json:"market"`
 	Bids      []MarketBookLevel `json:"bids"`
 	Asks      []MarketBookLevel `json:"asks"`
@@ -41,7 +41,7 @@ type MarketBookEvent struct {
 func (*MarketBookEvent) Type() MarketEventType { return MarketEventBook }
 
 type MarketPriceChange struct {
-	AssetID types.TokenID   `json:"asset_id"`
+	TokenID types.TokenID   `json:"asset_id"`
 	Price   string          `json:"price"`
 	Size    string          `json:"size"`
 	Side    types.OrderSide `json:"side"`
@@ -61,7 +61,7 @@ func (*MarketPriceChangeEvent) Type() MarketEventType { return MarketEventPriceC
 
 type MarketLastTradePriceEvent struct {
 	EventType       MarketEventType   `json:"event_type"`
-	AssetID         types.TokenID     `json:"asset_id"`
+	TokenID         types.TokenID     `json:"asset_id"`
 	Market          types.ConditionID `json:"market"`
 	Price           string            `json:"price"`
 	Size            string            `json:"size"`
@@ -77,7 +77,7 @@ func (*MarketLastTradePriceEvent) Type() MarketEventType { return MarketEventLas
 // allowing the business layer to update its order configuration cache.
 type MarketTickSizeChangeEvent struct {
 	EventType   MarketEventType   `json:"event_type"`
-	AssetID     types.TokenID     `json:"asset_id"`
+	TokenID     types.TokenID     `json:"asset_id"`
 	Market      types.ConditionID `json:"market"`
 	OldTickSize types.TickSize    `json:"old_tick_size"`
 	NewTickSize types.TickSize    `json:"new_tick_size"`
@@ -89,7 +89,7 @@ func (*MarketTickSizeChangeEvent) Type() MarketEventType { return MarketEventTic
 type MarketBestBidAskEvent struct {
 	EventType MarketEventType   `json:"event_type"`
 	Market    types.ConditionID `json:"market"`
-	AssetID   types.TokenID     `json:"asset_id"`
+	TokenID   types.TokenID     `json:"asset_id"`
 	BestBid   string            `json:"best_bid"`
 	BestAsk   string            `json:"best_ask"`
 	Spread    string            `json:"spread"`
@@ -113,7 +113,7 @@ type MarketNewMarketEvent struct {
 	Market                types.ConditionID  `json:"market"`
 	Slug                  string             `json:"slug"`
 	Description           string             `json:"description"`
-	AssetIDs              []types.TokenID    `json:"assets_ids"`
+	TokenIDs              []types.TokenID    `json:"assets_ids"`
 	Outcomes              []string           `json:"outcomes"`
 	EventMessage          MarketEventMessage `json:"event_message"`
 	Timestamp             string             `json:"timestamp"`
@@ -134,8 +134,8 @@ type MarketResolvedEvent struct {
 	EventType      MarketEventType   `json:"event_type"`
 	ID             string            `json:"id"`
 	Market         types.ConditionID `json:"market"`
-	AssetIDs       []types.TokenID   `json:"assets_ids"`
-	WinningAssetID types.TokenID     `json:"winning_asset_id"`
+	TokenIDs       []types.TokenID   `json:"assets_ids"`
+	WinningTokenID types.TokenID     `json:"winning_asset_id"`
 	WinningOutcome string            `json:"winning_outcome"`
 	Timestamp      string            `json:"timestamp"`
 	Tags           []string          `json:"tags"`

@@ -219,12 +219,12 @@ Market Channel 使用 `websocket.Client`，不需要鉴权：
 | -------------------- | ------------------ | ---------- | ------- |
 | `SetOnBookUpdate`    | 设置订单簿更新回调 | `callback` | -       |
 | `SetOnMarketEvent`   | 设置完整 typed event 回调 | `callback` | -       |
-| `Start`              | 启动连接           | `assetIDs` | `error` |
+| `Start`              | 启动连接           | `tokenIDs` | `error` |
 | `Stop`               | 停止连接           | -          | -       |
 | `IsRunning`          | 检查是否运行中     | -          | `bool`  |
-| `UpdateSubscription` | 更新订阅           | `assetIDs` | `error` |
-| `SubscribeAssets`    | 订阅资产           | `assetIDs` | `error` |
-| `UnsubscribeAssets`  | 取消订阅资产       | `assetIDs` | `error` |
+| `UpdateSubscription` | 更新订阅           | `tokenIDs` | `error` |
+| `SubscribeTokens`    | 订阅 outcome token | `tokenIDs` | `error` |
+| `UnsubscribeTokens`  | 取消订阅 token     | `tokenIDs` | `error` |
 
 `NewClient` 使用官方默认值：initial dump 开启、level 2、custom feature 关闭。
 需要 `best_bid_ask` / `new_market` / `market_resolved` 时，从
@@ -352,7 +352,7 @@ if err != nil {
 
 booksByToken := make(map[types.TokenID]types.OrderBookSummary, len(books))
 for _, book := range books {
-    tokenID, err := types.ParseTokenID(book.AssetID)
+    tokenID, err := types.ParseTokenID(book.TokenID)
     if err != nil {
         log.Printf("invalid token ID from server: %v", err)
         continue
@@ -365,6 +365,8 @@ for _, book := range books {
 `OrderBookSummaryResponse` 名称保留为类型别名。盘口的 price/size、最小下单量和
 最后成交价使用 `DecimalString` 保留原始十进制精度；需要浮点运算时显式调用
 `value.Float64()` 并处理错误。`LastTradePrice == nil` 表示该 token 尚无成交价。
+SDK 统一把官方 wire 字段 `asset_id/assets_ids` 暴露为 `TokenID/TokenIDs`；JSON
+编解码仍使用官方字段名，业务层不需要感知 `asset_id` 这一传输层命名。
 
 `String()` 会恢复官方规范字符串：`ConditionID` 输出小写 `0x` + 64 位 hex，`TokenID` 输出无前导零的 uint256 十进制；二者均支持文本/JSON 值和 JSON map key 编解码。现有请求与响应字段继续使用字符串，业务可只在需要构建字典时转换，不破坏旧代码。
 
@@ -381,14 +383,14 @@ import (
 wsClient := websocket.NewClient(time.Second)
 
 // 设置回调函数
-wsClient.SetOnBookUpdate(func(assetID string, snapshot *types.BookSnapshot) {
+wsClient.SetOnBookUpdate(func(tokenID string, snapshot *types.BookSnapshot) {
     fmt.Printf("订单簿更新: %s - Bid: %.4f, Ask: %.4f\n", 
-        assetID, snapshot.BestBid.Price, snapshot.BestAsk.Price)
+        tokenID, snapshot.BestBid.Price, snapshot.BestAsk.Price)
 })
 
 // 启动连接
-assetIDs := []string{"token1", "token2"}
-err := wsClient.Start(assetIDs)
+tokenIDs := []string{"token1", "token2"}
+err := wsClient.Start(tokenIDs)
 if err != nil {
     log.Fatal(err)
 }

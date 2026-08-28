@@ -340,6 +340,7 @@
 - [x] 价格和数量使用保留 JSON 原文的 `DecimalString`，需要浮点运算时显式转换。
 - [x] 将 `min_order_size/tick_size/neg_risk` 完整暴露给业务层，用于构造显式的下单参数和预校验配置。
 - [x] 针对空订单簿、null/空字符串/缺项 last trade 和高精度价格数量建立测试；生产只读请求确认未交易 token 当前会返回 `last_trade_price: ""`。
+- [x] SDK 领域模型统一使用 `TokenID/TokenIDs`；官方 `asset_id/assets_ids/winning_asset_id` 仅保留为 JSON wire tag，不向业务层扩散命名差异。
 
 ### [ ] P1-4：补齐单订单查询、撤单过滤与限制校验
 

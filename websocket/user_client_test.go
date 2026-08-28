@@ -139,7 +139,7 @@ func TestUserClientProtocolEventsAndHeartbeat(t *testing.T) {
 
 	select {
 	case event := <-orders:
-		if event.ID != "0xorder" || event.Market != conditionOne || event.AssetID.String() != testTokenOne || event.SizeMatched != "2.5" || event.Type != "UPDATE" {
+		if event.ID != "0xorder" || event.Market != conditionOne || event.TokenID.String() != testTokenOne || event.SizeMatched != "2.5" || event.Type != "UPDATE" {
 			t.Fatalf("order event = %#v", event)
 		}
 	case <-time.After(time.Second):
@@ -147,7 +147,7 @@ func TestUserClientProtocolEventsAndHeartbeat(t *testing.T) {
 	}
 	select {
 	case event := <-trades:
-		if event.ID != "trade-1" || event.Status != "MATCHED" || event.BucketIndex != 3 || len(event.MakerOrders) != 1 || event.MakerOrders[0].AssetID.String() != testTokenTwo {
+		if event.ID != "trade-1" || event.Status != "MATCHED" || event.BucketIndex != 3 || len(event.MakerOrders) != 1 || event.MakerOrders[0].TokenID.String() != testTokenTwo {
 			t.Fatalf("trade event = %#v", event)
 		}
 	case <-time.After(time.Second):

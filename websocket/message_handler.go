@@ -74,11 +74,11 @@ func (w *webSocketClient) emitMarketEvent(event MarketEvent) {
 	snapshot := marketBookSnapshot(book)
 	internal.LogDebug(
 		"[WebSocket] 收到订单簿更新: asset_id=%s, best_bid=%v, best_ask=%v",
-		book.AssetID.String(),
+		book.TokenID.String(),
 		snapshot.BestBid,
 		snapshot.BestAsk,
 	)
-	bookCallback(book.AssetID.String(), snapshot)
+	bookCallback(book.TokenID.String(), snapshot)
 }
 
 func marketBookSnapshot(event *MarketBookEvent) *types.BookSnapshot {

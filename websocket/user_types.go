@@ -10,7 +10,7 @@ type UserOrderEvent struct {
 	ID              string            `json:"id"`
 	Owner           string            `json:"owner"`
 	Market          types.ConditionID `json:"market"`
-	AssetID         types.TokenID     `json:"asset_id"`
+	TokenID         types.TokenID     `json:"asset_id"`
 	Side            types.OrderSide   `json:"side"`
 	OrderOwner      string            `json:"order_owner"`
 	OriginalSize    string            `json:"original_size"`
@@ -35,7 +35,7 @@ type UserTradeMakerOrder struct {
 	MatchedAmount string          `json:"matched_amount"`
 	Price         string          `json:"price"`
 	FeeRateBps    string          `json:"fee_rate_bps"`
-	AssetID       types.TokenID   `json:"asset_id"`
+	TokenID       types.TokenID   `json:"asset_id"`
 	Outcome       string          `json:"outcome"`
 	Side          types.OrderSide `json:"side"`
 }
@@ -49,7 +49,7 @@ type UserTradeEvent struct {
 	ID              string                `json:"id"`
 	TakerOrderID    string                `json:"taker_order_id"`
 	Market          types.ConditionID     `json:"market"`
-	AssetID         types.TokenID         `json:"asset_id"`
+	TokenID         types.TokenID         `json:"asset_id"`
 	Side            types.OrderSide       `json:"side"`
 	Size            string                `json:"size"`
 	Price           string                `json:"price"`

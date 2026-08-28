@@ -165,7 +165,7 @@ type RequesterAcceptance struct {
 
 type WalletAssetDelta struct {
 	Asset   string `json:"asset"`
-	AssetID string `json:"asset_id"`
+	TokenID string `json:"asset_id"`
 	Amount  string `json:"amount"`
 }
 

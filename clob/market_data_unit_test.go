@@ -306,7 +306,7 @@ func TestGetOrderBookDecodesCompleteSnapshotAndNullLastTrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrderBook: %v", err)
 	}
-	if book.AssetID != "42" || book.Market == "" || book.Timestamp != "1234567890" || book.Hash != "snapshot-hash" {
+	if book.TokenID != "42" || book.Market == "" || book.Timestamp != "1234567890" || book.Hash != "snapshot-hash" {
 		t.Fatalf("incomplete snapshot: %+v", book)
 	}
 	if book.MinOrderSize.String() != "5.000000" || book.TickSize != types.TickSize0_001 || !book.NegRisk {
@@ -356,7 +356,7 @@ func TestGetMultipleOrderBooksUsesSamePreciseModel(t *testing.T) {
 		t.Fatalf("last trade price = %v", book.LastTradePrice)
 	}
 	var legacyName types.OrderBookSummaryResponse = book
-	if legacyName.AssetID != book.AssetID {
+	if legacyName.TokenID != book.TokenID {
 		t.Fatal("OrderBookSummaryResponse compatibility alias changed the value")
 	}
 }

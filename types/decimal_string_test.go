@@ -65,3 +65,22 @@ func TestOrderBookLastTradePriceNullableSemantics(t *testing.T) {
 		t.Fatalf("zero last trade = %v", book.LastTradePrice)
 	}
 }
+
+func TestOrderBookUsesTokenIDForAssetIDWireField(t *testing.T) {
+	var book OrderBookSummary
+	if err := json.Unmarshal([]byte(`{
+		"asset_id":"42","bids":[],"asks":[],"min_order_size":"5","tick_size":"0.01"
+	}`), &book); err != nil {
+		t.Fatalf("Unmarshal order book: %v", err)
+	}
+	if book.TokenID != "42" {
+		t.Fatalf("TokenID = %q, want 42", book.TokenID)
+	}
+	encoded, err := json.Marshal(book)
+	if err != nil {
+		t.Fatalf("Marshal order book: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"asset_id":"42"`) || strings.Contains(string(encoded), `"token_id"`) {
+		t.Fatalf("wire JSON did not preserve asset_id mapping: %s", encoded)
+	}
+}

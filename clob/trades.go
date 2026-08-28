@@ -80,8 +80,8 @@ func tradeQueryParams(params *types.ClobTradeParams) map[string]string {
 	if params.Market != (types.ConditionID{}) {
 		query["market"] = params.Market.String()
 	}
-	if params.AssetID != (types.TokenID{}) {
-		query["asset_id"] = params.AssetID.String()
+	if params.TokenID != (types.TokenID{}) {
+		query["asset_id"] = params.TokenID.String()
 	}
 	if params.Before > 0 {
 		query["before"] = strconv.FormatInt(params.Before, 10)

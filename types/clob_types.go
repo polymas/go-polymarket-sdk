@@ -485,7 +485,7 @@ type ClobTradeParams struct {
 	ID           string
 	MakerAddress EthAddress
 	Market       ConditionID
-	AssetID      TokenID
+	TokenID      TokenID
 	Before       int64
 	After        int64
 }
@@ -521,7 +521,7 @@ type ClobMakerOrder struct {
 	MatchedAmount string     `json:"matched_amount"`
 	Price         string     `json:"price"`
 	FeeRateBPS    string     `json:"fee_rate_bps"`
-	AssetID       TokenID    `json:"asset_id"`
+	TokenID       TokenID    `json:"asset_id"`
 	Outcome       string     `json:"outcome"`
 	Side          OrderSide  `json:"side"`
 }
@@ -532,7 +532,7 @@ type ClobTrade struct {
 	ID              string           `json:"id"`
 	TakerOrderID    Keccak256        `json:"taker_order_id"`
 	Market          ConditionID      `json:"market"`
-	AssetID         TokenID          `json:"asset_id"`
+	TokenID         TokenID          `json:"asset_id"`
 	Side            OrderSide        `json:"side"`
 	Size            string           `json:"size"`
 	FeeRateBPS      string           `json:"fee_rate_bps"`
@@ -578,7 +578,7 @@ type OrderCancelResponse struct {
 // OrderBookSummary 是 GET /book 与 POST /books 共用的完整订单簿快照。
 type OrderBookSummary struct {
 	Market         string         `json:"market"`
-	AssetID        string         `json:"asset_id"`
+	TokenID        string         `json:"asset_id"`
 	Timestamp      string         `json:"timestamp"`
 	Hash           string         `json:"hash"`
 	Bids           []OrderLevel   `json:"bids"`
