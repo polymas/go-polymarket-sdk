@@ -3,7 +3,6 @@ package gamma
 import (
 	"context"
 	"strconv"
-	"strings"
 
 	"github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/types"
@@ -19,6 +18,31 @@ type SearchOptions struct {
 	KeepClosedMarkets *bool
 	Sort              *string
 	Ascending         *bool
+	SearchTags        *bool
+	SearchProfiles    *bool
+	Recurrence        string
+	ExcludeTagIDs     []int
+	Optimized         *bool
+}
+
+func WithSearchTagsEnabled(enabled bool) SearchOption {
+	return func(opts *SearchOptions) { opts.SearchTags = &enabled }
+}
+
+func WithSearchProfiles(enabled bool) SearchOption {
+	return func(opts *SearchOptions) { opts.SearchProfiles = &enabled }
+}
+
+func WithSearchRecurrence(recurrence string) SearchOption {
+	return func(opts *SearchOptions) { opts.Recurrence = recurrence }
+}
+
+func WithSearchExcludeTagIDs(ids ...int) SearchOption {
+	return func(opts *SearchOptions) { opts.ExcludeTagIDs = append([]int(nil), ids...) }
+}
+
+func WithSearchOptimized(optimized bool) SearchOption {
+	return func(opts *SearchOptions) { opts.Optimized = &optimized }
 }
 
 // SearchOption 函数选项类型
@@ -105,11 +129,12 @@ func (c *polymarketGammaClient) SearchContext(ctx context.Context, query string,
 	if opts.Page != nil {
 		params["page"] = strconv.Itoa(*opts.Page)
 	}
-	if len(opts.Tags) > 0 {
-		params["tags"] = strings.Join(opts.Tags, ",")
-	}
 	if opts.KeepClosedMarkets != nil {
-		params["keep_closed_markets"] = strconv.FormatBool(*opts.KeepClosedMarkets)
+		if *opts.KeepClosedMarkets {
+			params["keep_closed_markets"] = "1"
+		} else {
+			params["keep_closed_markets"] = "0"
+		}
 	}
 	if opts.Sort != nil {
 		params["sort"] = *opts.Sort
@@ -117,6 +142,24 @@ func (c *polymarketGammaClient) SearchContext(ctx context.Context, query string,
 	if opts.Ascending != nil {
 		params["ascending"] = strconv.FormatBool(*opts.Ascending)
 	}
+	if opts.SearchTags != nil {
+		params["search_tags"] = strconv.FormatBool(*opts.SearchTags)
+	}
+	if opts.SearchProfiles != nil {
+		params["search_profiles"] = strconv.FormatBool(*opts.SearchProfiles)
+	}
+	if opts.Recurrence != "" {
+		params["recurrence"] = opts.Recurrence
+	}
+	if opts.Optimized != nil {
+		params["optimized"] = strconv.FormatBool(*opts.Optimized)
+	}
+	exclude := make([]string, len(opts.ExcludeTagIDs))
+	for i, id := range opts.ExcludeTagIDs {
+		exclude[i] = strconv.Itoa(id)
+	}
 
-	return http.GetContext[types.SearchResult](ctx, c.baseURL, "/public-search", params, http.WithService("gamma"))
+	return http.GetContext[types.SearchResult](ctx, c.baseURL, "/public-search", params, http.WithMultiParams(map[string][]string{
+		"events_tag": opts.Tags, "exclude_tag_id": exclude,
+	}), http.WithService("gamma"))
 }

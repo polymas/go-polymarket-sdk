@@ -255,6 +255,9 @@ type Event struct {
 	ScheduledDeploymentTimestamp *time.Time         `json:"scheduledDeploymentTimestamp,omitempty"`
 	GameStatus                   string             `json:"gameStatus,omitempty"`
 	TemplateVariables            string             `json:"templateVariables,omitempty"`
+	EventCreators                []EventCreator     `json:"eventCreators,omitempty"`
+	Chats                        []json.RawMessage  `json:"chats,omitempty"`
+	Templates                    []json.RawMessage  `json:"templates,omitempty"`
 }
 
 // ImageOptimization 表示图片优化信息（List markets API 中的 imageOptimized/iconOptimized）
@@ -701,73 +704,111 @@ type TagRelation struct {
 	Count        int `json:"count"`
 }
 
+// RelatedTag is the relationship record returned by Gamma's related-tags
+// endpoints. It intentionally differs from the legacy aggregate TagRelation.
+type RelatedTag struct {
+	ID           string `json:"id"`
+	TagID        int    `json:"tagID"`
+	RelatedTagID int    `json:"relatedTagID"`
+	Rank         int    `json:"rank"`
+}
+
 // SearchResult 表示搜索结果
 type SearchResult struct {
-	Events   []Event       `json:"events"`
-	Markets  []GammaMarket `json:"markets"`
-	Tags     []Tag         `json:"tags"`
-	Profiles []interface{} `json:"profiles"` // Profile type not defined in Python version
+	Events     []Event       `json:"events"`
+	Markets    []GammaMarket `json:"markets"`
+	Tags       []Tag         `json:"tags"`
+	Profiles   []interface{} `json:"profiles"` // Profile type not defined in Python version
+	Pagination Pagination    `json:"pagination"`
 }
 
 // Series 表示系列
 type Series struct {
-	SeriesID    int       `json:"id"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Recurrence  string    `json:"recurrence"` // hourly, daily, weekly, monthly, annual
-	Closed      bool      `json:"closed"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	SeriesID          int               `json:"id"`
+	Ticker            string            `json:"ticker,omitempty"`
+	Slug              string            `json:"slug"`
+	Title             string            `json:"title"`
+	Subtitle          string            `json:"subtitle,omitempty"`
+	SeriesType        string            `json:"seriesType,omitempty"`
+	Recurrence        string            `json:"recurrence"`
+	Description       string            `json:"description"`
+	Image             string            `json:"image,omitempty"`
+	Icon              string            `json:"icon,omitempty"`
+	Layout            string            `json:"layout,omitempty"`
+	Active            bool              `json:"active,omitempty"`
+	Closed            bool              `json:"closed"`
+	Archived          bool              `json:"archived,omitempty"`
+	New               bool              `json:"new,omitempty"`
+	Featured          bool              `json:"featured,omitempty"`
+	Restricted        bool              `json:"restricted,omitempty"`
+	IsTemplate        bool              `json:"isTemplate,omitempty"`
+	TemplateVariables bool              `json:"templateVariables,omitempty"`
+	PublishedAt       string            `json:"publishedAt,omitempty"`
+	CreatedBy         string            `json:"createdBy,omitempty"`
+	UpdatedBy         string            `json:"updatedBy,omitempty"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	UpdatedAt         time.Time         `json:"updatedAt"`
+	CommentsEnabled   bool              `json:"commentsEnabled,omitempty"`
+	Competitive       string            `json:"competitive,omitempty"`
+	Volume24hr        *float64          `json:"volume24hr,omitempty"`
+	Volume            *float64          `json:"volume,omitempty"`
+	Liquidity         *float64          `json:"liquidity,omitempty"`
+	StartDate         string            `json:"startDate,omitempty"`
+	PythTokenID       string            `json:"pythTokenID,omitempty"`
+	CGAssetName       string            `json:"cgAssetName,omitempty"`
+	Score             *int              `json:"score,omitempty"`
+	Events            []Event           `json:"events,omitempty"`
+	Collections       []Collection      `json:"collections,omitempty"`
+	Categories        []Category        `json:"categories,omitempty"`
+	Tags              []Tag             `json:"tags,omitempty"`
+	CommentCount      *int              `json:"commentCount,omitempty"`
+	Chats             []json.RawMessage `json:"chats,omitempty"`
 }
 
 // UnmarshalJSON 实现Series的自定义JSON反序列化，处理id可能是字符串或数字的情况
 func (s *Series) UnmarshalJSON(data []byte) error {
-	// 使用临时结构体来解析JSON
-	var temp struct {
-		ID          interface{} `json:"id"` // 可能是字符串或数字
-		Slug        string      `json:"slug"`
-		Title       string      `json:"title"`
-		Description string      `json:"description"`
-		Recurrence  string      `json:"recurrence"`
-		Closed      bool        `json:"closed"`
-		CreatedAt   time.Time   `json:"created_at"`
-		UpdatedAt   time.Time   `json:"updated_at"`
-	}
-
-	if err := json.Unmarshal(data, &temp); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-
-	// 复制字段
-	s.Slug = temp.Slug
-	s.Title = temp.Title
-	s.Description = temp.Description
-	s.Recurrence = temp.Recurrence
-	s.Closed = temp.Closed
-	s.CreatedAt = temp.CreatedAt
-	s.UpdatedAt = temp.UpdatedAt
-
-	// 处理id（可能是字符串或数字）
-	switch v := temp.ID.(type) {
-	case float64:
-		s.SeriesID = int(v)
-	case int:
-		s.SeriesID = v
-	case int64:
-		s.SeriesID = int(v)
-	case string:
-		// 尝试解析为整数
-		if parsed, err := strconv.Atoi(v); err == nil {
-			s.SeriesID = parsed
-		} else {
-			return fmt.Errorf("failed to parse series id as int: %w", err)
+	var idString string
+	if err := json.Unmarshal(raw["id"], &idString); err != nil {
+		var idNumber int
+		if numberErr := json.Unmarshal(raw["id"], &idNumber); numberErr != nil {
+			return fmt.Errorf("failed to parse series id: %w", err)
 		}
-	default:
-		return fmt.Errorf("unexpected series id type: %T", v)
+		idString = strconv.Itoa(idNumber)
 	}
-
-	return nil
+	id, err := strconv.Atoi(idString)
+	if err != nil {
+		return fmt.Errorf("failed to parse series id as int: %w", err)
+	}
+	raw["id"] = json.RawMessage(strconv.Itoa(id))
+	// Older responses used snake_case for these timestamps.
+	if _, ok := raw["createdAt"]; !ok {
+		raw["createdAt"] = raw["created_at"]
+	}
+	if _, ok := raw["updatedAt"]; !ok {
+		raw["updatedAt"] = raw["updated_at"]
+	}
+	for _, key := range []string{"createdAt", "updatedAt"} {
+		var value string
+		if err := json.Unmarshal(raw[key], &value); err != nil || value == "" {
+			continue
+		}
+		for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05.000-07", "2006-01-02 15:04:05-07"} {
+			if parsed, parseErr := time.Parse(layout, value); parseErr == nil {
+				raw[key], _ = json.Marshal(parsed.Format(time.RFC3339Nano))
+				break
+			}
+		}
+	}
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	type alias Series
+	return json.Unmarshal(normalized, (*alias)(s))
 }
 
 // Team 表示体育团队
@@ -779,8 +820,33 @@ type Team struct {
 	Logo         string    `json:"logo"`
 	Record       string    `json:"record"`
 	Alias        string    `json:"alias"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+func (t *Team) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, key := range []string{"createdAt", "updatedAt"} {
+		var value string
+		if err := json.Unmarshal(raw[key], &value); err != nil || value == "" {
+			continue
+		}
+		for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05.000-07", "2006-01-02 15:04:05-07"} {
+			if parsed, parseErr := time.Parse(layout, value); parseErr == nil {
+				raw[key], _ = json.Marshal(parsed.Format(time.RFC3339Nano))
+				break
+			}
+		}
+	}
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	type alias Team
+	return json.Unmarshal(normalized, (*alias)(t))
 }
 
 // Sport 表示体育元数据
@@ -788,6 +854,67 @@ type Sport struct {
 	SportID int      `json:"id"`
 	Name    string   `json:"name"`
 	Leagues []string `json:"leagues"`
+}
+
+// SportsMetadata and SportsMarketTypesResponse match the current /sports
+// endpoints. Several fields are encoded as strings by Gamma, including tags
+// and series.
+type SportsMetadata struct {
+	Sport      string `json:"sport"`
+	Image      string `json:"image"`
+	Resolution string `json:"resolution"`
+	Ordering   string `json:"ordering"`
+	Tags       string `json:"tags"`
+	Series     string `json:"series"`
+}
+
+type SportsMarketTypesResponse struct {
+	MarketTypes []string `json:"marketTypes"`
+}
+
+type EventCreator struct {
+	ID            string `json:"id"`
+	CreatorName   string `json:"creatorName"`
+	CreatorHandle string `json:"creatorHandle"`
+	CreatorURL    string `json:"creatorUrl"`
+	CreatorImage  string `json:"creatorImage"`
+	CreatedAt     string `json:"createdAt,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+}
+
+type EventTweetCount struct {
+	TweetCount int `json:"tweetCount"`
+}
+
+type Count struct {
+	Count int `json:"count"`
+}
+
+type MarketDescription struct {
+	Description string `json:"description"`
+}
+
+type Pagination struct {
+	Limit      int    `json:"limit"`
+	Offset     int    `json:"offset"`
+	Total      int    `json:"total,omitempty"`
+	HasMore    bool   `json:"has_more,omitempty"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+type EventsPagination struct {
+	Data       []Event    `json:"data"`
+	Pagination Pagination `json:"pagination"`
+}
+
+type MarketsPage struct {
+	Markets    []GammaMarket `json:"markets"`
+	NextCursor string        `json:"next_cursor"`
+}
+
+type EventsPage struct {
+	Events     []Event `json:"events"`
+	NextCursor string  `json:"next_cursor"`
 }
 
 type SeriesSummary struct {
@@ -872,6 +999,34 @@ type Profile struct {
 	Users                 []PublicProfileUser `json:"users"`
 	XUsername             *string             `json:"xUsername"`
 	VerifiedBadge         *bool               `json:"verifiedBadge"`
+}
+
+// GammaProfile is returned by /profiles/user_address/{address}. Profile above
+// remains the public-profile response for backward compatibility.
+type GammaProfile struct {
+	ID                    string             `json:"id"`
+	Name                  string             `json:"name"`
+	User                  int                `json:"user"`
+	Referral              string             `json:"referral"`
+	CreatedBy             *int               `json:"createdBy,omitempty"`
+	UpdatedBy             *int               `json:"updatedBy,omitempty"`
+	CreatedAt             string             `json:"createdAt,omitempty"`
+	UpdatedAt             string             `json:"updatedAt,omitempty"`
+	UTMSource             string             `json:"utmSource,omitempty"`
+	UTMMedium             string             `json:"utmMedium,omitempty"`
+	UTMCampaign           string             `json:"utmCampaign,omitempty"`
+	UTMContent            string             `json:"utmContent,omitempty"`
+	UTMTerm               string             `json:"utmTerm,omitempty"`
+	WalletActivated       bool               `json:"walletActivated"`
+	Pseudonym             string             `json:"pseudonym"`
+	DisplayUsernamePublic bool               `json:"displayUsernamePublic"`
+	ProfileImage          string             `json:"profileImage"`
+	Bio                   string             `json:"bio"`
+	ProxyWallet           string             `json:"proxyWallet"`
+	ProfileImageOptimized *ImageOptimization `json:"profileImageOptimized,omitempty"`
+	IsCloseOnly           bool               `json:"isCloseOnly"`
+	IsCertReq             bool               `json:"isCertReq"`
+	CertReqDate           string             `json:"certReqDate,omitempty"`
 }
 
 // SimplifiedMarket 表示简化市场（只包含基本字段）

@@ -40,6 +40,7 @@ func (c *polymarketGammaClient) GetMarketBySlugContext(ctx context.Context, slug
 type GetMarketsOptions struct {
 	Offset               *int
 	AfterCursor          *string
+	ForceKeyset          bool
 	Order                *string
 	Ascending            bool
 	Archived             *bool
@@ -67,6 +68,10 @@ type GetMarketsOptions struct {
 	SportsMarketTypes    []string
 	RewardsMinSize       *float64
 	QuestionIDs          []string
+	Decimalized          *bool
+	RFQEnabled           *bool
+	TagMatch             string
+	Locale               string
 }
 
 // GetMarketsOption 函数选项类型
@@ -84,6 +89,28 @@ func WithAfterCursor(afterCursor string) GetMarketsOption {
 	return func(opts *GetMarketsOptions) {
 		opts.AfterCursor = &afterCursor
 	}
+}
+
+// WithMarketsKeyset forces GET /markets/keyset even when offset is supplied.
+// Prefer GetMarketsPage when the next cursor is needed by the caller.
+func WithMarketsKeyset() GetMarketsOption {
+	return func(opts *GetMarketsOptions) { opts.ForceKeyset = true }
+}
+
+func WithDecimalized(decimalized bool) GetMarketsOption {
+	return func(opts *GetMarketsOptions) { opts.Decimalized = &decimalized }
+}
+
+func WithRFQEnabled(enabled bool) GetMarketsOption {
+	return func(opts *GetMarketsOptions) { opts.RFQEnabled = &enabled }
+}
+
+func WithTagMatch(match string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) { opts.TagMatch = match }
+}
+
+func WithLocale(locale string) GetMarketsOption {
+	return func(opts *GetMarketsOptions) { opts.Locale = locale }
 }
 
 // WithOrder 设置排序字段和方向
@@ -470,6 +497,18 @@ func (c *polymarketGammaClient) getMarketsPageContext(ctx context.Context, limit
 	if opts.RewardsMinSize != nil {
 		params["rewards_min_size"] = strconv.FormatFloat(*opts.RewardsMinSize, 'f', -1, 64)
 	}
+	if opts.Decimalized != nil {
+		params["decimalized"] = strconv.FormatBool(*opts.Decimalized)
+	}
+	if opts.RFQEnabled != nil {
+		params["rfq_enabled"] = strconv.FormatBool(*opts.RFQEnabled)
+	}
+	if opts.TagMatch != "" {
+		params["tag_match"] = opts.TagMatch
+	}
+	if opts.Locale != "" {
+		params["locale"] = opts.Locale
+	}
 
 	// 多个值参数（API 文档中为 array 的 query）
 	multiParams := make(map[string][]string)
@@ -500,7 +539,7 @@ func (c *polymarketGammaClient) getMarketsPageContext(ctx context.Context, limit
 	}
 
 	path := internal.GetMarketsKeyset
-	if opts.Offset != nil {
+	if opts.Offset != nil && opts.AfterCursor == nil && !opts.ForceKeyset {
 		path = internal.GetMarkets
 	}
 

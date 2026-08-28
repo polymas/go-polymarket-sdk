@@ -12,8 +12,18 @@ import (
 
 // GetTagsOptions 包含 GetTags 的所有可选参数
 type GetTagsOptions struct {
-	Order     *string
-	Ascending bool
+	Order           *string
+	Ascending       bool
+	IncludeTemplate *bool
+	IsCarousel      *bool
+}
+
+func WithTagsIncludeTemplate(include bool) GetTagsOption {
+	return func(opts *GetTagsOptions) { opts.IncludeTemplate = &include }
+}
+
+func WithTagsCarousel(carousel bool) GetTagsOption {
+	return func(opts *GetTagsOptions) { opts.IsCarousel = &carousel }
 }
 
 // GetTagsOption 函数选项类型
@@ -47,6 +57,12 @@ func (c *polymarketGammaClient) GetTagsContext(ctx context.Context, limit int, o
 		params["order"] = *opts.Order
 		params["ascending"] = strconv.FormatBool(opts.Ascending)
 	}
+	if opts.IncludeTemplate != nil {
+		params["include_template"] = strconv.FormatBool(*opts.IncludeTemplate)
+	}
+	if opts.IsCarousel != nil {
+		params["is_carousel"] = strconv.FormatBool(*opts.IsCarousel)
+	}
 
 	result, err := http.GetContext[[]types.Tag](ctx, c.baseURL, internal.GetTags, params, http.WithService("gamma"))
 	if err != nil {
@@ -69,6 +85,16 @@ func (c *polymarketGammaClient) GetTagContext(ctx context.Context, tagID int) (*
 	return http.GetContext[types.Tag](ctx, c.baseURL, fmt.Sprintf("%s%d", internal.GetTag, tagID), nil, http.WithService("gamma"))
 }
 
+func (c *polymarketGammaClient) GetTagWithTemplate(tagID int, includeTemplate bool) (*types.Tag, error) {
+	return c.GetTagWithTemplateContext(context.Background(), tagID, includeTemplate)
+}
+
+func (c *polymarketGammaClient) GetTagWithTemplateContext(ctx context.Context, tagID int, includeTemplate bool) (*types.Tag, error) {
+	return http.GetContext[types.Tag](ctx, c.baseURL, fmt.Sprintf("%s%d", internal.GetTag, tagID), map[string]string{
+		"include_template": strconv.FormatBool(includeTemplate),
+	}, http.WithService("gamma"))
+}
+
 // GetTagBySlug 通过 slug 获取标签
 func (c *polymarketGammaClient) GetTagBySlug(slug string) (*types.Tag, error) {
 	return c.GetTagBySlugContext(context.Background(), slug)
@@ -76,4 +102,14 @@ func (c *polymarketGammaClient) GetTagBySlug(slug string) (*types.Tag, error) {
 
 func (c *polymarketGammaClient) GetTagBySlugContext(ctx context.Context, slug string) (*types.Tag, error) {
 	return http.GetContext[types.Tag](ctx, c.baseURL, fmt.Sprintf("%s%s", internal.GetTagBySlug, slug), nil, http.WithService("gamma"))
+}
+
+func (c *polymarketGammaClient) GetTagBySlugWithTemplate(slug string, includeTemplate bool) (*types.Tag, error) {
+	return c.GetTagBySlugWithTemplateContext(context.Background(), slug, includeTemplate)
+}
+
+func (c *polymarketGammaClient) GetTagBySlugWithTemplateContext(ctx context.Context, slug string, includeTemplate bool) (*types.Tag, error) {
+	return http.GetContext[types.Tag](ctx, c.baseURL, fmt.Sprintf("%s%s", internal.GetTagBySlug, slug), map[string]string{
+		"include_template": strconv.FormatBool(includeTemplate),
+	}, http.WithService("gamma"))
 }

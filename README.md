@@ -172,22 +172,37 @@ V1 回退选项。
 | `GetMarketBySlug`              | 通过slug获取市场（默认包含 tag）   | `slug`                                    | `*GammaMarket`, `error`        |
 | `GetMarketsByConditionIDs`     | 通过条件ID批量获取市场           | `conditionIDs`                              | `[]GammaMarket`, `error`       |
 | `GetMarkets`                   | 获取市场列表（支持分页和过滤）   | `limit`, `options...`                       | `[]GammaMarket`, `error`       |
+| `GetMarketsPage`               | keyset 市场分页并返回 cursor     | `limit`, `options...`                       | `*MarketsPage`, `error`        |
+| `GetMarketsInformation`        | 批量获取完整市场信息             | `request`                                   | `[]GammaMarket`, `error`       |
+| `GetAbridgedMarkets`           | 批量获取 abridged 市场           | `request`                                   | `[]GammaMarket`, `error`       |
+| `GetMarketDescription/Tags`    | 获取市场描述或标签               | `marketID`                                  | 描述或 `[]Tag`                 |
 | `GetCertaintyMarkets`          | 获取 Certainty 市场（尾盘市场）  | -                                           | `[]GammaMarket`, `error`       |
 | `GetDisputeMarkets`            | 获取争议市场                     | -                                           | `[]GammaMarket`, `error`       |
 | `GetAllMarkets`                | 获取所有历史市场数据（自动分页） | -                                           | `[]GammaMarket`, `error`       |
 | `GetEvent`                     | 获取事件                         | `eventID`, `includeChat`, `includeTemplate` | `*Event`, `error`              |
 | `GetEventBySlug`               | 通过slug获取事件                 | `slug`, `includeChat`, `includeTemplate`    | `*Event`, `error`              |
 | `GetEvents`                    | 获取事件列表                     | `limit`, `offset`, `options...`             | `[]Event`, `error`             |
+| `GetEventsPage`                | keyset 事件分页并返回 cursor     | `limit`, `EventsKeysetOptions`              | `*EventsPage`, `error`         |
+| `GetEventsPagination`          | offset 事件分页及分页元数据       | `limit`, `offset`, `options...`             | `*EventsPagination`, `error`   |
+| `GetSportsEventResults`        | 获取体育事件结果                 | `limit`, `offset`, `order`, `ascending`     | `[]Event`, `error`             |
+| `GetEventTweetCount/CommentsCount/Tags` | 获取事件附属数据       | `eventID`                                   | 对应类型                       |
+| `GetEventCreators/GetEventCreator` | 获取事件创建者                | 分页参数或 `creatorID`                       | 创建者类型                     |
 | `Search`                       | 搜索                             | `query`, `options...`                       | `*SearchResult`, `error`       |
 | `GetTags`                      | 获取标签列表                     | `limit`, `offset`, `options...`             | `[]Tag`, `error`               |
 | `GetTag`                       | 获取标签                         | `tagID`                                     | `*Tag`, `error`                |
 | `GetTagBySlug`                 | 通过slug获取标签                 | `slug`                                      | `*Tag`, `error`                |
 | `GetSeries`                    | 获取系列列表                     | `limit`, `offset`, `options...`             | `[]Series`, `error`            |
+| `GetSeriesByID`                | 获取完整系列                     | `id`, `includeChat`                         | `*Series`, `error`             |
+| `GetSeriesCommentsCount`       | 获取系列评论数                   | `id`                                        | `*Count`, `error`              |
 | `GetSeriesSummaryByID`         | 通过 ID 获取系列摘要             | `id`                                        | `*SeriesSummary`, `error`      |
 | `GetSeriesSummaryBySlug`       | 通过 slug 获取系列摘要           | `slug`                                      | `*SeriesSummary`, `error`      |
 | `GetComments`                  | 按父实体获取评论列表             | `parentType`, `parentID`, `limit`, `offset` | `[]Comment`, `error`           |
 | `GetComment`                   | 按 ID 获取评论（官方返回数组）   | `commentID`, `getPositions`                 | `[]Comment`, `error`           |
+| `GetCommentsByUserAddress`     | 按用户地址获取评论               | `user`, `limit`, `offset`, `options...`     | `[]Comment`, `error`           |
 | `GetProfile`                   | 获取用户资料                     | `address`                                   | `*Profile`, `error`            |
+| `GetStatus/GetTeams/GetTeam`   | 状态和球队元数据                 | 分页参数或 `teamID`                          | 对应类型                       |
+| `GetRelatedTags*`              | 四组 related-tags 查询           | tag ID/slug 与过滤器                         | 关系或标签数组                 |
+| `GetSportsMetadata/GetSportsMarketTypes` | 获取体育元数据        | -                                           | 对应类型                       |
 | `GetSamplingSimplifiedMarkets` | 获取采样简化市场                 | `limit`                                     | `[]SimplifiedMarket`, `error`  |
 | `GetSamplingMarkets`           | 获取采样市场                     | `limit`                                     | `[]GammaMarket`, `error`       |
 | `GetSimplifiedMarkets`         | 获取简化市场列表                 | `limit`, `offset`, `options...`             | `[]SimplifiedMarket`, `error`  |

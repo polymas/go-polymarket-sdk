@@ -491,19 +491,20 @@
 - [ ] 当前 rebates。
 - [ ] 分页、时间窗口、金额精度和空结果模型。
 
-### [ ] P2-4：Gamma 补全
+### [x] P2-4：Gamma 补全
 
-- [ ] status。
-- [ ] teams 列表与按 ID 查询。
-- [ ] related tags 四组关系查询。
-- [ ] events pagination、results、tweet-count、comments count、event tags、creators、creator by ID。
-- [ ] market description、market tags。
-- [ ] markets information、markets abridged。
-- [ ] events keyset；markets keyset 对外暴露 next cursor，并遵守官方 page size 上限。
-- [ ] series by ID、series comments count、series summary by ID/slug。
-- [ ] comments by user address。
-- [ ] sports metadata、sports market types。
-- [ ] Gamma 新增过滤器与字段：decimalized、rfq_enabled、tag_match、locale 等。
+- [x] status（兼容官方纯文本 `OK` 响应）。
+- [x] teams 列表与按 ID 查询。
+- [x] related tags 四组关系查询。
+- [x] events pagination、results、tweet-count、comments count、event tags、creators、creator by ID。
+- [x] market description、market tags。
+- [x] markets information、markets abridged（只读 POST 标记为幂等请求）。
+- [x] events keyset；markets keyset 对外暴露 next cursor，并分别限制官方最大 page size 500/100。
+- [x] series by ID、series comments count、series summary by ID/slug，并补齐 series 过滤器与当前响应字段。
+- [x] comments by user address。
+- [x] sports metadata、sports market types。
+- [x] Gamma 新增过滤器与字段：decimalized、rfq_enabled、tag_match、locale 等；同时补齐 search、tags、series 过滤器和按地址 profile 路径。
+- [x] 单元契约测试覆盖 query、multi-query、keyset cursor、只读 POST body 和纯文本 status；生产只读联调通过 status、teams、events keyset、markets keyset、sports market types。
 
 ### [ ] P2-5：Data API 补全
 

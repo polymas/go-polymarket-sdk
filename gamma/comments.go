@@ -90,3 +90,22 @@ func (c *polymarketGammaClient) GetCommentContext(ctx context.Context, commentID
 	}
 	return *result, nil
 }
+
+func (c *polymarketGammaClient) GetCommentsByUserAddress(user types.EthAddress, limit, offset int, options ...GetCommentsOption) ([]types.Comment, error) {
+	return c.GetCommentsByUserAddressContext(context.Background(), user, limit, offset, options...)
+}
+
+func (c *polymarketGammaClient) GetCommentsByUserAddressContext(ctx context.Context, user types.EthAddress, limit, offset int, options ...GetCommentsOption) ([]types.Comment, error) {
+	opts := &GetCommentsOptions{}
+	for _, option := range options {
+		option(opts)
+	}
+	params := map[string]string{"limit": strconv.Itoa(limit), "offset": strconv.Itoa(offset)}
+	if opts.Order != "" {
+		params["order"] = opts.Order
+	}
+	if opts.Ascending != nil {
+		params["ascending"] = strconv.FormatBool(*opts.Ascending)
+	}
+	return http.GetSliceContext[types.Comment](ctx, c.baseURL, "/comments/user_address/"+string(user), params, http.WithService("gamma"))
+}
