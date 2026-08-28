@@ -15,6 +15,7 @@
 - `web3/gasless_split_merge_test.go` - Gasless Split/Merge 测试（读写，需要认证）
 - `websocket/client_test.go` - WebSocket客户端测试（只读）
 - `websocket/sports_client_test.go` - Sports WebSocket客户端测试（只读）
+- `chainws/client_test.go` - 链上 WSS 单元测试；60 秒生产监控探针默认跳过，需人工显式开启
 - `rfq/client_test.go` - Combos RFQ REST/WS mock 契约测试
 - `rtds/client_test.go` - RTDS TWAP 协议与精度测试（只读 mock）
 
@@ -115,6 +116,9 @@ go test ./web3/ -run TestSplitAndMergeBTC4H
 
 # WebSocket测试
 go test ./websocket/
+
+# 人工运行链上 WSS 地址监控（连接 Polygon 主网并持续 60 秒）
+POLY_RUN_CHAINWS_MONITOR=1 go test ./chainws/ -run TestMonitorAddress_USDCAndTokenChanges -v -timeout 90s
 
 # RFQ mock 契约测试
 go test ./rfq/

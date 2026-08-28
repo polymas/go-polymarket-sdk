@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -148,10 +149,14 @@ func usdcValue(raw *big.Int) float64 {
 }
 
 // TestMonitorAddress_USDCAndTokenChanges 监控指定地址的链上事件，仅打印 USDC 变化与 Token 变化情况。
-// 需网络；-short 时跳过。
+// 这是人工生产监控探针，不属于默认测试；仅在显式设置
+// POLY_RUN_CHAINWS_MONITOR=1 时运行，-short 始终跳过。
 func TestMonitorAddress_USDCAndTokenChanges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping chain WSS monitor test in short mode")
+	}
+	if os.Getenv("POLY_RUN_CHAINWS_MONITOR") != "1" {
+		t.Skip("set POLY_RUN_CHAINWS_MONITOR=1 to run the 60-second manual chain WSS monitor")
 	}
 	watchAddr := types.EthAddress(monitorTestAddress)
 	c, err := NewClientWithAddresses(internal.Polygon, "", []types.EthAddress{watchAddr})
@@ -262,7 +267,7 @@ func TestMonitorAddress_USDCAndTokenChanges(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 	t.Logf("Monitoring address %s for 60s (WSS). Events will be logged above.", monitorTestAddress)
-	time.Sleep(6000 * time.Second)
+	time.Sleep(60 * time.Second)
 	c.Stop()
 	t.Logf("Stopped. Total events received: %d", eventCount.Load())
 }
