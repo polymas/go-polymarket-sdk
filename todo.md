@@ -434,14 +434,15 @@
 - [x] 批量结果返回 `map[TokenID]LastTradePrice`，不假设返回长度、顺序与输入一致。
 - [x] mock 覆盖占位值、null、非法 ID 零请求、缺项、重复输入和乱序；生产正负向请求验证通过。
 
-### [ ] P1-9：完善新钱包 onboarding
+### [x] P1-9：完善新钱包 onboarding
 
 当前 web3 已支持多种签名类型、Deposit Wallet 部署和 V2 approvals，但 CLOB 创建流程仍要求调用方自行拼装多个步骤。
 
-- [ ] 提供安全的 wallet/account resolver，明确 signer、funder/maker、签名类型和 wallet 类型。
-- [ ] 对新 Deposit Wallet 提供 deploy → fund → approvals → ready check 的可恢复流程。
-- [ ] 每一步都可重复执行且幂等；失败后可从链上/Relayer 状态恢复。
-- [ ] 文档明确 EOA、legacy proxy、Safe、Deposit Wallet 的适用方法。
+- [x] 新增 `ResolveWalletAccount(ctx)` 和 `WalletAccount`，明确 controlling signer、wallet/funder/maker、V2 order signer、signature type、wallet type 与部署状态；枚举值与当前官方 `AccountIdentity/WalletType` 对齐。
+- [x] 新增 `OnboardDepositWallet(ctx, minimumPUSD)`：未部署时走 `WALLET-CREATE`，资金不足返回非错误的 `funding_required` checkpoint，资金到位后自动 wrap USDC.e、只补缺失的四项 V2 approvals 并二次读取链上状态。
+- [x] deploy 和 approvals 都以链上状态判定、重复调用为 no-op；SDK 不替业务自动转账，避免 funding 请求超时后重复扣款。任一步失败后重新调用会从 code/balance/allowance/approval 状态恢复。
+- [x] README 明确 EOA、legacy Proxy、Safe、Deposit Wallet 语义，并记录 Deposit Wallet 可恢复 onboarding 用法。
+- [x] mock 覆盖未部署、部署失败、外部 funding checkpoint、USDC.e wrap 后 ready、授权提交后仍不一致、非法门槛与错误 wallet type；`.env` 当前生产账户 resolver 正向读取通过，公开已部署 Deposit Wallet 和空地址的 `eth_getCode` 正/负向验证通过，未发交易。
 
 ### [x] P1-10：更新 `chainws` 的当前合约监听集合和余额模型
 

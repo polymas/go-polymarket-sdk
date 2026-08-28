@@ -27,6 +27,7 @@ type Client interface {
 	GetPolyProxyAddress() (types.EthAddress, error)
 	GetChainID() types.ChainID
 	GetSignatureType() types.SignatureType
+	ResolveWalletAccount(ctx context.Context) (*WalletAccount, error)
 	GetPOLBalance() (float64, error)
 	// GetCollateralBalance returns the balance of the current V2 trading
 	// collateral (pUSD) for address.

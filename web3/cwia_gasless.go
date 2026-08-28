@@ -71,13 +71,19 @@ func (c *baseClient) GetDepositWalletNonce(ctx context.Context, wallet common.Ad
 // 不区分 ERC-7760 / 其他，只检查"地址有 code"。便于业务层在调用 batch 前
 // 决定是否要先 deploy。
 func (c *baseClient) IsDepositWalletDeployed(ctx context.Context, wallet common.Address) (bool, error) {
-	// 直接读 nonce()；空响应 == 没部署
-	data, _ := hex.DecodeString("affed0e0")
-	res, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &wallet, Data: data}, nil)
-	if err != nil {
-		return false, fmt.Errorf("probe wallet.nonce(): %w", err)
+	var (
+		code []byte
+		err  error
+	)
+	if c.depositWalletRPC != nil && c.depositWalletRPC.code != nil {
+		code, err = c.depositWalletRPC.code(ctx, wallet)
+	} else {
+		code, err = c.codeAtWithRetry(ctx, wallet)
 	}
-	return len(res) > 0, nil
+	if err != nil {
+		return false, fmt.Errorf("probe wallet code: %w", err)
+	}
+	return len(code) > 0, nil
 }
 
 // BuildCWIABatchCalldata 编码 DepositWalletFactory.proxy([batch], [sig]) 调用。
@@ -228,9 +234,9 @@ const cwiaRelayerWalletType = "WALLET"
 // 字段顺序与官方 Python 客户端的 dict 插入顺序一致——这关系到 HMAC 签名所
 // 用到的 body 字符串，不能乱序。
 type CWIADepositWalletParams struct {
-	DepositWallet string                  `json:"depositWallet"` // wallet 代理地址
-	Deadline      string                  `json:"deadline"`      // unix 秒
-	Calls         []CWIARelayCallPayload  `json:"calls"`
+	DepositWallet string                 `json:"depositWallet"` // wallet 代理地址
+	Deadline      string                 `json:"deadline"`      // unix 秒
+	Calls         []CWIARelayCallPayload `json:"calls"`
 }
 
 // CWIARelayCallPayload 是单条 call 在 relayer body 中的 JSON 形态。
