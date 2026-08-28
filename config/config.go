@@ -95,9 +95,6 @@ type CacheConfig struct {
 
 	// NegRisk 缓存 TTL
 	NegRiskTTL time.Duration
-
-	// FeeRate 缓存 TTL
-	FeeRateTTL time.Duration
 }
 
 // LogConfig 日志配置
@@ -154,7 +151,6 @@ func DefaultConfig() *Config {
 			DefaultTTL:  5 * time.Minute,
 			TickSizeTTL: 10 * time.Minute,
 			NegRiskTTL:  10 * time.Minute,
-			FeeRateTTL:  10 * time.Minute,
 		},
 		Log: LogConfig{
 			Level:         "INFO",

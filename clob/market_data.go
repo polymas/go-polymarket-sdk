@@ -555,51 +555,6 @@ func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.L
 	return result, nil
 }
 
-// GetFeeRate 获取代币的手续费率（以 bps 为单位，1 bps = 0.01%）
-func (c *marketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
-	// 检查缓存
-	if feeRate, ok := c.baseClient.feeRates[tokenID]; ok {
-		return feeRate, nil
-	}
-
-	params := map[string]string{"token_id": tokenID}
-
-	// API 可能返回数字或字符串格式的 fee_rate
-	var rawResponse map[string]interface{}
-	resp, err := http.Get[map[string]interface{}](c.baseClient.baseURL, internal.GetFeeRate, params)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get fee rate: %w", err)
-	}
-	rawResponse = *resp
-
-	// 提取 fee_rate 并转换为 int
-	var feeRate int
-	if val, ok := rawResponse["fee_rate"]; ok {
-		switch v := val.(type) {
-		case float64:
-			feeRate = int(v)
-		case int:
-			feeRate = v
-		case int64:
-			feeRate = int(v)
-		case string:
-			parsed, err := strconv.Atoi(v)
-			if err != nil {
-				return 0, fmt.Errorf("failed to parse fee_rate as int: %w", err)
-			}
-			feeRate = parsed
-		default:
-			return 0, fmt.Errorf("unexpected fee_rate type: %T", v)
-		}
-	} else {
-		return 0, fmt.Errorf("fee_rate not found in response")
-	}
-
-	// 缓存结果
-	c.baseClient.feeRates[tokenID] = feeRate
-	return feeRate, nil
-}
-
 // GetPricesHistory 获取市场的历史价格时序（GET /prices-history）
 // market 为必填的 asset id；可选参数见 PricesHistoryOption
 func (c *marketDataClientImpl) GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
@@ -924,77 +879,6 @@ func (c *readonlyMarketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([
 		return nil, fmt.Errorf("批量获取最后成交价失败: failed to decode response: %w", err)
 	}
 	return result, nil
-}
-
-// GetFeeRate 获取代币的手续费率（只读客户端实现）
-func (c *readonlyMarketDataClientImpl) GetFeeRate(tokenID string) (int, error) {
-	// 检查缓存
-	if feeRate, ok := c.readonlyBaseClient.feeRates[tokenID]; ok {
-		return feeRate, nil
-	}
-
-	params := map[string]string{"token_id": tokenID}
-
-	// API 可能返回数字或字符串格式的 fee_rate
-	var rawResponse map[string]interface{}
-	resp, err := http.Get[map[string]interface{}](c.readonlyBaseClient.baseURL, internal.GetFeeRate, params)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get fee rate: %w", err)
-	}
-	rawResponse = *resp
-
-	// 提取 fee_rate 或 base_fee 并转换为 int
-	// API可能返回 fee_rate 或 base_fee 字段
-	var feeRate int
-	var found bool
-
-	// 优先查找 fee_rate
-	if val, ok := rawResponse["fee_rate"]; ok {
-		found = true
-		switch v := val.(type) {
-		case float64:
-			feeRate = int(v)
-		case int:
-			feeRate = v
-		case int64:
-			feeRate = int(v)
-		case string:
-			parsed, err := strconv.Atoi(v)
-			if err != nil {
-				return 0, fmt.Errorf("failed to parse fee_rate as int: %w", err)
-			}
-			feeRate = parsed
-		default:
-			return 0, fmt.Errorf("unexpected fee_rate type: %T", v)
-		}
-	} else if val, ok := rawResponse["base_fee"]; ok {
-		// 如果没有 fee_rate，尝试 base_fee
-		found = true
-		switch v := val.(type) {
-		case float64:
-			feeRate = int(v)
-		case int:
-			feeRate = v
-		case int64:
-			feeRate = int(v)
-		case string:
-			parsed, err := strconv.Atoi(v)
-			if err != nil {
-				return 0, fmt.Errorf("failed to parse base_fee as int: %w", err)
-			}
-			feeRate = parsed
-		default:
-			return 0, fmt.Errorf("unexpected base_fee type: %T", v)
-		}
-	}
-
-	if !found {
-		return 0, fmt.Errorf("fee_rate or base_fee not found in response")
-	}
-
-	// 缓存结果
-	c.readonlyBaseClient.feeRates[tokenID] = feeRate
-	return feeRate, nil
 }
 
 // GetPricesHistory 获取市场的历史价格时序（只读客户端实现）

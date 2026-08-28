@@ -186,9 +186,9 @@ go test -parallel 4 ./...
 
 ## 测试覆盖
 
-当前测试覆盖了所有102个接口：
+当前测试覆盖了所有101个接口：
 
-- **只读接口**：78个
+- **只读接口**：77个
 - **读写接口**：24个
 
 每个接口至少包含：
@@ -214,7 +214,6 @@ go test -parallel 4 ./...
 | `TestGetSpreads`            | ✅ PASS | 已通过 - 已修复API响应格式问题         |
 | `TestGetLastTradePrice`     | ✅ PASS | 已通过 - 已修复无效tokenID处理         |
 | `TestGetLastTradesPrices`   | ✅ PASS | 已通过 - 已修复空数组结果处理          |
-| `TestGetFeeRate`            | ✅ PASS | 已通过 - 已修复base_fee字段解析问题    |
 | `TestGetTime`               | ✅ PASS | 已通过 - 服务器时间获取                |
 
 #### 读写接口测试（client_readwrite_test.go）
@@ -355,7 +354,7 @@ RFQ 测试不读取私钥，使用本地 HTTP/WebSocket server 锁定当前公�
 ### 测试统计
 
 **CLOB包**：
-- ✅ 通过：12个（TestGetOrderBook, TestGetMultipleOrderBooks, TestGetMidpoint, TestGetMidpoints, TestGetPrice, TestGetPrices, TestGetSpread, TestGetSpreads, TestGetLastTradePrice, TestGetLastTradesPrices, TestGetFeeRate, TestGetTime）
+- ✅ 通过：11个（TestGetOrderBook, TestGetMultipleOrderBooks, TestGetMidpoint, TestGetMidpoints, TestGetPrice, TestGetPrices, TestGetSpread, TestGetSpreads, TestGetLastTradePrice, TestGetLastTradesPrices, TestGetTime）
 - ⏭️ 跳过：20个（需要认证或测试数据）
 
 **Data包**：
@@ -372,8 +371,8 @@ RFQ 测试不读取私钥，使用本地 HTTP/WebSocket server 锁定当前公�
 - ✅ 通过：2个（TWAP 协议和 E18 精度测试）
 
 **总计**：
-- ✅ **通过**：54个测试
-  - CLOB包：12个（所有只读接口测试已通过）
+- ✅ **通过**：53个测试
+  - CLOB包：11个（所有只读接口测试已通过）
   - Data包：4个（TestGetPositions, TestGetTrades, TestGetActivity, TestGetValue）
   - Gamma包：16个（包括TestGetSeries, TestSearch等）
   - WebSocket包：9个（市场频道和体育频道测试）
@@ -399,13 +398,12 @@ RFQ 测试不读取私钥，使用本地 HTTP/WebSocket server 锁定当前公�
 - ✅ **TestGetAllMarkets已标记为不测试**：由于需要很长时间且容易超时，已添加`t.Skip()`跳过此测试
 - ✅ **TestGetMidpoint已修复**：现在支持从15分钟预测试数据中自动获取tokenID，测试通过
 - ✅ **所有需要tokenID的测试已优化**：所有标记为"需要POLY_TEST_TOKEN_ID或市场数据"的测试现在都支持自动从15分钟预测试数据中获取tokenID，不再强制依赖环境变量
-  - 优化的测试包括：TestGetMultipleOrderBooks, TestGetPrice, TestGetPrices, TestGetSpread, TestGetSpreads, TestGetLastTradePrice, TestGetLastTradesPrices, TestGetFeeRate
+  - 优化的测试包括：TestGetMultipleOrderBooks, TestGetPrice, TestGetPrices, TestGetSpread, TestGetSpreads, TestGetLastTradePrice, TestGetLastTradesPrices
   - 这些测试现在会优先使用环境变量中的POLY_TEST_TOKEN_ID，如果未设置则自动从市场数据中获取
 - ✅ **所有失败的测试已修复**：
   - **GetMidpoints/GetSpreads**：修复了API返回对象而不是数组的问题
   - **GetPrice**：修复了price字段是字符串而不是数字的问题（添加了自定义UnmarshalJSON）
   - **GetPrices**：修复了API返回嵌套对象的问题
-  - **GetFeeRate**：修复了API返回base_fee而不是fee_rate的问题
   - **TestGetMultipleOrderBooks**：修复了API合并BUY/SELL请求的预期
   - **TestGetLastTradePrice**：修复了无效tokenID的处理逻辑
   - **TestSearch**：修复了空查询应该期望错误的问题

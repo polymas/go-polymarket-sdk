@@ -55,13 +55,13 @@ func TestUserClientProtocolEventsAndHeartbeat(t *testing.T) {
 			"event_type":"trade","type":"TRADE","id":"trade-1",
 			"taker_order_id":"0xtaker","market":"`+testConditionOne+`",
 			"asset_id":"`+testTokenOne+`","side":"BUY","size":"2.5",
-			"price":"0.57","fee_rate_bps":"0","status":"MATCHED",
+			"price":"0.57","status":"MATCHED",
 			"match_time":"1672290701","last_update":"1672290702","outcome":"YES",
 			"owner":"owner-key","trade_owner":"trade-owner","maker_address":"0xmaker",
 			"transaction_hash":"0xtx","bucket_index":3,
 			"maker_orders":[{"order_id":"0xmaker-order","owner":"maker-owner",
 			"maker_address":"0xmaker","matched_amount":"2.5","price":"0.57",
-			"fee_rate_bps":"0","asset_id":"`+testTokenTwo+`","outcome":"NO","side":"SELL"}],
+			"asset_id":"`+testTokenTwo+`","outcome":"NO","side":"SELL"}],
 			"trader_side":"TAKER","timestamp":"1672290701000"
 		}`))
 

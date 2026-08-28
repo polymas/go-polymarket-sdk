@@ -832,53 +832,6 @@ func TestGetLastTradesPrices(t *testing.T) {
 	})
 }
 
-func TestGetFeeRate(t *testing.T) {
-	client := newTestClobClient(t)
-	config := test.LoadTestConfig()
-
-	// 优先使用环境变量中的token ID
-	var testTokenID string
-	if config.TestTokenID != "" {
-		testTokenID = config.TestTokenID
-		t.Logf("Using token ID from environment: %s", testTokenID)
-	} else {
-		// 如果没有设置，尝试通过slug获取BTC 15分钟市场数据
-		testData := getTestMarketData(t, "")
-		if testData == nil {
-			t.Skip("Skipping test: POLY_TEST_TOKEN_ID not set and could not get market data")
-			return
-		}
-		testTokenID = testData.TokenIDs[0] // 使用第一个token ID
-		t.Logf("Using token ID from market: %s (market: %s)", testTokenID, testData.Slug)
-	}
-
-	// 基本功能测试
-	// 注意：fee-rate API端点可能不存在或已废弃，返回404
-	t.Run("Basic", func(t *testing.T) {
-		feeRate, err := client.GetFeeRate(testTokenID)
-		if err != nil {
-			// 如果API端点不存在（404），跳过测试
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "Not Found") {
-				t.Skip("Skipping test: fee-rate API endpoint not found (may be deprecated)")
-				return
-			}
-			t.Fatalf("GetFeeRate failed: %v", err)
-		}
-		if feeRate < 0 {
-			t.Errorf("Expected non-negative fee rate, got %d", feeRate)
-		}
-		t.Logf("GetFeeRate returned: %d", feeRate)
-	})
-
-	// 测试无效tokenID
-	t.Run("InvalidTokenID", func(t *testing.T) {
-		_, err := client.GetFeeRate("invalid-token-id")
-		if err == nil {
-			t.Error("Expected error for invalid token ID")
-		}
-	})
-}
-
 func TestGetTime(t *testing.T) {
 	client := newTestClobClient(t)
 

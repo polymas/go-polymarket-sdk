@@ -34,7 +34,6 @@ type UserTradeMakerOrder struct {
 	MakerAddress  string          `json:"maker_address"`
 	MatchedAmount string          `json:"matched_amount"`
 	Price         string          `json:"price"`
-	FeeRateBps    string          `json:"fee_rate_bps"`
 	TokenID       types.TokenID   `json:"asset_id"`
 	Outcome       string          `json:"outcome"`
 	Side          types.OrderSide `json:"side"`
@@ -53,7 +52,6 @@ type UserTradeEvent struct {
 	Side            types.OrderSide       `json:"side"`
 	Size            string                `json:"size"`
 	Price           string                `json:"price"`
-	FeeRateBps      string                `json:"fee_rate_bps"`
 	Status          string                `json:"status"`
 	MatchTime       string                `json:"match_time"`
 	LastUpdate      string                `json:"last_update"`

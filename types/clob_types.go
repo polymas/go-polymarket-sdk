@@ -194,7 +194,6 @@ type OrderArgs struct {
 	Side    OrderSide `json:"side"`
 	// TickSize 是 SDK 构造/校验签名所需的本地输入；官方 /orders body 没有该字段。
 	TickSize   TickSize `json:"tick_size"`
-	FeeRateBps *int     `json:"fee_rate_bps,omitempty"`
 	Expiration int64    `json:"expiration,omitempty"` // unix 秒；0 = GTC
 	PostOnly   bool     `json:"post_only,omitempty"`
 	DeferExec  bool     `json:"defer_exec,omitempty"`
@@ -536,7 +535,6 @@ type ClobMakerOrder struct {
 	MakerAddress  EthAddress `json:"maker_address"`
 	MatchedAmount string     `json:"matched_amount"`
 	Price         string     `json:"price"`
-	FeeRateBPS    string     `json:"fee_rate_bps"`
 	TokenID       TokenID    `json:"asset_id"`
 	Outcome       string     `json:"outcome"`
 	Side          OrderSide  `json:"side"`
@@ -551,7 +549,6 @@ type ClobTrade struct {
 	TokenID         TokenID          `json:"asset_id"`
 	Side            OrderSide        `json:"side"`
 	Size            string           `json:"size"`
-	FeeRateBPS      string           `json:"fee_rate_bps"`
 	Price           string           `json:"price"`
 	Status          ClobTradeStatus  `json:"status"`
 	MatchTime       string           `json:"match_time"`

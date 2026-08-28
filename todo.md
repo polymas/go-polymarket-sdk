@@ -406,20 +406,21 @@
 - [ ] 下单/Relayer 超时必须返回 ambiguous outcome，先对账再决定是否重发。
 - [ ] 日志统一脱敏 API secret、passphrase、私钥、签名和完整鉴权头。
 
-### [ ] P1-6：为 SDK 内部 negRisk/feeRate 缓存增加并发安全和生命周期
+### [ ] P1-6：为 SDK 内部 negRisk 缓存增加并发安全和生命周期
 
-当前 negRisk/feeRate map 没有明显的统一锁、TTL 和失效策略；tick 已改为业务层显式传入，SDK 不再隐藏缓存。
+当前 negRisk map 没有明显的统一锁、TTL 和失效策略；tick 已改为业务层显式传入，SDK 不再隐藏缓存。
 
 - [ ] 使用并发安全缓存；避免批量签名与 WS 更新产生 data race。
 - [ ] cache entry 带 fetchedAt/source/version。
 - [ ] 支持手动 invalidate、WS invalidate、TTL refresh 和 singleflight。
 - [ ] `go test -race` 覆盖并发批量下单与缓存更新。
 
-### [ ] P1-7：使用市场实时 fee rate，而不是依赖调用方或旧默认值
+### [x] P1-7：按 V2 设计移除 fee rate
 
-- [ ] 下单前从 market config/cache 获取当前 fee rate。
-- [ ] 调用方传入 fee 时与官方值校验，不一致返回明确错误。
-- [ ] fee 更新时刷新缓存，并用官方 SDK golden vectors 验证签名。
+- [x] 删除 `OrderArgs` 入参、公开查询接口、REST endpoint、内部缓存及缓存配置。
+- [x] 删除成交模型和 WebSocket 模型里的对应字段；服务端额外字段由 JSON 解码安全忽略。
+- [x] 下单热路径不查询、不缓存也不传入该值，V2 签名结构保持官方字段集合。
+- [x] README 保留 V2 费用由撮合方在成交时动态处理的说明。
 
 ### [ ] P1-8：修正 last-trade 的 null/缺项语义
 
@@ -463,7 +464,7 @@
 - [ ] `POST /markets/live-activity` 与 `GET /markets/live-activity/{condition_id}`。
 - [ ] `POST /batch-prices-history`。
 - [ ] sampling/simplified market 的官方 CLOB 版本与游标分页。
-- [ ] tick-size、fee-rate、neg-risk 的 path 参数版本（若需要完整端点对称性）。
+- [ ] tick-size、neg-risk 的 path 参数版本（若需要完整端点对称性）。
 
 ### [ ] P2-2：CLOB 认证交易与 Builder 数据
 

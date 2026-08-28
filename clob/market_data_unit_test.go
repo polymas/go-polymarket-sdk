@@ -103,9 +103,8 @@ func TestPayloadSnippet(t *testing.T) {
 func newReadonlyMarketDataAt(url string) *readonlyMarketDataClientImpl {
 	return &readonlyMarketDataClientImpl{
 		readonlyBaseClient: &readonlyBaseClient{
-			baseURL:  url,
-			negRisk:  map[string]bool{},
-			feeRates: map[string]int{},
+			baseURL: url,
+			negRisk: map[string]bool{},
 		},
 	}
 }

@@ -183,7 +183,6 @@ const (
 const (
 	GetTickSize = "/tick-size"
 	GetNegRisk  = "/neg-risk"
-	GetFeeRate  = "/fee-rate"
 )
 
 // Rewards endpoints

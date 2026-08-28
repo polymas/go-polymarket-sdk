@@ -10,7 +10,7 @@ import (
 //
 // 关键差异（相对 V1）：
 //   - Exchange domain version "1" -> "2"（ClobAuthDomain 保持 "1"，不影响 L1 鉴权）
-//   - Order 结构移除 taker / expiration / nonce / feeRateBps
+//   - Order 结构移除 taker / expiration / nonce
 //   - Order 结构新增 timestamp(uint256 毫秒) / metadata(bytes32) / builder(bytes32)
 
 var (

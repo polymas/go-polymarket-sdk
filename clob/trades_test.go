@@ -75,7 +75,6 @@ func TestGetTradesUsesOfficialFiltersAndPagination(t *testing.T) {
 				"asset_id":         testTokenID,
 				"side":             "BUY",
 				"size":             "5.000000",
-				"fee_rate_bps":     "0",
 				"price":            "0.500000",
 				"status":           "TRADE_STATUS_CONFIRMED",
 				"match_time":       "1700000000",

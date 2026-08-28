@@ -65,7 +65,6 @@ type MarketLastTradePriceEvent struct {
 	Market          types.ConditionID `json:"market"`
 	Price           string            `json:"price"`
 	Size            string            `json:"size"`
-	FeeRateBps      string            `json:"fee_rate_bps"`
 	Side            types.OrderSide   `json:"side"`
 	Timestamp       string            `json:"timestamp"`
 	TransactionHash string            `json:"transaction_hash"`

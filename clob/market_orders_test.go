@@ -258,7 +258,6 @@ func TestCreateAndPostMarketOrderInstantUsesMarketAmountWireValues(t *testing.T)
 			Passphrase: "test-passphrase",
 		},
 		negRisk:    make(map[string]bool),
-		feeRates:   make(map[string]int),
 		web3Client: w3,
 	}
 	client := &orderClientImpl{baseClient: base}

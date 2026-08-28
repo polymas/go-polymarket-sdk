@@ -96,6 +96,9 @@ func main() {
 保留，新代码无需传入。生产 CLOB 已不再支持 V1 签名订单，因此 SDK 不提供
 V1 回退选项。
 
+> V2 订单不包含 `feeRateBps`。手续费由撮合方在成交时动态处理，SDK 不查询、
+> 缓存或接收 fee rate，也不会在下单请求或签名中传入该值。
+
 ### 更多示例
 
 查看 `examples/` 目录获取更多使用示例。
@@ -143,7 +146,6 @@ V1 回退选项。
 | `GetLastTradePrice`      | 获取最后成交价         | `tokenID`                                  | `*LastTradePrice`, `error`            |
 | `GetLastTradesPrices`    | 批量获取最后成交价     | `tokenIDs`                                 | `[]LastTradePrice`, `error`           |
 | `CalculateMarketPrice`   | 按订单簿估算市价单最差成交价 | `tokenID`, `side`, `amount`, `orderType` | `float64`, `error`                    |
-| `GetFeeRate`             | 获取手续费率           | `tokenID`                                  | `int`, `error`                        |
 | `GetTime`                | 获取服务器时间         | -                                          | `time.Time`, `error`                  |
 | `GetCollateralBalance`   | 获取 V2 抵押物 pUSD 余额 | -                                      | `float64`, `error`                    |
 | `GetUSDCBalance`         | 获取旧 USDC.e 余额（已弃用） | -                                   | `float64`, `error`                    |
