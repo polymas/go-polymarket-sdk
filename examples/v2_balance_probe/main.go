@@ -38,8 +38,10 @@ func main() {
 	} else {
 		fmt.Printf("%+v\n", baV2)
 	}
-	usdcV2, _ := v2.GetUSDCBalance()
-	fmt.Printf("GetUSDCBalance: %.6f\n", usdcV2)
+	collateral, collateralErr := v2.GetCollateralBalance()
+	fmt.Printf("GetCollateralBalance (pUSD): %.6f, err=%v\n", collateral, collateralErr)
+	legacyUSDC, legacyUSDCErr := v2.GetUSDCBalance()
+	fmt.Printf("GetUSDCBalance (deprecated USDC.e): %.6f, err=%v\n", legacyUSDC, legacyUSDCErr)
 
 	// Raw V2 response dump for debugging
 	fmt.Println("\n── V2 CLOB raw /balance-allowance response ──")
@@ -58,7 +60,7 @@ func main() {
 		{"asset_type": "COLLATERAL", "signature_type": "2", "address": string(proxy)},
 	} {
 		label := fmt.Sprintf("%+v", params)
-		raw, err := sdkhttp.GetRaw(internal.ClobAPIV2Domain, "GET", internal.GetBalanceAllowance,
+		raw, err := sdkhttp.GetRaw(internal.ClobAPIDomain, "GET", internal.GetBalanceAllowance,
 			params, sdkhttp.WithHeaders(headers))
 		if err != nil {
 			fmt.Printf("  %s err: %v\n", label, err)
@@ -75,7 +77,7 @@ func main() {
 		fmt.Printf("headers err: %v\n", err)
 		return
 	}
-	rawUpd, err := sdkhttp.GetRaw(internal.ClobAPIV2Domain, "GET", internal.UpdateBalanceAllowance,
+	rawUpd, err := sdkhttp.GetRaw(internal.ClobAPIDomain, "GET", internal.UpdateBalanceAllowance,
 		map[string]string{"asset_type": "COLLATERAL"}, sdkhttp.WithHeaders(updHeaders))
 	if err != nil {
 		fmt.Printf("  err: %v\n", err)

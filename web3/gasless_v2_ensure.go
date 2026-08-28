@@ -249,13 +249,11 @@ func (c *GaslessClient) GetPUSDBalance() (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("GetPolyProxyAddress: %w", err)
 	}
-	safe := common.HexToAddress(string(safeStr))
-	raw, err := c.callERC20Uint(context.Background(), common.HexToAddress(internal.PolygonPUSD), "balanceOf", safe)
+	balance, err := c.baseClient.GetCollateralBalance(safeStr)
 	if err != nil {
-		return 0, fmt.Errorf("pUSD.balanceOf: %w", err)
+		return 0, err
 	}
-	f, _ := new(big.Float).Quo(new(big.Float).SetInt(raw), big.NewFloat(1e6)).Float64()
-	return f, nil
+	return balance, nil
 }
 
 // callERC20Uint 调 ERC20 view 函数（balanceOf / allowance 等返回 uint256）。

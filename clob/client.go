@@ -58,6 +58,10 @@ type MarketDataClient interface {
 
 // AccountClient 账户相关操作的轻量接口
 type AccountClient interface {
+	// GetCollateralBalance returns the current V2 trading collateral (pUSD).
+	GetCollateralBalance() (float64, error)
+	// Deprecated: GetUSDCBalance returns legacy USDC.e, not V2 collateral.
+	// Use GetCollateralBalance for trading funds.
 	GetUSDCBalance() (float64, error)
 	GetBalanceAllowance() (*types.BalanceAllowance, error)
 	UpdateBalanceAllowance(amount float64) (*types.BalanceAllowance, error)

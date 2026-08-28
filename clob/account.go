@@ -11,7 +11,15 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// GetUSDCBalance gets USDC balance
+// GetCollateralBalance gets the proxy wallet's current V2 collateral balance.
+// Polymarket V2 uses pUSD as trading collateral.
+func (c *accountClientImpl) GetCollateralBalance() (float64, error) {
+	return c.baseClient.web3Client.GetCollateralBalance(c.baseClient.proxyAddress)
+}
+
+// GetUSDCBalance gets the proxy wallet's legacy USDC.e balance.
+//
+// Deprecated: use GetCollateralBalance for V2 trading funds.
 func (c *accountClientImpl) GetUSDCBalance() (float64, error) {
 	return c.baseClient.web3Client.GetUSDCBalance(c.baseClient.proxyAddress)
 }

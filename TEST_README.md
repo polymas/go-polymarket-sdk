@@ -220,7 +220,8 @@ go test -parallel 4 ./...
 | `TestCancelOrder`            | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestCancelAll`              | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestCancelMarketOrders`     | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
-| `TestGetUSDCBalance`         | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
+| `TestGetUSDCBalance`         | ⏭️ SKIP | 需要POLY_PRIVATE_KEY（旧 USDC.e） |
+| `TestGetCollateralBalance`   | ⏭️ SKIP | 需要POLY_PRIVATE_KEY（V2 pUSD） |
 | `TestGetBalanceAllowance`    | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestUpdateBalanceAllowance` | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestGetNotifications`       | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
@@ -299,7 +300,8 @@ go test -parallel 4 ./...
 | 测试函数                  | 状态   | 说明                 |
 | ------------------------- | ------ | -------------------- |
 | `TestGetPOLBalance`       | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
-| `TestGetUSDCBalance`      | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
+| `TestGetUSDCBalance`      | ⏭️ SKIP | 需要POLY_PRIVATE_KEY（旧 USDC.e） |
+| `TestGetCollateralBalance` | ⏭️ SKIP | 需要POLY_PRIVATE_KEY（V2 pUSD） |
 | `TestGetTokenBalance`     | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestGetBaseAddress`      | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |
 | `TestGetPolyProxyAddress` | ⏭️ SKIP | 需要POLY_PRIVATE_KEY |

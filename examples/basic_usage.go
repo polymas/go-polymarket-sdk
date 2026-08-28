@@ -76,12 +76,12 @@ func main() {
 		fmt.Printf("市场: %+v\n", market)
 	}
 
-	// 4. 查询 USDC 余额
-	balance, err := clobClient.GetUSDCBalance()
+	// 4. 查询 V2 交易抵押物 pUSD 余额
+	balance, err := clobClient.GetCollateralBalance()
 	if err != nil {
-		log.Printf("获取 USDC 余额失败: %v", err)
+		log.Printf("获取 pUSD 余额失败: %v", err)
 	} else {
-		fmt.Printf("USDC 余额: %.6f\n", balance)
+		fmt.Printf("pUSD 余额: %.6f\n", balance)
 	}
 
 	// 5. 查询 Web3 余额

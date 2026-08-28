@@ -17,7 +17,8 @@ import (
 // PositionKeyUSDC 表示 USDC 仓位的 map key（与 CT 一致，使用 tokenID：此处为 Collateral 合约地址）
 var PositionKeyUSDC = internal.PolygonCollateral
 
-// BalanceReader 读取链上 USDC 与 CT 余额。若用 web3.Client 可实现：GetUSDCBalance(addr)=client.GetUSDCBalance(addr)，GetTokenBalance(addr, tokenID)=client.GetTokenBalance(tokenID, addr)。
+// BalanceReader 读取链上旧 USDC.e 与 CT 余额。若用 web3.Client 可实现：GetUSDCBalance(addr)=client.GetUSDCBalance(addr)，GetTokenBalance(addr, tokenID)=client.GetTokenBalance(tokenID, addr)。
+// V2 交易抵押物监控应使用 web3.Client.GetCollateralBalance（pUSD），不应将本 legacy reader 当作下单余额。
 type BalanceReader interface {
 	GetUSDCBalance(addr types.EthAddress) (float64, error)
 	GetTokenBalance(addr types.EthAddress, tokenID string) (float64, error)

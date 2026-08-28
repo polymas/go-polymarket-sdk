@@ -86,12 +86,12 @@ func stepA(client clob.Client, testToken string) {
 	}
 	fmt.Printf("✅ A1 GetTime: %s（本地偏差 %v）\n", serverTime.UTC().Format(time.RFC3339), skew.Truncate(time.Millisecond))
 
-	// A2：GET /balance-allowance —— 验 L2 HMAC 鉴权能跑通；USDC 余额未必准（pUSD 风险）
-	balance, err := client.GetUSDCBalance()
+	// A2：直读链上 V2 交易抵押物 pUSD 余额。
+	balance, err := client.GetCollateralBalance()
 	if err != nil {
-		log.Fatalf("❌ A2 GetUSDCBalance 失败（L2 鉴权 / pUSD 合约问题）: %v", err)
+		log.Fatalf("❌ A2 GetCollateralBalance 失败（pUSD 合约 / RPC 问题）: %v", err)
 	}
-	fmt.Printf("✅ A2 GetUSDCBalance: %.6f（若 V2 已切 pUSD 这个数可能错，只要不报错就算过）\n", balance)
+	fmt.Printf("✅ A2 GetCollateralBalance (pUSD): %.6f\n", balance)
 
 	if testToken == "" {
 		fmt.Println("ℹ️  A3/A4 跳过（未设置 POLY_V2_TEST_TOKEN）")

@@ -82,6 +82,21 @@ func TestGetUSDCBalance(t *testing.T) {
 	})
 }
 
+func TestGetCollateralBalance(t *testing.T) {
+	client := newTestWeb3Client(t)
+	config := test.LoadTestConfig()
+	userAddr := test.GetTestUserAddress(config)
+
+	balance, err := client.GetCollateralBalance(userAddr)
+	if err != nil {
+		t.Fatalf("GetCollateralBalance failed: %v", err)
+	}
+	if balance < 0 {
+		t.Errorf("Expected non-negative balance, got %f", balance)
+	}
+	t.Logf("GetCollateralBalance returned: %f", balance)
+}
+
 func TestGetTokenBalance(t *testing.T) {
 	client := newTestWeb3Client(t)
 	config := test.LoadTestConfig()

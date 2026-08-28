@@ -720,6 +720,19 @@ func TestGetUSDCBalance(t *testing.T) {
 	})
 }
 
+func TestGetCollateralBalance(t *testing.T) {
+	client := newTestClobClientWithAuth(t)
+
+	balance, err := client.GetCollateralBalance()
+	if err != nil {
+		t.Fatalf("GetCollateralBalance failed: %v", err)
+	}
+	if balance < 0 {
+		t.Errorf("Expected non-negative balance, got %f", balance)
+	}
+	t.Logf("GetCollateralBalance returned: %f", balance)
+}
+
 func TestGetBalanceAllowance(t *testing.T) {
 	client := newTestClobClientWithAuth(t)
 

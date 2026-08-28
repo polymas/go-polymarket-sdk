@@ -323,6 +323,21 @@
 - [x] 交易后链上验证两个 pUSD allowance 均为 MAX、两个 CTF approval 均为 true，两个 USDC.e allowance 与交易前逐值一致。
 - [x] 更新可执行示例的交易数和抵押物说明，不再引导用户对 V2 Exchange 授权 USDC.e。
 
+### [x] V2-P0-2：统一 V2 余额查询的 pUSD 语义
+
+完成于 2026-08-28，发布版本 `v1.29.0`。
+
+原 `clob.GetUSDCBalance()` 与 `web3.GetUSDCBalance(address)` 固定读取 USDC.e，但 V2 CLOB 的交易抵押物已是 pUSD，业务层用该结果做下单余额判断会得到错误结果。
+
+- [x] `web3.Client` 新增 `GetCollateralBalance(address)`，明确读取 V2 抵押物 pUSD；新增 `GetUSDCEBalance(address)` 供明确的旧 USDC.e 场景使用。
+- [x] `clob.AccountClient` 新增无参 `GetCollateralBalance()`，使用已解析的 maker/proxy 地址直读 pUSD。
+- [x] 不静默改变旧方法语义：`GetUSDCBalance` 保留为 USDC.e 兼容别名并标记 deprecated，避免存取款/进场业务在升级后情况下无感切换代币。
+- [x] 单元测试以 mock JSON-RPC 解析 `eth_call` target：正向确认 pUSD/USDC.e 各返回 6 位精度数值，反向确认 V2 collateral 不得命中 USDC.e，旧别名只命中 USDC.e，非法地址不发 RPC。
+- [x] 使用 `.env` 真实 Safe `0xC789151B4dd1F4fd16044742Ab17AAa895ae10FD` 做只读验证：CLOB `COLLATERAL` 返回 `51144933`，链上 `GetCollateralBalance` 返回 `51.144933` pUSD，两者完全一致；旧 USDC.e 返回 `0.000000`。
+- [x] 修正 balance probe 的 raw 请求 host 为当前生产 `clob.polymarket.com`，示例和 README 统一使用 pUSD/collateral 语义。
+- [x] `go test -timeout 30s ./web3`、`go test -race -timeout 45s ./web3` 以及排除用户未跟踪测试文件后的 clob tracked tests/race 均通过。
+- [x] 下游影响核查：`polyworker` 只消费 `web3.Client`/`clob.Client` 构造结果，没有自定义实现这两个接口，本项不需要改它的业务代码。它直接替换到当前 SDK 的全量编译仍被早于本项的 `AssetID/DecimalString/WebSocketAuth` 迁移遗留阻断；本项未修改 `polyworker`。外部若自定义实现 SDK 公开接口，升级时需补充新方法。
+
 ---
 
 ## P1：核心流程不完整或行为不安全

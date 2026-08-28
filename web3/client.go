@@ -28,6 +28,13 @@ type Client interface {
 	GetChainID() types.ChainID
 	GetSignatureType() types.SignatureType
 	GetPOLBalance() (float64, error)
+	// GetCollateralBalance returns the balance of the current V2 trading
+	// collateral (pUSD) for address.
+	GetCollateralBalance(address types.EthAddress) (float64, error)
+	// GetUSDCEBalance returns the legacy bridged USDC.e balance for address.
+	GetUSDCEBalance(address types.EthAddress) (float64, error)
+	// Deprecated: use GetCollateralBalance for V2 trading funds, or
+	// GetUSDCEBalance when USDC.e is explicitly required.
 	GetUSDCBalance(address types.EthAddress) (float64, error)
 	GetTokenBalance(tokenID string, address types.EthAddress) (float64, error)
 	Close()
@@ -537,44 +544,59 @@ func (c *baseClient) GetPOLBalance() (float64, error) {
 	return result, nil
 }
 
-// GetUSDCBalance 获取地址的USDC余额
-func (c *baseClient) GetUSDCBalance(address types.EthAddress) (float64, error) {
-	// 获取 USDC 合约地址（PolygonCollateral）
-	usdcAddr := common.HexToAddress(internal.PolygonCollateral)
+// GetCollateralBalance returns address's current V2 trading collateral balance.
+// Polymarket V2 uses pUSD; USDC.e is only an on-ramp asset.
+func (c *baseClient) GetCollateralBalance(address types.EthAddress) (float64, error) {
+	return c.getERC20Balance(address, common.HexToAddress(internal.PolygonPUSD), "pUSD")
+}
 
-	// 创建 ERC20 标准的 balanceOf(address) ABI
+// GetUSDCEBalance returns address's legacy bridged USDC.e balance.
+func (c *baseClient) GetUSDCEBalance(address types.EthAddress) (float64, error) {
+	return c.getERC20Balance(address, common.HexToAddress(internal.PolygonCollateral), "USDC.e")
+}
+
+// GetUSDCBalance returns the legacy bridged USDC.e balance.
+//
+// Deprecated: use GetCollateralBalance for V2 trading funds, or
+// GetUSDCEBalance when USDC.e is explicitly required.
+func (c *baseClient) GetUSDCBalance(address types.EthAddress) (float64, error) {
+	return c.GetUSDCEBalance(address)
+}
+
+func (c *baseClient) getERC20Balance(address types.EthAddress, token common.Address, symbol string) (float64, error) {
+	if err := address.Validate(); err != nil {
+		return 0, fmt.Errorf("invalid balance address: %w", err)
+	}
+
 	balanceOfABI := `[{"constant":true,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]`
 	parsedABI, err := abi.JSON(strings.NewReader(balanceOfABI))
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse ABI: %w", err)
+		return 0, fmt.Errorf("failed to parse ERC20 ABI: %w", err)
 	}
 
-	// 打包函数调用
-	addr := common.HexToAddress(string(address))
+	addr := common.HexToAddress(address.String())
 	packed, err := parsedABI.Pack("balanceOf", addr)
 	if err != nil {
-		return 0, fmt.Errorf("failed to pack function call: %w", err)
+		return 0, fmt.Errorf("failed to pack %s.balanceOf: %w", symbol, err)
 	}
 
-	// 调用合约
 	callMsg := ethereum.CallMsg{
-		To:   &usdcAddr,
+		To:   &token,
 		Data: packed,
 	}
 
 	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to call contract: %w", err)
+		return 0, fmt.Errorf("failed to call %s.balanceOf: %w", symbol, err)
 	}
 
-	// 解包结果
 	var balance *big.Int
 	err = parsedABI.UnpackIntoInterface(&balance, "balanceOf", result)
 	if err != nil {
-		return 0, fmt.Errorf("failed to unpack result: %w", err)
+		return 0, fmt.Errorf("failed to unpack %s.balanceOf: %w", symbol, err)
 	}
 
-	// USDC 有 6 位小数，所以除以 1e6
+	// Both pUSD and USDC.e use 6 decimals on Polygon.
 	balanceFloat := new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1e6))
 	resultFloat, _ := balanceFloat.Float64()
 	return resultFloat, nil

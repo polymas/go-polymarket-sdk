@@ -140,7 +140,8 @@ V1 回退选项。
 | `GetLastTradesPrices`    | 批量获取最后成交价     | `tokenIDs`                                 | `[]LastTradePrice`, `error`           |
 | `GetFeeRate`             | 获取手续费率           | `tokenID`                                  | `int`, `error`                        |
 | `GetTime`                | 获取服务器时间         | -                                          | `time.Time`, `error`                  |
-| `GetUSDCBalance`         | 获取 USDC 余额         | -                                          | `float64`, `error`                    |
+| `GetCollateralBalance`   | 获取 V2 抵押物 pUSD 余额 | -                                      | `float64`, `error`                    |
+| `GetUSDCBalance`         | 获取旧 USDC.e 余额（已弃用） | -                                   | `float64`, `error`                    |
 | `GetBalanceAllowance`    | 获取余额授权信息       | -                                          | `*BalanceAllowance`, `error`          |
 | `UpdateBalanceAllowance` | 更新余额授权           | `amount`                                   | `*BalanceAllowance`, `error`          |
 | `GetNotifications`       | 获取通知列表           | `limit`, `offset`                          | `[]Notification`, `error`             |
@@ -207,7 +208,9 @@ V1 回退选项。
 | `GetChainID`          | 获取链ID       | -                    | `ChainID`             |
 | `GetSignatureType`    | 获取签名类型   | -                    | `SignatureType`       |
 | `GetPOLBalance`       | 获取 POL 余额  | -                    | `float64`, `error`    |
-| `GetUSDCBalance`      | 获取 USDC 余额 | `address`            | `float64`, `error`    |
+| `GetCollateralBalance` | 获取 V2 抵押物 pUSD 余额 | `address`       | `float64`, `error`    |
+| `GetUSDCEBalance`     | 获取旧 USDC.e 余额 | `address`          | `float64`, `error`    |
+| `GetUSDCBalance`      | `GetUSDCEBalance` 的已弃用别名 | `address`       | `float64`, `error`    |
 | `GetTokenBalance`     | 获取代币余额   | `tokenID`, `address` | `float64`, `error`    |
 | `Close`               | 关闭客户端     | -                    | -                     |
 
