@@ -422,13 +422,15 @@
 - [x] 下单热路径不查询、不缓存也不传入该值，V2 签名结构保持官方字段集合。
 - [x] README 保留 V2 费用由撮合方在成交时动态处理的说明。
 
-### [ ] P1-8：修正 last-trade 的 null/缺项语义
+### [x] P1-8：修正 last-trade 的未成交/缺项语义
 
-官方行为中，单 token 从未成交时可能返回 null；批量查询可能直接省略未成交 token。
+2026-08-28 官方文档与生产验证：单 token 从未成交时返回占位值
+`{"price":"0.5","side":""}`；批量查询直接省略未成交 token，且重复输入只返回一项。
 
-- [ ] 单查询返回 `(value, found)`、pointer 或显式 NotTraded 状态。
-- [ ] 批量结果按 token ID 映射，不假设返回长度和输入一致。
-- [ ] 对 null、缺项、重复输入和乱序响应做测试。
+- [x] 单查询保留 pointer 接口，将官方空 side 占位值和兼容性的 `null` 统一返回 `nil, nil`。
+- [x] `LastTradePrice` 使用 typed `TokenID`、精确 `DecimalString` price 和 side，不再错误复用 `TokenValue.value`。
+- [x] 批量结果返回 `map[TokenID]LastTradePrice`，不假设返回长度、顺序与输入一致。
+- [x] mock 覆盖占位值、null、非法 ID 零请求、缺项、重复输入和乱序；生产正负向请求验证通过。
 
 ### [ ] P1-9：完善新钱包 onboarding
 

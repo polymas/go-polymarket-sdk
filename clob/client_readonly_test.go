@@ -749,12 +749,13 @@ func TestGetLastTradePrice(t *testing.T) {
 
 	// 测试无交易历史的情况
 	t.Run("NoTradeHistory", func(t *testing.T) {
-		unlikelyTokenID := "0x0000000000000000000000000000000000000000"
+		unlikelyTokenID := "1"
 		lastTradePrice, err := client.GetLastTradePrice(unlikelyTokenID)
 		if err != nil {
-			t.Logf("GetLastTradePrice with unlikely tokenID returned error (may be expected): %v", err)
-		} else if lastTradePrice != nil {
-			t.Logf("GetLastTradePrice with unlikely tokenID returned: %+v", lastTradePrice)
+			t.Fatalf("GetLastTradePrice with untraded token: %v", err)
+		}
+		if lastTradePrice != nil {
+			t.Fatalf("GetLastTradePrice with untraded token = %+v, want nil", lastTradePrice)
 		}
 	})
 }

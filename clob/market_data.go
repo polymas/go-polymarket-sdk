@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -514,17 +515,52 @@ func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, er
 	return result, nil
 }
 
-// GetLastTradePrice 获取单个代币的最后成交价
+// GetLastTradePrice 获取单个代币的最后成交价。官方对从未成交的 token 返回
+// {"price":"0.5","side":""}；SDK 将该占位值和兼容性的 null 统一为 nil。
 func (c *marketDataClientImpl) GetLastTradePrice(tokenID string) (*types.LastTradePrice, error) {
-	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.LastTradePrice](c.baseClient.baseURL, internal.GetLastTradePrice, params)
+	return getLastTradePrice(c.baseClient.baseURL, tokenID)
 }
 
-// GetLastTradesPrices 批量获取多个代币的最后成交价
-func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error) {
+// GetLastTradesPrices 批量获取最后成交价。未成交 token 不出现在返回 map 中。
+func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
+	return getLastTradesPrices(c.baseClient.baseURL, tokenIDs)
+}
+
+func getLastTradePrice(baseURL, tokenID string) (*types.LastTradePrice, error) {
+	parsedTokenID, err := types.ParseTokenID(strings.TrimSpace(tokenID))
+	if err != nil || parsedTokenID == (types.TokenID{}) {
+		if err == nil {
+			err = types.ErrInvalidTokenID
+		}
+		return nil, fmt.Errorf("get last trade price: %w", err)
+	}
+
+	rawBytes, err := http.GetRaw(baseURL, "GET", internal.GetLastTradePrice, map[string]string{"token_id": parsedTokenID.String()})
+	if err != nil {
+		return nil, fmt.Errorf("get last trade price: %w", err)
+	}
+	if len(bytes.TrimSpace(rawBytes)) == 0 || bytes.Equal(bytes.TrimSpace(rawBytes), []byte("null")) {
+		return nil, nil
+	}
+
+	var result types.LastTradePrice
+	if err := json.Unmarshal(rawBytes, &result); err != nil {
+		return nil, fmt.Errorf("get last trade price: failed to decode response: %w", err)
+	}
+	if result.Side == "" {
+		return nil, nil
+	}
+	if result.Side != types.OrderSideBUY && result.Side != types.OrderSideSELL {
+		return nil, fmt.Errorf("get last trade price: unexpected side %q", result.Side)
+	}
+	result.TokenID = parsedTokenID
+	return &result, nil
+}
+
+func getLastTradesPrices(baseURL string, tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
 	cleaned := sanitizeTokenIDs(tokenIDs)
 	if len(cleaned) == 0 {
-		return []types.LastTradePrice{}, nil
+		return map[types.TokenID]types.LastTradePrice{}, nil
 	}
 	if len(cleaned) > 500 {
 		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
@@ -543,14 +579,27 @@ func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.L
 		return nil, fmt.Errorf("批量获取最后成交价失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetLastTradesPrices, bodyBytes)
+	rawBytes, err := http.PostRaw(baseURL, internal.GetLastTradesPrices, bodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("批量获取最后成交价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
 
-	var result []types.LastTradePrice
-	if err := json.Unmarshal(rawBytes, &result); err != nil {
+	var response []types.LastTradePrice
+	if err := json.Unmarshal(rawBytes, &response); err != nil {
 		return nil, fmt.Errorf("批量获取最后成交价失败: failed to decode response: %w", err)
+	}
+	result := make(map[types.TokenID]types.LastTradePrice, len(response))
+	for _, trade := range response {
+		if trade.TokenID == (types.TokenID{}) {
+			return nil, fmt.Errorf("批量获取最后成交价失败: response missing token_id")
+		}
+		if trade.Side == "" {
+			continue
+		}
+		if trade.Side != types.OrderSideBUY && trade.Side != types.OrderSideSELL {
+			return nil, fmt.Errorf("批量获取最后成交价失败: token %s has unexpected side %q", trade.TokenID, trade.Side)
+		}
+		result[trade.TokenID] = trade
 	}
 	return result, nil
 }
@@ -842,43 +891,12 @@ func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Sp
 
 // GetLastTradePrice 获取单个代币的最后成交价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetLastTradePrice(tokenID string) (*types.LastTradePrice, error) {
-	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.LastTradePrice](c.readonlyBaseClient.baseURL, internal.GetLastTradePrice, params)
+	return getLastTradePrice(c.readonlyBaseClient.baseURL, tokenID)
 }
 
 // GetLastTradesPrices 批量获取多个代币的最后成交价（只读客户端实现）
-func (c *readonlyMarketDataClientImpl) GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error) {
-	cleaned := sanitizeTokenIDs(tokenIDs)
-	if len(cleaned) == 0 {
-		return []types.LastTradePrice{}, nil
-	}
-	if len(cleaned) > 500 {
-		return nil, fmt.Errorf("tokenIDs数组长度不能超过500，当前: %d", len(cleaned))
-	}
-
-	// 构建请求体
-	requestBody := make([]map[string]string, len(cleaned))
-	for i, tokenID := range cleaned {
-		requestBody[i] = map[string]string{
-			"token_id": tokenID,
-		}
-	}
-
-	bodyBytes, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("批量获取最后成交价失败: failed to marshal request body: %w", err)
-	}
-
-	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetLastTradesPrices, bodyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("批量获取最后成交价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
-	}
-
-	var result []types.LastTradePrice
-	if err := json.Unmarshal(rawBytes, &result); err != nil {
-		return nil, fmt.Errorf("批量获取最后成交价失败: failed to decode response: %w", err)
-	}
-	return result, nil
+func (c *readonlyMarketDataClientImpl) GetLastTradesPrices(tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
+	return getLastTradesPrices(c.readonlyBaseClient.baseURL, tokenIDs)
 }
 
 // GetPricesHistory 获取市场的历史价格时序（只读客户端实现）

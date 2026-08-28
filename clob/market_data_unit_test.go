@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -253,6 +254,114 @@ func TestGetLastTradesPricesSkipsRequestWhenAllEmpty(t *testing.T) {
 	}
 	if atomic.LoadInt32(&hits) != 0 {
 		t.Fatalf("expected zero HTTP calls, got %d", hits)
+	}
+}
+
+func TestGetLastTradePriceMissingSemantics(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantNil  bool
+	}{
+		{name: "trade", response: `{"price":"0.7","side":"BUY"}`},
+		{name: "official no-trade placeholder", response: `{"price":"0.5","side":""}`, wantNil: true},
+		{name: "legacy null", response: `null`, wantNil: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != internal.GetLastTradePrice {
+					t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+				}
+				if got := r.URL.Query().Get("token_id"); got != "1" {
+					t.Fatalf("token_id = %q, want canonical 1", got)
+				}
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer server.Close()
+
+			got, err := newReadonlyMarketDataAt(server.URL).GetLastTradePrice("0001")
+			if err != nil {
+				t.Fatalf("GetLastTradePrice: %v", err)
+			}
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("result = %+v, want nil", got)
+				}
+				return
+			}
+			id, _ := types.ParseTokenID("1")
+			if got == nil || got.TokenID != id || got.Price.String() != "0.7" || got.Side != types.OrderSideBUY {
+				t.Fatalf("result = %+v", got)
+			}
+		})
+	}
+}
+
+func TestGetLastTradePriceRejectsInvalidTokenWithoutRequest(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		hits.Add(1)
+	}))
+	defer server.Close()
+
+	for _, tokenID := range []string{"", "abc", "0"} {
+		if _, err := newReadonlyMarketDataAt(server.URL).GetLastTradePrice(tokenID); err == nil {
+			t.Fatalf("token %q: expected error", tokenID)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("HTTP requests = %d, want 0", hits.Load())
+	}
+}
+
+func TestGetLastTradesPricesReturnsTokenMap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != internal.GetLastTradesPrices {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var body []map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(body) != 2 || body[0]["token_id"] != "1" || body[1]["token_id"] != "2" {
+			t.Fatalf("request body = %#v, want deduplicated [1,2]", body)
+		}
+		_, _ = w.Write([]byte(`[
+			{"token_id":"2","price":"0.25","side":"SELL"},
+			{"token_id":"1","price":"0.75","side":"BUY"}
+		]`))
+	}))
+	defer server.Close()
+
+	got, err := newReadonlyMarketDataAt(server.URL).GetLastTradesPrices([]string{"1", "2", "1"})
+	if err != nil {
+		t.Fatalf("GetLastTradesPrices: %v", err)
+	}
+	id1, _ := types.ParseTokenID("1")
+	id2, _ := types.ParseTokenID("2")
+	if len(got) != 2 || got[id1].Price.String() != "0.75" || got[id2].Price.String() != "0.25" {
+		t.Fatalf("result = %#v", got)
+	}
+}
+
+func TestGetLastTradesPricesOmitsMissingToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"token_id":"1","price":"0.75","side":"BUY"}]`))
+	}))
+	defer server.Close()
+
+	got, err := newReadonlyMarketDataAt(server.URL).GetLastTradesPrices([]string{"1", "2"})
+	if err != nil {
+		t.Fatalf("GetLastTradesPrices: %v", err)
+	}
+	id1, _ := types.ParseTokenID("1")
+	id2, _ := types.ParseTokenID("2")
+	if _, ok := got[id1]; !ok {
+		t.Fatal("traded token 1 is missing")
+	}
+	if _, ok := got[id2]; ok {
+		t.Fatal("untraded token 2 must be omitted")
 	}
 }
 

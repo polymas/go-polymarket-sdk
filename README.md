@@ -144,7 +144,7 @@ V1 回退选项。
 | `GetSpread`              | 获取价差               | `tokenID`                                  | `*Spread`, `error`                    |
 | `GetSpreads`             | 批量获取价差           | `tokenIDs`                                 | `[]Spread`, `error`                   |
 | `GetLastTradePrice`      | 获取最后成交价         | `tokenID`                                  | `*LastTradePrice`, `error`            |
-| `GetLastTradesPrices`    | 批量获取最后成交价     | `tokenIDs`                                 | `[]LastTradePrice`, `error`           |
+| `GetLastTradesPrices`    | 批量获取最后成交价（未成交 token 无 key） | `tokenIDs`                    | `map[TokenID]LastTradePrice`, `error` |
 | `CalculateMarketPrice`   | 按订单簿估算市价单最差成交价 | `tokenID`, `side`, `amount`, `orderType` | `float64`, `error`                    |
 | `GetTime`                | 获取服务器时间         | -                                          | `time.Time`, `error`                  |
 | `GetCollateralBalance`   | 获取 V2 抵押物 pUSD 余额 | -                                      | `float64`, `error`                    |

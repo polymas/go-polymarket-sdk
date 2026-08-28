@@ -52,7 +52,7 @@ type MarketDataClient interface {
 	GetSpread(tokenID string) (*types.Spread, error)
 	GetSpreads(tokenIDs []string) ([]types.Spread, error)
 	GetLastTradePrice(tokenID string) (*types.LastTradePrice, error)
-	GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error)
+	GetLastTradesPrices(tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error)
 	// CalculateMarketPrice 按当前订单簿估算市价单的最差成交价。
 	// BUY 的 amount 是 pUSD 金额，SELL 的 amount 是 shares。
 	CalculateMarketPrice(tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error)

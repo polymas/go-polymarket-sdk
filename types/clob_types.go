@@ -772,8 +772,14 @@ type PolygonTrade struct {
 	TakerAddress EthAddress `json:"taker_address"`
 }
 
-// LastTradePrice 表示最后成交价
-type LastTradePrice TokenValue
+// LastTradePrice 表示一个 token 已发生的最后一笔成交。
+// Price 保留服务端十进制原文；未成交 token 不使用零值表示，而由单查返回 nil、
+// 批量查询省略对应 map key。
+type LastTradePrice struct {
+	TokenID TokenID       `json:"token_id"`
+	Price   DecimalString `json:"price"`
+	Side    OrderSide     `json:"side"`
+}
 
 // BalanceAllowance 表示余额授权信息。V2 服务端把 balance/allowance 序列化为字符串
 // （最小单位的 uint256，例如 "43468934"），所以这里用 string 承接再由调用方解析。
