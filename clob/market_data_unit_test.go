@@ -105,7 +105,7 @@ func newReadonlyMarketDataAt(url string) *readonlyMarketDataClientImpl {
 	return &readonlyMarketDataClientImpl{
 		readonlyBaseClient: &readonlyBaseClient{
 			baseURL: url,
-			negRisk: map[string]bool{},
+			negRisk: newNegRiskCache(),
 		},
 	}
 }

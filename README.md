@@ -146,6 +146,9 @@ V1 回退选项。
 | `GetLastTradePrice`      | 获取最后成交价         | `tokenID`                                  | `*LastTradePrice`, `error`            |
 | `GetLastTradesPrices`    | 批量获取最后成交价（未成交 token 无 key） | `tokenIDs`                    | `map[TokenID]LastTradePrice`, `error` |
 | `CalculateMarketPrice`   | 按订单簿估算市价单最差成交价 | `tokenID`, `side`, `amount`, `orderType` | `float64`, `error`                    |
+| `GetNegRisk`            | 获取并缓存市场 negRisk 属性 | `tokenID`                              | `bool`, `error`                       |
+| `PrimeNegRisk`          | 用已加载的市场数据预热 negRisk | `tokenID`, `value`                    | `error`                               |
+| `InvalidateNegRisk`     | 失效单个 negRisk 缓存项 | `tokenID`                                  | `error`                               |
 | `GetTime`                | 获取服务器时间         | -                                          | `time.Time`, `error`                  |
 | `GetCollateralBalance`   | 获取 V2 抵押物 pUSD 余额 | -                                      | `float64`, `error`                    |
 | `GetUSDCBalance`         | 获取旧 USDC.e 余额（已弃用） | -                                   | `float64`, `error`                    |

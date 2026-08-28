@@ -317,9 +317,11 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 			if orderArgs.NegRisk != nil {
 				perOrderNegRisk = *orderArgs.NegRisk
 				// 顺手把权威值喂进缓存，惠及后续 GetNegRisk / 重试路径。
-				c.baseClient.negRisk[orderArgs.TokenID] = perOrderNegRisk
+				if canonical, canonicalErr := canonicalNegRiskTokenID(orderArgs.TokenID); canonicalErr == nil {
+					c.baseClient.negRisk.set(canonical, perOrderNegRisk, negRiskSourceOrderArg)
+				}
 			} else {
-				perOrderNegRisk = c.baseClient.negRiskForToken(orderArgs.TokenID)
+				perOrderNegRisk, _ = c.baseClient.negRiskForToken(orderArgs.TokenID)
 			}
 		}
 

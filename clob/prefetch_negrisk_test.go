@@ -13,8 +13,9 @@ import (
 func TestNegRiskFetchList(t *testing.T) {
 	truePtr, falsePtr := true, false
 	c := &baseClient{
-		negRisk: map[string]bool{"400": true}, // 预置缓存命中项
+		negRisk: newNegRiskCache(),
 	}
+	c.negRisk.set("400", true, negRiskSourceManual)
 
 	args := []types.OrderArgs{
 		{TokenID: "100", NegRisk: &truePtr},  // 已传入 → 跳过
@@ -37,11 +38,12 @@ func TestNegRiskFetchList(t *testing.T) {
 // 时，待查列表为空——预取应完全不发请求。
 func TestNegRiskFetchList_AllKnown(t *testing.T) {
 	truePtr := true
-	c := &baseClient{negRisk: map[string]bool{"a": false}}
+	c := &baseClient{negRisk: newNegRiskCache()}
+	c.negRisk.set("1", false, negRiskSourceManual)
 
 	args := []types.OrderArgs{
-		{TokenID: "a"},                    // 缓存命中
-		{TokenID: "b", NegRisk: &truePtr}, // 传入
+		{TokenID: "1"},                    // 缓存命中
+		{TokenID: "2", NegRisk: &truePtr}, // 传入
 	}
 	if got := c.negRiskFetchList(args); len(got) != 0 {
 		t.Fatalf("expected empty fetch list, got %v", got)

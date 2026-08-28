@@ -188,21 +188,68 @@ func (c *readonlyMarketDataClientImpl) GetTickSize(tokenID string) (types.TickSi
 	return getTickSize(c.readonlyBaseClient.baseURL, tokenID)
 }
 
-// GetNegRisk 获取代币的负风险状态。
-//
-// 缓存命中时直接返回；未命中时走 baseClient.negRiskForToken 查询（共用
-// baseClient.negRisk 缓存）。仅当查询失败且无缓存时才返回 error——
-// negRiskForToken 内部把失败吞成 false，这里复查缓存以区分 "查到 = false"
-// 与 "查询失败"，保留原有的 error 契约。
+// GetNegRisk 获取代币的负风险状态。首次查询通过 singleflight 合并同 token
+// 的并发请求，后续从进程生命周期缓存读取。
 func (c *marketDataClientImpl) GetNegRisk(tokenID string) (bool, error) {
-	if negRisk, ok := c.baseClient.negRisk[tokenID]; ok {
-		return negRisk, nil
+	return c.baseClient.negRiskForToken(tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetNegRisk(tokenID string) (bool, error) {
+	canonical, err := canonicalNegRiskTokenID(tokenID)
+	if err != nil {
+		return false, err
 	}
-	v := c.baseClient.negRiskForToken(tokenID)
-	if _, ok := c.baseClient.negRisk[tokenID]; !ok {
-		return false, fmt.Errorf("failed to get neg risk for token %s", tokenID)
+	return getNegRiskCached(c.readonlyBaseClient.baseURL, c.readonlyBaseClient.negRisk, canonical)
+}
+
+func getNegRiskCached(baseURL string, cache *negRiskCache, tokenID string) (bool, error) {
+	return cache.getOrFetch(tokenID, func() (bool, error) {
+		resp, err := http.Get[struct {
+			NegRisk bool `json:"neg_risk"`
+		}](baseURL, internal.GetNegRisk, map[string]string{"token_id": tokenID})
+		if err != nil {
+			return false, fmt.Errorf("get neg risk for token %s: %w", tokenID, err)
+		}
+		return resp.NegRisk, nil
+	})
+}
+
+// PrimeNegRisk allows a business layer that already loaded market metadata to
+// seed the cache before order submission, preserving a zero-network hot path.
+func (c *marketDataClientImpl) PrimeNegRisk(tokenID string, value bool) error {
+	return primeNegRisk(c.baseClient.negRisk, tokenID, value)
+}
+
+func (c *readonlyMarketDataClientImpl) PrimeNegRisk(tokenID string, value bool) error {
+	return primeNegRisk(c.readonlyBaseClient.negRisk, tokenID, value)
+}
+
+func primeNegRisk(cache *negRiskCache, tokenID string, value bool) error {
+	canonical, err := canonicalNegRiskTokenID(tokenID)
+	if err != nil {
+		return err
 	}
-	return v, nil
+	cache.set(canonical, value, negRiskSourceManual)
+	return nil
+}
+
+// InvalidateNegRisk removes one cached classification. The next GetNegRisk or
+// order without an explicit NegRisk value fetches it again.
+func (c *marketDataClientImpl) InvalidateNegRisk(tokenID string) error {
+	return invalidateNegRisk(c.baseClient.negRisk, tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) InvalidateNegRisk(tokenID string) error {
+	return invalidateNegRisk(c.readonlyBaseClient.negRisk, tokenID)
+}
+
+func invalidateNegRisk(cache *negRiskCache, tokenID string) error {
+	canonical, err := canonicalNegRiskTokenID(tokenID)
+	if err != nil {
+		return err
+	}
+	cache.invalidate(canonical)
+	return nil
 }
 
 // GetOrderBook 获取代币的订单簿

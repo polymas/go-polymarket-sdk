@@ -703,6 +703,31 @@ func TestGetSpreads(t *testing.T) {
 	})
 }
 
+func TestGetNegRisk(t *testing.T) {
+	client := newTestClobClient(t)
+	config := test.LoadTestConfig()
+	tokenID := config.TestTokenID
+	if tokenID == "" {
+		testData := getTestMarketData(t, "")
+		if testData == nil {
+			t.Skip("Skipping test: no active token available")
+		}
+		tokenID = testData.TokenIDs[0]
+	}
+
+	first, err := client.GetNegRisk(tokenID)
+	if err != nil {
+		t.Fatalf("GetNegRisk: %v", err)
+	}
+	second, err := client.GetNegRisk(tokenID)
+	if err != nil || second != first {
+		t.Fatalf("cached GetNegRisk = %v, %v; first=%v", second, err, first)
+	}
+	if _, err := client.GetNegRisk("invalid-token-id"); err == nil {
+		t.Fatal("invalid token ID unexpectedly accepted")
+	}
+}
+
 func TestGetLastTradePrice(t *testing.T) {
 	client := newTestClobClient(t)
 	config := test.LoadTestConfig()

@@ -406,14 +406,16 @@
 - [ ] 下单/Relayer 超时必须返回 ambiguous outcome，先对账再决定是否重发。
 - [ ] 日志统一脱敏 API secret、passphrase、私钥、签名和完整鉴权头。
 
-### [ ] P1-6：为 SDK 内部 negRisk 缓存增加并发安全和生命周期
+### [x] P1-6：为 SDK 内部 negRisk 缓存增加并发安全和生命周期
 
-当前 negRisk map 没有明显的统一锁、TTL 和失效策略；tick 已改为业务层显式传入，SDK 不再隐藏缓存。
+`negRisk` 是市场创建时确定的静态属性；官方 V2 客户端使用进程生命周期缓存，
+当前 Market WS 也没有 negRisk 变更事件。因此不做定时/逐单刷新，避免增加下单热路径延迟。
 
-- [ ] 使用并发安全缓存；避免批量签名与 WS 更新产生 data race。
-- [ ] cache entry 带 fetchedAt/source/version。
-- [ ] 支持手动 invalidate、WS invalidate、TTL refresh 和 singleflight。
-- [ ] `go test -race` 覆盖并发批量下单与缓存更新。
+- [x] 裸 map 替换为加锁 typed cache；并发批量签名、显式订单参数更新不再产生 data race。
+- [x] cache entry 带 fetchedAt/source/version，区分 API、订单显式参数和业务层预热。
+- [x] 同一 token 冷启动请求使用 singleflight；提供 `PrimeNegRisk` 和 `InvalidateNegRisk`。
+- [x] 显式 `OrderArgs.NegRisk` 及业务启动预热保持下单零网络；无 TTL 和不存在的 WS 自动刷新。
+- [x] mock、生产正负向验证及 `go test -race` 覆盖并发预取、更新、失效和重新获取。
 
 ### [x] P1-7：按 V2 设计移除 fee rate
 

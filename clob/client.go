@@ -59,6 +59,9 @@ type MarketDataClient interface {
 	// GetTickSize 显式查询 token 当前的最小价格步长；SDK 不隐藏缓存。
 	// 下单方法不会隐式调用；业务层可选择默认值或提前调用本方法。
 	GetTickSize(tokenID string) (types.TickSize, error)
+	GetNegRisk(tokenID string) (bool, error)
+	PrimeNegRisk(tokenID string, value bool) error
+	InvalidateNegRisk(tokenID string) error
 	GetTime() (time.Time, error)
 }
 
@@ -116,7 +119,7 @@ type baseClient struct {
 	baseURL       string           // API 基础 URL
 	signatureType types.SignatureType
 	deriveCreds   *types.ApiCreds
-	negRisk       map[string]bool
+	negRisk       *negRiskCache
 	web3Client    web3.Client // 保存 Web3Client 引用（可能为nil，用于只读客户端）
 }
 
@@ -136,7 +139,7 @@ func WithV2() ClientOption {
 // readonlyBaseClient 只读客户端的基础结构，不包含认证相关字段
 type readonlyBaseClient struct {
 	baseURL string
-	negRisk map[string]bool
+	negRisk *negRiskCache
 }
 
 // orderClientImpl 订单功能模块实现
@@ -201,7 +204,7 @@ func NewReadonlyClient() ReadonlyClient {
 	// 创建只读基础客户端
 	readonlyBase := &readonlyBaseClient{
 		baseURL: internal.ClobAPIDomain,
-		negRisk: make(map[string]bool),
+		negRisk: newNegRiskCache(),
 	}
 
 	// 创建功能模块
@@ -234,7 +237,7 @@ func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 		proxyAddress:  "", // Will be set in initialization
 		baseURL:       internal.ClobAPIDomain,
 		signatureType: signatureType,
-		negRisk:       make(map[string]bool),
+		negRisk:       newNegRiskCache(),
 		web3Client:    web3Client,
 	}
 
@@ -300,19 +303,12 @@ func (c *baseClient) GetAPICreds() *types.ApiCreds {
 //
 // 与 marketDataClientImpl.GetNegRisk 共用 baseClient.negRisk 缓存；查不到时
 // 退回 false，由调用方的 negRisk 重试兜底。
-func (c *baseClient) negRiskForToken(tokenID string) bool {
-	if v, ok := c.negRisk[tokenID]; ok {
-		return v
-	}
-	params := map[string]string{"token_id": tokenID}
-	resp, err := http.Get[struct {
-		NegRisk bool `json:"neg_risk"`
-	}](c.baseURL, internal.GetNegRisk, params)
+func (c *baseClient) negRiskForToken(tokenID string) (bool, error) {
+	canonical, err := canonicalNegRiskTokenID(tokenID)
 	if err != nil {
-		return false
+		return false, err
 	}
-	c.negRisk[tokenID] = resp.NegRisk
-	return resp.NegRisk
+	return getNegRiskCached(c.baseURL, c.negRisk, canonical)
 }
 
 // negRiskFetchList 计算一批订单里"NegRisk 状态未知、需要现查"的去重 tokenID
@@ -325,8 +321,11 @@ func (c *baseClient) negRiskFetchList(orderArgsList []types.OrderArgs) []string 
 		if orderArgsList[i].NegRisk != nil {
 			continue // 调用方已传入真实值，签名循环直接用
 		}
-		id := orderArgsList[i].TokenID
-		if _, ok := c.negRisk[id]; ok {
+		id, err := canonicalNegRiskTokenID(orderArgsList[i].TokenID)
+		if err != nil {
+			continue
+		}
+		if _, ok := c.negRisk.get(id); ok {
 			continue // 缓存已命中
 		}
 		if _, dup := seen[id]; dup {
@@ -345,43 +344,25 @@ func (c *baseClient) negRiskFetchList(orderArgsList []types.OrderArgs) []string 
 // 已传入或已缓存的跳过。≤1 个待查时不起 goroutine，留给签名循环里的
 // negRiskForToken 串行兜底即可。
 //
-// 并发安全：每个 goroutine 只写自己的本地结果槽，不触碰共享的 c.negRisk；
-// 待全部返回后由调用方所在的单 goroutine 合并进缓存，不引入新的 data race。
+// 并发安全：缓存自身加锁，同一 token 的并发冷启动查询由 singleflight 合并。
 func (c *baseClient) prefetchNegRisk(orderArgsList []types.OrderArgs) {
 	need := c.negRiskFetchList(orderArgsList)
 	if len(need) <= 1 {
 		return // 0 或 1 个，串行查即可，不值得起 goroutine
 	}
 
-	type result struct {
-		val bool
-		ok  bool
-	}
-	out := make([]result, len(need))
 	sem := make(chan struct{}, negRiskPrefetchConcurrency)
 	var wg sync.WaitGroup
-	for i, id := range need {
+	for _, id := range need {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, id string) {
+		go func(id string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			resp, err := http.Get[struct {
-				NegRisk bool `json:"neg_risk"`
-			}](c.baseURL, internal.GetNegRisk, map[string]string{"token_id": id})
-			if err != nil {
-				return // ok 默认 false → 不写缓存，签名循环里再 negRiskForToken 兜底
-			}
-			out[i] = result{val: resp.NegRisk, ok: true}
-		}(i, id)
+			_, _ = getNegRiskCached(c.baseURL, c.negRisk, id)
+		}(id)
 	}
 	wg.Wait()
-
-	for i, r := range out {
-		if r.ok {
-			c.negRisk[need[i]] = r.val
-		}
-	}
 }
 
 // CreateOrDeriveAPICreds creates or derives API credentials
