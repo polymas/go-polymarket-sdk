@@ -469,6 +469,8 @@ func TestOrderPostResponseStateHelpers(t *testing.T) {
 		notSubmitted bool
 	}{
 		{name: "live", response: types.OrderPostResponse{Status: "live"}, accepted: true},
+		{name: "success flag", response: types.OrderPostResponse{Success: true}, accepted: true},
+		{name: "error dominates success flag", response: types.OrderPostResponse{Success: true, Status: OrderServerRejectedStatus, ErrorMsg: "insufficient balance"}, notSubmitted: true},
 		{name: "matched pending", response: types.OrderPostResponse{Status: "matched", TradeIDs: []string{"trade"}}, accepted: true, followUp: true},
 		{name: "unknown", response: types.OrderPostResponse{Status: OrderUnknownStatus}, followUp: true},
 		{name: "market closed", response: types.OrderPostResponse{Status: OrderMarketClosedStatus}, notSubmitted: true},

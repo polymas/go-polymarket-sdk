@@ -124,6 +124,9 @@ V1 回退选项。
 | `GetOrders`              | 获取活跃订单           | `orderID`, `conditionID`, `tokenID` (可选) | `[]OpenOrder`, `error`                |
 | `CreateAndPostOrders`    | 创建并提交多个订单     | `orderArgsList`, `orderTypes`              | `[]OrderPostResponse`, `error`        |
 | `PostOrder`              | 提交单个订单           | `orderArgs`, `orderType`                   | `*OrderPostResponse`, `error`         |
+| `CreateAndPostMarketOrder` | 构造并提交市价单（兼容等待语义） | `marketOrderArgs`                   | `*OrderPostResponse`, `error`         |
+| `CreateAndPostMarketOrderInstant` | 构造并立即提交市价单 | `marketOrderArgs`                          | `*OrderPostResponse`, `error`         |
+| `CreateAndPostMarketOrderAndWait` | 构造市价单并等待结果 | `ctx`, `marketOrderArgs`                   | `*OrderPostResponse`, `error`         |
 | `CancelOrders`           | 取消多个订单           | `orderIDs`                                 | `*OrderCancelResponse`, `error`       |
 | `CancelOrder`            | 取消单个订单           | `orderID`                                  | `*OrderCancelResponse`, `error`       |
 | `CancelAll`              | 取消所有订单           | -                                          | `*OrderCancelResponse`, `error`       |
@@ -138,6 +141,7 @@ V1 回退选项。
 | `GetSpreads`             | 批量获取价差           | `tokenIDs`                                 | `[]Spread`, `error`                   |
 | `GetLastTradePrice`      | 获取最后成交价         | `tokenID`                                  | `*LastTradePrice`, `error`            |
 | `GetLastTradesPrices`    | 批量获取最后成交价     | `tokenIDs`                                 | `[]LastTradePrice`, `error`           |
+| `CalculateMarketPrice`   | 按订单簿估算市价单最差成交价 | `tokenID`, `side`, `amount`, `orderType` | `float64`, `error`                    |
 | `GetFeeRate`             | 获取手续费率           | `tokenID`                                  | `int`, `error`                        |
 | `GetTime`                | 获取服务器时间         | -                                          | `time.Time`, `error`                  |
 | `GetCollateralBalance`   | 获取 V2 抵押物 pUSD 余额 | -                                      | `float64`, `error`                    |
@@ -305,6 +309,39 @@ if err != nil {
 
 fmt.Printf("订单ID: %s\n", response.OrderID)
 ```
+
+市价单在 CLOB 上仍是立即可成交的 FOK/FAK 限价单。BUY 的业务数量是
+pUSD 金额，SELL 的业务数量是 outcome token 份额：
+
+```go
+// 低延迟 BUY：业务层已有实时盘口时显式传入 MaxPrice，SDK 不再请求订单簿。
+buy, err := clobClient.CreateAndPostMarketOrderInstant(types.MarketOrderArgs{
+    TokenID:  "token-id",
+    Side:     types.OrderSideBUY,
+    Amount:   5.00, // 最多花 5.00 pUSD
+    MaxPrice: 0.51,
+    TickSize: types.TickSize0_01,
+    OrderType: types.OrderTypeFOK,
+    NegRisk:  &negRisk,
+})
+
+// SELL：卖出 5 shares，最低接受 0.50；ctx 控制等待成交/结算结果的时间。
+sell, err := clobClient.CreateAndPostMarketOrderAndWait(ctx, types.MarketOrderArgs{
+    TokenID:  "token-id",
+    Side:     types.OrderSideSELL,
+    Shares:   5,
+    MinPrice: 0.50,
+    TickSize: types.TickSize0_01,
+    OrderType: types.OrderTypeFOK,
+    NegRisk:  &negRisk,
+})
+```
+
+`MaxPrice`（BUY）或 `MinPrice`（SELL）为零时，SDK 会先请求当前订单簿：FOK
+深度不足会返回可用 `errors.As` 判断的 `*clob.InsufficientLiquidityError`；FAK
+会使用当前最差可成交档位，允许部分成交后取消剩余数量。显式保护价是低延迟路径，
+SDK 只做 tick、价格范围、金额精度和默认最小 5 shares 校验，不会再查盘口；调用方
+应保证价格数据新鲜。`OrderType` 零值默认 FOK，市价单不接受 GTC/GTD。
 
 批量下单时每笔订单都必须显式携带自己的 `TickSize`，同一批可以不同：
 
@@ -605,6 +642,7 @@ go test -cover ./...
 - `OrderSide`: 订单方向（BUY/SELL）
 - `OrderType`: 订单类型（GTC/FOK/GTD/FAK）；GTD 至少提前 3 分钟，PostOnly 仅支持 GTC/GTD
 - `OrderArgs`: 订单参数
+- `MarketOrderArgs`: 市价单参数；BUY 使用 `Amount/MaxPrice`，SELL 使用 `Shares/MinPrice`
 - `OpenOrder`: 开放订单
 - `OrderBookSummary`: 订单簿摘要
 - `GammaMarket`: Gamma 市场

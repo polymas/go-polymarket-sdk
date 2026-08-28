@@ -32,6 +32,9 @@ type OrderClient interface {
 	PostOrder(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
 	PostOrderInstant(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
 	PostOrderAndWait(ctx context.Context, orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
+	CreateAndPostMarketOrder(orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
+	CreateAndPostMarketOrderInstant(orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
+	CreateAndPostMarketOrderAndWait(ctx context.Context, orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
 	CancelOrder(orderID types.Keccak256) (*types.OrderCancelResponse, error)
 	CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error)
 }
@@ -49,6 +52,9 @@ type MarketDataClient interface {
 	GetSpreads(tokenIDs []string) ([]types.Spread, error)
 	GetLastTradePrice(tokenID string) (*types.LastTradePrice, error)
 	GetLastTradesPrices(tokenIDs []string) ([]types.LastTradePrice, error)
+	// CalculateMarketPrice 按当前订单簿估算市价单的最差成交价。
+	// BUY 的 amount 是 pUSD 金额，SELL 的 amount 是 shares。
+	CalculateMarketPrice(tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error)
 	// GetTickSize 显式查询 token 当前的最小价格步长；SDK 不隐藏缓存。
 	// 下单方法不会隐式调用；业务层可选择默认值或提前调用本方法。
 	GetTickSize(tokenID string) (types.TickSize, error)

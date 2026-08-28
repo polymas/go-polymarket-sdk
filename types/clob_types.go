@@ -206,11 +206,24 @@ type OrderArgs struct {
 	NegRisk *bool `json:"neg_risk,omitempty"`
 }
 
-// MarketOrderArgs 表示创建市价单的参数
+// MarketOrderArgs 表示市价单的业务输入。市价单在 CLOB 上仍是一笔
+// 可立即成交的限价单；OrderType 只能是 FOK/FAK，零值默认 FOK。
+//
+// BUY 只使用 Amount（pUSD 金额），可选 MaxPrice 作为最高成交价；
+// SELL 只使用 Shares（outcome token 份额），可选 MinPrice 作为最低成交价。
+// MaxPrice/MinPrice 为 0 时，SDK 请求当前订单簿自动估价；显式提供保护价时
+// 不再额外请求订单簿，适合业务层已持有实时价格的低延迟路径。
 type MarketOrderArgs struct {
-	OrderArgs
-	Amount    float64   `json:"amount"`
-	OrderType OrderType `json:"order_type"`
+	TokenID   string    `json:"token_id"`
+	Side      OrderSide `json:"side"`
+	Amount    float64   `json:"amount,omitempty"`
+	Shares    float64   `json:"shares,omitempty"`
+	MaxPrice  float64   `json:"max_price,omitempty"`
+	MinPrice  float64   `json:"min_price,omitempty"`
+	TickSize  TickSize  `json:"tick_size"`
+	OrderType OrderType `json:"order_type,omitempty"`
+	DeferExec bool      `json:"defer_exec,omitempty"`
+	NegRisk   *bool     `json:"neg_risk,omitempty"`
 }
 
 // FloatString 处理可能来自API的字符串格式的浮点值
@@ -421,12 +434,15 @@ type OrderPostResponse struct {
 
 // Accepted 表示 CLOB 已明确接收订单。它只判断接单结果，不代表订单已经成交。
 func (r OrderPostResponse) Accepted() bool {
+	if r.ErrorMsg != "" {
+		return false
+	}
 	if r.Success {
 		return true
 	}
 	switch strings.ToLower(r.Status) {
 	case "live", "matched", "delayed":
-		return r.ErrorMsg == ""
+		return true
 	default:
 		return false
 	}

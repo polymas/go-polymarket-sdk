@@ -87,6 +87,11 @@ type batchPostError struct {
 	timing           types.OrderResponseTiming
 }
 
+type orderAmountOverride struct {
+	maker *big.Int
+	taker *big.Int
+}
+
 func (e *batchPostError) Error() string { return e.err.Error() }
 func (e *batchPostError) Unwrap() error { return e.err }
 
@@ -264,6 +269,16 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	waitForResult bool,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2OnceWithAmounts(orderArgsList, orderTypes, waitForResult, nil, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
+	orderArgsList []types.OrderArgs,
+	orderTypes []types.OrderType,
+	waitForResult bool,
+	amountOverrides []orderAmountOverride,
+	isRetry ...bool,
+) ([]types.OrderPostResponse, error) {
 	batchStart := time.Now()
 	isRetryCall := len(isRetry) > 0 && isRetry[0]
 	if len(orderArgsList) == 0 {
@@ -271,6 +286,9 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	}
 	if len(orderArgsList) > 15 {
 		return nil, newBatchNotSubmittedError("postOrdersBatchV2: batch size cannot exceed 15, got %d", len(orderArgsList))
+	}
+	if amountOverrides != nil && len(amountOverrides) != len(orderArgsList) {
+		return nil, newBatchNotSubmittedError("amount override count mismatch: got %d, want %d", len(amountOverrides), len(orderArgsList))
 	}
 
 	negRisk := false
@@ -305,7 +323,18 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 			}
 		}
 
-		signed, err := c.createSignedOrderV2(orderArgs, orderArgs.TickSize, perOrderNegRisk, orderTypes[i])
+		var signed *signing.V2SignedOrder
+		var err error
+		if amountOverrides == nil {
+			signed, err = c.createSignedOrderV2(orderArgs, orderArgs.TickSize, perOrderNegRisk, orderTypes[i])
+		} else {
+			signed, err = c.createSignedOrderV2WithAmounts(
+				orderArgs,
+				amountOverrides[i].maker,
+				amountOverrides[i].taker,
+				perOrderNegRisk,
+			)
+		}
 		if err != nil {
 			return nil, newBatchNotSubmittedError("订单 %d token=%s 本地构造/签名失败: %w", i+1, orderArgs.TokenID, err)
 		}
@@ -423,11 +452,20 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	if len(failedOrders) > 0 && !isRetryCall {
 		retryArgs := make([]types.OrderArgs, 0, len(failedOrders))
 		retryTypes := make([]types.OrderType, 0, len(failedOrders))
+		var retryOverrides []orderAmountOverride
+		if amountOverrides != nil {
+			retryOverrides = make([]orderAmountOverride, 0, len(failedOrders))
+		}
 		for _, idx := range failedOrders {
 			retryArgs = append(retryArgs, orderArgsList[idx])
 			retryTypes = append(retryTypes, orderTypes[idx])
+			if amountOverrides != nil {
+				retryOverrides = append(retryOverrides, amountOverrides[idx])
+			}
 		}
-		retryResults, err := c.postOrdersBatchV2WithMode(retryArgs, retryTypes, waitForResult, true)
+		retryResults, err := resolveV2BatchAttempt(retryArgs, retryTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
+			return c.postOrdersBatchV2OnceWithAmounts(a, t, waitForResult, retryOverrides, true)
+		})
 		if err != nil {
 			internal.LogError("V2 重试订单失败: %v", err)
 		} else {
@@ -583,6 +621,18 @@ func (c *orderClientImpl) createSignedOrderV2(
 	makerAmount, takerAmount, err := c.calculateOrderAmounts(orderArgs.Side, orderArgs.Size, orderArgs.Price, tickSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate amounts: %w", err)
+	}
+	return c.createSignedOrderV2WithAmounts(orderArgs, makerAmount, takerAmount, negRisk)
+}
+
+func (c *orderClientImpl) createSignedOrderV2WithAmounts(
+	orderArgs types.OrderArgs,
+	makerAmount *big.Int,
+	takerAmount *big.Int,
+	negRisk bool,
+) (*signing.V2SignedOrder, error) {
+	if makerAmount == nil || makerAmount.Sign() <= 0 || takerAmount == nil || takerAmount.Sign() <= 0 {
+		return nil, fmt.Errorf("maker and taker amounts must be positive")
 	}
 
 	baseAddr := string(c.baseClient.web3Client.GetBaseAddress())

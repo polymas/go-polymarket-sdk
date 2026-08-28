@@ -351,14 +351,23 @@
 - [x] GTD 必须带至少提前 3 分钟的 Unix 秒 expiration，其他类型禁止携带 expiration。
 - [x] PostOnly 仅允许 GTC/GTD；使用表驱动测试覆盖 GTC/GTD/FOK/FAK、expiration 和非法类型。
 
-### [ ] P1-2：实现官方市价单构造流程
+### [x] P1-2：实现官方市价单构造流程
 
 已有 `MarketOrderArgs` 类型，但没有公开的 create/post market order 流程。
 
-- [ ] 实现 BUY 按金额、SELL 按份额的市价单构造。
-- [ ] 支持用户指定 worst price / slippage guard。
-- [ ] 提交前基于订单簿估算可成交量；深度不足时在本地返回明确错误。
-- [ ] 实现官方建议的 market price estimation，并覆盖 FOK/FAK。
+完成于 2026-08-28，发布版本 `v1.30.0`。
+
+- [x] 实现 BUY 按 pUSD 金额、SELL 按 outcome token 份额的市价单构造；市价单限制为 FOK/FAK，零值默认 FOK。
+- [x] 支持 BUY `MaxPrice`、SELL `MinPrice`。显式保护价不请求订单簿，保留业务层已持有实时盘口时的低延迟路径；保护价为零才由 SDK 获取订单簿估价。
+- [x] 未指定保护价时按官方 best-to-worst 规则累计深度：BUY 累计 `price*size`，SELL 累计 shares；FOK 深度不足返回 typed `InsufficientLiquidityError`，FAK 使用最差可成交档位并允许部分成交。
+- [x] 市价金额使用整数定点算法：maker 固定向下保留 2 位，taker 根据 tick 使用官方 rounding config；显式保护价向保护方向取整，自动估价路径向下取整。
+- [x] 公开 `CalculateMarketPrice`、兼容等待语义、`Instant` 和 `AndWait(ctx)` 三种提交方式；复用 V2 签名、negRisk 重试、歧义结果对账与 settlement 等待，不另建重复下单栈。
+- [x] 修正生产响应判定：真实 CLOB 的逐单拒绝可能同时返回 `success=true` 和非空 `errorMsg`，现在 `Accepted()` 以错误字段优先，不会误判为已接单。
+- [x] 单元测试覆盖 BUY/SELL、FOK/FAK、空簿/深度不足、side-specific 字段、保护价网格、过期 tick、默认最小 5 shares、零额外盘口请求、真实 EIP-712 签名及 `/orders` wire amounts；clob tracked tests 与 race tests 均通过。
+- [x] 从 Git 索引构造的干净副本中 `go test ./clob ./types` 通过；全仓测试的本项相关包及其他包通过，仅既有 `chainws.TestMonitorAddress_USDCAndTokenChanges` 因测试内长时间 sleep 触发 90 秒总超时、`internal` 公共 OnFinality RPC 返回 429，与本项无关。
+- [x] 生产正向验证：BTC 5 分钟 token `14557128192760159105557252808339369229830206629064893850242581995445599509282`，以 0.51 BUY 5 shares（2.55 pUSD），再以 0.50 SELL 5 shares，仓位完全关闭，往返价差成本约 0.05 pUSD。BUY tx `0xb19313996c80ecdb6eadbf56de3ba048d83dd8f97e1bcc0d1447d338b81fe2ef`，SELL tx `0xda794ea7f7f54225d074fd7656f119940b7d63ecf6e6288e7c78629a4dab86d3`。
+- [x] 生产负向验证：tick `0.001` token 在远离盘口的 0.003 FAK BUY 中，6 位 taker 精度被明确拒绝，官方 5 位精度通过 amount validation 后得到 `no orders found`，两次均无成交和资产损失。由此以生产行为否定旧 issue 中“统一最多 4 位”的过时结论。
+- [x] 下游核查：`polyworker` 未调用 SDK 的旧 `MarketOrderArgs`，也没有自定义实现新增的公开接口；本项不修改 `polyworker`。旧类型此前虽未被仓库使用，但字段布局变更对外属于源码级升级点，调用方应迁移到新的 side-specific 字段。
 
 ### [x] P1-3：扩展订单簿模型并统一单个/批量返回类型
 
