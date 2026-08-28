@@ -204,9 +204,9 @@ func main() {
 // 借 SetV2Allowances 那种"已知 noop 调用"的方法不合适——这里走最小私有调用。
 //
 // 因为 executeGaslessBatch 是私有的，本工具用 SetV2Allowances 这条公开 API
-// 替代：approve 三件套，链上幂等无副作用。
+// 替代：pUSD/CTF 四笔授权，链上幂等无副作用。
 func callExecuteGaslessBatch(gc *web3.GaslessClient, _ signing.CWIACall, _ string) (*types.TransactionReceipt, error) {
-	// SetV2Allowances 自身就是一个标准的 batch（pUSD/USDC/CTF 三笔 approve），
+	// SetV2Allowances 自身就是一个标准的 batch（pUSD approve + CTF approval 共四笔），
 	// 走的是 executeGaslessBatch -> CWIA 分支，所以是验证 relayer 提交流程的
 	// 最直接公开入口。
 	return gc.SetV2Allowances()

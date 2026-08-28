@@ -68,27 +68,37 @@ func packSetApprovalForAll(operator common.Address) ([]byte, error) {
 }
 
 // SetV2Allowances 让 Safe/Proxy 钱包对 V2 Exchange 一次性完成授权。
-//   - USDC.e.approve(V2_Exchange, MAX)
-//   - USDC.e.approve(V2_NegRiskExchange, MAX)
+//   - pUSD.approve(V2_Exchange, MAX)
+//   - pUSD.approve(V2_NegRiskExchange, MAX)
 //   - CTF.setApprovalForAll(V2_Exchange, true)
 //   - CTF.setApprovalForAll(V2_NegRiskExchange, true)
 //
 // 四笔通过 Relayer 打包在一次 gasless 交易里。退役的 NegRiskAdapter 不再授权。
 func (c *GaslessClient) SetV2Allowances() (*types.TransactionReceipt, error) {
-	usdc := common.HexToAddress(internal.PolygonCollateral)
+	proxyTxns, err := buildV2AllowanceTransactions()
+	if err != nil {
+		return nil, err
+	}
+	return c.executeGaslessBatch(proxyTxns, "Set V2 Allowances", "approve-v2")
+}
+
+// buildV2AllowanceTransactions 只构造 V2 撮合所需的授权调用，不发送交易。
+// V2 Exchange 的抵押物是 pUSD；USDC.e 只应授权给 CollateralOnramp 用于 wrap。
+func buildV2AllowanceTransactions() ([]map[string]any, error) {
+	pusd := common.HexToAddress(internal.PolygonPUSD)
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
 	exV2 := common.HexToAddress(internal.PolygonExchangeV2)
 	exNRV2 := common.HexToAddress(internal.PolygonNegRiskExchangeV2)
-	usdcApproves := []common.Address{exV2, exNRV2}
+	pusdApproves := []common.Address{exV2, exNRV2}
 	ctfApprovals := []common.Address{exV2, exNRV2}
 
-	proxyTxns := make([]map[string]any, 0, len(usdcApproves)+len(ctfApprovals))
-	for _, spender := range usdcApproves {
+	proxyTxns := make([]map[string]any, 0, len(pusdApproves)+len(ctfApprovals))
+	for _, spender := range pusdApproves {
 		data, err := packApproveMax(spender)
 		if err != nil {
-			return nil, fmt.Errorf("pack approve USDC.e→%s: %w", spender.Hex(), err)
+			return nil, fmt.Errorf("pack approve pUSD→%s: %w", spender.Hex(), err)
 		}
-		proxyTxns = append(proxyTxns, callTxn(usdc, data))
+		proxyTxns = append(proxyTxns, callTxn(pusd, data))
 	}
 	for _, op := range ctfApprovals {
 		data, err := packSetApprovalForAll(op)
@@ -97,7 +107,7 @@ func (c *GaslessClient) SetV2Allowances() (*types.TransactionReceipt, error) {
 		}
 		proxyTxns = append(proxyTxns, callTxn(ctf, data))
 	}
-	return c.executeGaslessBatch(proxyTxns, "Set V2 Allowances", "approve-v2")
+	return proxyTxns, nil
 }
 
 // WrapAndApproveV2 一次性完成 V2 trading 的资金准备，打包成一笔 gasless batch：

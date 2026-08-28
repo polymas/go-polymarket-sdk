@@ -1,11 +1,12 @@
-// v2_approve：对 V2 Exchange 和 V2 NegRisk Exchange 做 USDC.e approve + CTF setApprovalForAll。
+// v2_approve：对 V2 Exchange 和 V2 NegRisk Exchange 做 pUSD approve + CTF setApprovalForAll。
 // 通过 Polymarket Relayer 的 gasless 路径一次性打包 4 笔。
 //
 // 必选 env：poly_sec（或 POLY_PRIVATE_KEY）
 // 可选 env：POLY_SIGNATURE_TYPE（默认 2=Safe）
 // 可选 env：POLY_BUILDER_API_KEY / POLY_BUILDER_SECRET / POLY_BUILDER_PASSPHRASE
-//   三个都设 → Relayer 走 POLY_BUILDER_* HMAC 鉴权（前端 "Relayer API Keys" 生成的 key）
-//   缺一个 → Relayer 走 L1 EOA-signed 鉴权（POLY_ADDRESS + POLY_SIGNATURE）
+//
+//	三个都设 → Relayer 走 POLY_BUILDER_* HMAC 鉴权（前端 "Relayer API Keys" 生成的 key）
+//	缺一个 → Relayer 走 L1 EOA-signed 鉴权（POLY_ADDRESS + POLY_SIGNATURE）
 package main
 
 import (
@@ -41,12 +42,11 @@ func main() {
 	}
 	fmt.Printf(" Safe Proxy    : %s\n", proxy)
 	fmt.Printf(" SignatureType : %d\n", sigType)
-	fmt.Println(" 5 txs in one relayer batch:")
-	fmt.Println("   1) USDC.e.approve(V2 Exchange,         MAX)")
-	fmt.Println("   2) USDC.e.approve(V2 NegRisk Exchange, MAX)")
-	fmt.Println("   3) USDC.e.approve(NegRisk Adapter,     MAX)")
-	fmt.Println("   4) CTF.setApprovalForAll(V2 Exchange,         true)")
-	fmt.Println("   5) CTF.setApprovalForAll(V2 NegRisk Exchange, true)")
+	fmt.Println(" 4 txs in one relayer batch:")
+	fmt.Println("   1) pUSD.approve(V2 Exchange,         MAX)")
+	fmt.Println("   2) pUSD.approve(V2 NegRisk Exchange, MAX)")
+	fmt.Println("   3) CTF.setApprovalForAll(V2 Exchange,         true)")
+	fmt.Println("   4) CTF.setApprovalForAll(V2 NegRisk Exchange, true)")
 	fmt.Println("=============================================")
 
 	var creds *types.ApiCreds

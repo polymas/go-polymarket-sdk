@@ -310,6 +310,19 @@
 - [x] 删除用 Skip 掩盖失效端点的测试。
 - [x] 不保留绑定旧 Polymarket schema 的通用 GraphQL client。
 
+### [x] V2-P0-1：修正 `SetV2Allowances` 的 V2 抵押物授权
+
+完成于 2026-08-28，发布版本 `v1.28.0`。
+
+复审发现 `SetV2Allowances()` 虽然以 V2 命名，但前两笔仍向 V2 Exchange / V2 NegRisk Exchange 执行 `USDC.e.approve(MAX)`。官方 CLOB V2 的交易抵押物是 pUSD；USDC.e 只应在进场 wrap 时授权给 CollateralOnramp。
+
+- [x] 前两笔改为 `pUSD.approve(V2 Exchange / V2 NegRisk Exchange, MAX)`；CTF 的两笔 `setApprovalForAll` 保持不变。
+- [x] 抽出纯构造函数，单元测试逐笔解码 target、selector、spender/operator 和 amount，并显式断言不得以 USDC.e 为 target。
+- [x] `go test -timeout 30s ./web3` 和 `go test -race -timeout 45s ./web3` 通过。
+- [x] 使用 `.env` Safe 钱包执行真实 gasless 四笔授权，receipt 成功：tx `0x49dd2e06554093264fccdf13f27e98c483086325354481ac3af9a05484a1861b`，block `92787358`。
+- [x] 交易后链上验证两个 pUSD allowance 均为 MAX、两个 CTF approval 均为 true，两个 USDC.e allowance 与交易前逐值一致。
+- [x] 更新可执行示例的交易数和抵押物说明，不再引导用户对 V2 Exchange 授权 USDC.e。
+
 ---
 
 ## P1：核心流程不完整或行为不安全
