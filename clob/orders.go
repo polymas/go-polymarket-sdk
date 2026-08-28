@@ -13,6 +13,9 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
+// MaxCancelOrdersPerRequest 是官方 DELETE /orders 当前允许的最大订单数。
+const MaxCancelOrdersPerRequest = 3000
+
 // GetOrders 获取活跃订单
 func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error) {
 	// Validate API credentials
@@ -275,17 +278,20 @@ func firstOrderResponse(results []types.OrderPostResponse, err error) (*types.Or
 // According to Polymarket API docs: DELETE /orders with body as string[] (orderID array)
 func (c *orderClientImpl) CancelOrders(orderIDs []types.Keccak256) (*types.OrderCancelResponse, error) {
 	if len(orderIDs) == 0 {
-		return &types.OrderCancelResponse{
-			Canceled:    []types.Keccak256{},
-			NotCanceled: make(map[types.Keccak256]string),
-		}, nil
+		return emptyOrderCancelResponse(), nil
+	}
+	if len(orderIDs) > MaxCancelOrdersPerRequest {
+		return nil, fmt.Errorf("cancel orders count %d exceeds per-request limit %d", len(orderIDs), MaxCancelOrdersPerRequest)
 	}
 
 	// Convert Keccak256 to string array for request body
 	// According to API docs, the body should be a string array directly, not wrapped in an object
 	orderIDStrings := make([]string, len(orderIDs))
 	for i, orderID := range orderIDs {
-		orderIDStrings[i] = string(orderID)
+		if err := orderID.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid order ID at index %d: %w", i, err)
+		}
+		orderIDStrings[i] = orderID.String()
 	}
 
 	// Marshal body to JSON (array of strings)
@@ -320,7 +326,8 @@ func (c *orderClientImpl) CancelOrders(orderIDs []types.Keccak256) (*types.Order
 	}
 
 	// 执行请求，使用格式化后的 JSON body
-	return http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelOrders, bodyJSON, http.WithHeaders(headers))
+	response, err := http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelOrders, bodyJSON, http.WithHeaders(headers))
+	return normalizeOrderCancelResponse(response), err
 }
 
 // CancelOrder 取消单个订单
@@ -338,11 +345,39 @@ func (c *orderClientImpl) CancelAll() (*types.OrderCancelResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
-	return http.Delete[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelAll, nil, http.WithHeaders(headers))
+	response, err := http.Delete[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelAll, nil, http.WithHeaders(headers))
+	return normalizeOrderCancelResponse(response), err
 }
 
-// CancelMarketOrders 取消指定市场的所有订单
+// CancelMarketOrders 取消指定 condition 的所有订单。
+// 保留该方法用于源码兼容；需要按 token 或 condition+token 过滤时使用
+// CancelMarketOrdersByFilter。
 func (c *orderClientImpl) CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error) {
+	parsed, err := types.ParseConditionID(conditionID.String())
+	if err != nil {
+		return nil, fmt.Errorf("invalid condition ID: %w", err)
+	}
+	return c.CancelMarketOrdersByFilter(types.CancelMarketOrdersParams{ConditionID: parsed})
+}
+
+type cancelMarketOrdersWire struct {
+	Market  string `json:"market,omitempty"`
+	AssetID string `json:"asset_id,omitempty"`
+}
+
+// CancelMarketOrdersByFilter 按 condition、token 或两者的交集取消订单。
+func (c *orderClientImpl) CancelMarketOrdersByFilter(params types.CancelMarketOrdersParams) (*types.OrderCancelResponse, error) {
+	requestBody := cancelMarketOrdersWire{}
+	if params.ConditionID != (types.ConditionID{}) {
+		requestBody.Market = params.ConditionID.String()
+	}
+	if params.TokenID != (types.TokenID{}) {
+		requestBody.AssetID = params.TokenID.String()
+	}
+	if requestBody.Market == "" && requestBody.AssetID == "" {
+		return nil, fmt.Errorf("cancel market orders requires ConditionID, TokenID, or both")
+	}
+
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -350,11 +385,6 @@ func (c *orderClientImpl) CancelMarketOrders(conditionID types.Keccak256) (*type
 	if c.baseClient.deriveCreds.Key == "" || c.baseClient.deriveCreds.Secret == "" || c.baseClient.deriveCreds.Passphrase == "" {
 		return nil, fmt.Errorf("API credentials incomplete: key=%v, secret=%v, passphrase=%v",
 			c.baseClient.deriveCreds.Key != "", c.baseClient.deriveCreds.Secret != "", c.baseClient.deriveCreds.Passphrase != "")
-	}
-
-	// Build request body with condition_id
-	requestBody := map[string]string{
-		"condition_id": string(conditionID),
 	}
 
 	// Create request args for signing
@@ -388,5 +418,26 @@ func (c *orderClientImpl) CancelMarketOrders(conditionID types.Keccak256) (*type
 	}
 
 	// Execute DELETE request with body
-	return http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelMarketOrders, bodyJSON, http.WithHeaders(headers))
+	response, err := http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelMarketOrders, bodyJSON, http.WithHeaders(headers))
+	return normalizeOrderCancelResponse(response), err
+}
+
+func emptyOrderCancelResponse() *types.OrderCancelResponse {
+	return &types.OrderCancelResponse{
+		Canceled:    []types.Keccak256{},
+		NotCanceled: make(map[types.Keccak256]string),
+	}
+}
+
+func normalizeOrderCancelResponse(response *types.OrderCancelResponse) *types.OrderCancelResponse {
+	if response == nil {
+		return nil
+	}
+	if response.Canceled == nil {
+		response.Canceled = []types.Keccak256{}
+	}
+	if response.NotCanceled == nil {
+		response.NotCanceled = make(map[types.Keccak256]string)
+	}
+	return response
 }

@@ -120,6 +120,12 @@ go test ./websocket/
 # 人工运行链上 WSS 地址监控（连接 Polygon 主网并持续 60 秒）
 POLY_RUN_CHAINWS_MONITOR=1 go test ./chainws/ -run TestMonitorAddress_USDCAndTokenChanges -v -timeout 90s
 
+# 生产撤单过滤协议探针；运行前必须提供当前账户没有开放订单的 condition/token
+POLY_RUN_CANCEL_FILTER_INTEGRATION=1 \
+POLY_CANCEL_FILTER_TEST_CONDITION='0x...' \
+POLY_CANCEL_FILTER_TEST_TOKEN='123...' \
+go test ./clob/ -run TestCancelMarketOrderFiltersLive -v -timeout 45s
+
 # RFQ mock 契约测试
 go test ./rfq/
 

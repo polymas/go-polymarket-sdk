@@ -37,6 +37,7 @@ type OrderClient interface {
 	CreateAndPostMarketOrderAndWait(ctx context.Context, orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
 	CancelOrder(orderID types.Keccak256) (*types.OrderCancelResponse, error)
 	CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error)
+	CancelMarketOrdersByFilter(params types.CancelMarketOrdersParams) (*types.OrderCancelResponse, error)
 }
 
 // MarketDataClient 市场数据相关操作的轻量接口

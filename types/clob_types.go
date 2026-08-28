@@ -591,6 +591,14 @@ type OrderCancelResponse struct {
 	NotCanceled map[Keccak256]string `json:"not_canceled,omitempty"`
 }
 
+// CancelMarketOrdersParams 按 condition、token 或两者的交集撤销开放订单。
+// 零值字段不会发送；ConditionID 和 TokenID 不能同时为零值。
+// SDK 领域模型使用 ConditionID/TokenID，官方 wire 字段分别是 market/asset_id。
+type CancelMarketOrdersParams struct {
+	ConditionID ConditionID
+	TokenID     TokenID
+}
+
 // OrderBookSummary 是 GET /book 与 POST /books 共用的完整订单簿快照。
 type OrderBookSummary struct {
 	Market         string         `json:"market"`

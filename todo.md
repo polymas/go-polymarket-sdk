@@ -379,12 +379,22 @@
 - [x] 针对空订单簿、null/空字符串/缺项 last trade 和高精度价格数量建立测试；生产只读请求确认未交易 token 当前会返回 `last_trade_price: ""`。
 - [x] SDK 领域模型统一使用 `TokenID/TokenIDs`；官方 `asset_id/assets_ids/winning_asset_id` 仅保留为 JSON wire tag，不向业务层扩散命名差异。
 
-### [ ] P1-4：补齐单订单查询、撤单过滤与限制校验
+### [x] P1-4：补齐单订单查询、撤单过滤与限制校验
 
 - [x] 实现官方 `GET /data/order/{orderID}`，不要只用 GetOrders 的筛选参数替代。（已随 P0-12 完成）
-- [ ] `CancelMarketOrders` 同时支持官方的 market/asset 过滤组合，而不是只接 condition ID。
-- [ ] `CancelOrders` 本地校验或自动分块遵循官方单次最多 1000 个 order ID。
-- [ ] 对 canceled/not_canceled 提供稳定 typed result。
+
+完成于 2026-08-28，发布版本 `v1.31.0`。
+
+- [x] 修正旧 `CancelMarketOrders(conditionID)` 的 wire body：由错误的 `condition_id` 改为官方 `market`，并保留旧方法作为源码兼容包装。
+- [x] 新增 `CancelMarketOrdersByFilter(CancelMarketOrdersParams)`，支持 condition-only、token-only 和 condition+token 交集；领域模型统一使用 `[32]byte` 的 `ConditionID/TokenID`，wire 层才映射为 `market/asset_id`。
+- [x] 全空过滤在本地拒绝且不发送请求，避免 `{}` 产生不明确或扩大范围的撤单行为。
+- [x] 审计时记录的 1000 上限已过期；2026-08-28 当前官方 `DELETE /orders` 文档明确为单次最多 3000。SDK 导出 `MaxCancelOrdersPerRequest=3000`，超限直接在本地报错，不自动切批引入部分撤单歧义。
+- [x] `CancelOrders` 在发送前逐个校验 order ID，并规范化为带 `0x` 的字符串；重复 ID 保持官方服务端自动忽略语义，不额外改变调用方结果。
+- [x] `CancelOrders/CancelOrder/CancelAll/CancelMarketOrdersByFilter` 共用稳定的 `OrderCancelResponse`；服务端缺省或返回 null 时，`Canceled` 与 `NotCanceled` 均归一化为非 nil typed 集合。
+- [x] mock 测试覆盖三种过滤组合、旧兼容入口、错误 wire 字段缺失、空过滤零请求、非法 ID、3000/3001 边界、ID 规范化和空结果归一化。
+- [x] 使用 `.env` Safe 账户在活跃市场做生产无状态验证：先确认 condition/token 均不命中当前开放订单，再发送 condition-only、token-only、condition+token 三种过滤，生产均接受并返回空 typed result；未创建订单、未撤销订单、无资产变化。
+- [x] clob tracked tests、race、vet 通过；Git 索引干净副本 `go test -short ./...` 全部通过，普通全仓测试除公共 OnFinality RPC 返回 429 外全部通过，`chainws` 已不再阻塞。
+- [x] 下游核查：`polyworker` 只调用签名不变的 `CancelOrders`，未调用 `CancelMarketOrders`，也没有自定义实现 SDK `Client`；本项无需修改 `polyworker`。
 
 ### [ ] P1-5：重构 HTTP 错误、重试和 context
 

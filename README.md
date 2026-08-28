@@ -127,10 +127,11 @@ V1 回退选项。
 | `CreateAndPostMarketOrder` | 构造并提交市价单（兼容等待语义） | `marketOrderArgs`                   | `*OrderPostResponse`, `error`         |
 | `CreateAndPostMarketOrderInstant` | 构造并立即提交市价单 | `marketOrderArgs`                          | `*OrderPostResponse`, `error`         |
 | `CreateAndPostMarketOrderAndWait` | 构造市价单并等待结果 | `ctx`, `marketOrderArgs`                   | `*OrderPostResponse`, `error`         |
-| `CancelOrders`           | 取消多个订单           | `orderIDs`                                 | `*OrderCancelResponse`, `error`       |
+| `CancelOrders`           | 取消多个订单（单次最多 3000） | `orderIDs`                            | `*OrderCancelResponse`, `error`       |
 | `CancelOrder`            | 取消单个订单           | `orderID`                                  | `*OrderCancelResponse`, `error`       |
 | `CancelAll`              | 取消所有订单           | -                                          | `*OrderCancelResponse`, `error`       |
-| `CancelMarketOrders`     | 取消指定市场的所有订单 | `conditionID`                              | `*OrderCancelResponse`, `error`       |
+| `CancelMarketOrders`     | 按 condition 取消订单（兼容接口） | `conditionID`                       | `*OrderCancelResponse`, `error`       |
+| `CancelMarketOrdersByFilter` | 按 condition/token/交集取消订单 | `params`                           | `*OrderCancelResponse`, `error`       |
 | `GetOrderBook`           | 获取订单簿             | `tokenID`                                  | `*OrderBookSummary`, `error`          |
 | `GetMultipleOrderBooks`  | 批量获取订单簿         | `requests`                                 | `[]OrderBookSummary`, `error`         |
 | `GetMidpoint`            | 获取中间价             | `tokenID`                                  | `*Midpoint`, `error`                  |
@@ -366,6 +367,27 @@ responses, err := clobClient.CreateAndPostOrders(orders, []types.OrderType{
 - `server_rejected`：HTTP 200 中的逐单业务拒绝，例如余额/授权不足；其他订单仍可以成功。
 
 如果一个子批全部是同一个已关闭 token，返回 `market_closed` 且 `error=nil`。如果子批混有其他 token，SDK 不会拆掉关闭 token 后重发；它会返回对齐结果和非空 error。跨 15 单切批时，首个失败子批会终止后续提交，后续位置标记为 `not_submitted`。
+
+撤单接口统一返回 `OrderCancelResponse`：`Canceled` 是成功撤销的订单 ID，
+`NotCanceled` 是订单 ID 到失败原因的 typed map；即使服务端省略空字段，SDK 也会
+归一化为非 nil 的空集合。`CancelOrders` 单次最多接收 3000 个 ID，超出或包含非法
+ID 时会在网络请求前报错，不会自动切批产生部分撤单状态。
+
+按市场撤单时，旧 `CancelMarketOrders(conditionID)` 保留兼容；新代码可显式选择
+condition、token 或两者交集：
+
+```go
+conditionID, _ := types.ParseConditionID("0x...")
+tokenID, _ := types.ParseTokenID("123...")
+
+result, err := clobClient.CancelMarketOrdersByFilter(types.CancelMarketOrdersParams{
+    ConditionID: conditionID, // 可单独使用
+    TokenID:     tokenID,     // 可单独使用；两者都有时取交集
+})
+```
+
+两个字段不能同时为零值，以防空请求意外扩大撤单范围。SDK 对外统一使用
+`ConditionID/TokenID`，发送给官方接口时分别编码为 `market/asset_id`。
 
 ### 批量获取市场数据
 
@@ -643,6 +665,7 @@ go test -cover ./...
 - `OrderType`: 订单类型（GTC/FOK/GTD/FAK）；GTD 至少提前 3 分钟，PostOnly 仅支持 GTC/GTD
 - `OrderArgs`: 订单参数
 - `MarketOrderArgs`: 市价单参数；BUY 使用 `Amount/MaxPrice`，SELL 使用 `Shares/MinPrice`
+- `CancelMarketOrdersParams`: 按 condition、token 或两者交集撤单的过滤参数
 - `OpenOrder`: 开放订单
 - `OrderBookSummary`: 订单簿摘要
 - `GammaMarket`: Gamma 市场
