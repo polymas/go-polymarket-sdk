@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -12,18 +13,26 @@ import (
 
 // GetMarket 通过市场ID获取市场（默认 include_tag=true）
 func (c *polymarketGammaClient) GetMarket(marketID string) (*types.GammaMarket, error) {
+	return c.GetMarketContext(context.Background(), marketID)
+}
+
+func (c *polymarketGammaClient) GetMarketContext(ctx context.Context, marketID string) (*types.GammaMarket, error) {
 	params := map[string]string{
 		"include_tag": "true",
 	}
-	return http.Get[types.GammaMarket](c.baseURL, fmt.Sprintf("/markets/%s", marketID), params)
+	return http.GetContext[types.GammaMarket](ctx, c.baseURL, fmt.Sprintf("/markets/%s", marketID), params, http.WithService("gamma"))
 }
 
 // GetMarketBySlug 通过slug获取市场（默认 include_tag=true）
 func (c *polymarketGammaClient) GetMarketBySlug(slug string) (*types.GammaMarket, error) {
+	return c.GetMarketBySlugContext(context.Background(), slug)
+}
+
+func (c *polymarketGammaClient) GetMarketBySlugContext(ctx context.Context, slug string) (*types.GammaMarket, error) {
 	params := map[string]string{
 		"include_tag": "true",
 	}
-	return http.Get[types.GammaMarket](c.baseURL, fmt.Sprintf("/markets/slug/%s", slug), params)
+	return http.GetContext[types.GammaMarket](ctx, c.baseURL, fmt.Sprintf("/markets/slug/%s", slug), params, http.WithService("gamma"))
 }
 
 // GetMarketsOptions 包含 GetMarkets 的所有可选参数
@@ -233,8 +242,12 @@ func WithQuestionIDs(ids []string) GetMarketsOption {
 // GetDisputeMarkets 获取争议市场
 // 在 Certainty 市场基础上，过滤出有 dispute 状态的市场
 func (c *polymarketGammaClient) GetDisputeMarkets() ([]types.GammaMarket, error) {
+	return c.GetDisputeMarketsContext(context.Background())
+}
+
+func (c *polymarketGammaClient) GetDisputeMarketsContext(ctx context.Context) ([]types.GammaMarket, error) {
 	// 先获取所有 Certainty 市场
-	certaintyMarkets, err := c.GetCertaintyMarkets()
+	certaintyMarkets, err := c.GetCertaintyMarketsContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +267,10 @@ func (c *polymarketGammaClient) GetDisputeMarkets() ([]types.GammaMarket, error)
 // 过滤条件：active=true, closed=false, uma_resolution_status=proposed, 按 endDate 升序排序
 // 自动分页获取全部结果（单次 API 最多 500 条）
 func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, error) {
+	return c.GetCertaintyMarketsContext(context.Background())
+}
+
+func (c *polymarketGammaClient) GetCertaintyMarketsContext(ctx context.Context) ([]types.GammaMarket, error) {
 	const pageSize = 100
 	volumeNumMin := 100.0
 	opts := []GetMarketsOption{
@@ -273,7 +290,7 @@ func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, erro
 			pageOptions = append(pageOptions, WithAfterCursor(afterCursor))
 		}
 
-		markets, nextCursor, err := c.getMarketsPage(pageSize, pageOptions...)
+		markets, nextCursor, err := c.getMarketsPageContext(ctx, pageSize, pageOptions...)
 		if err != nil {
 			return nil, err
 		}
@@ -289,21 +306,33 @@ func (c *polymarketGammaClient) GetCertaintyMarkets() ([]types.GammaMarket, erro
 
 // GetMarketsByConditionIDs 根据条件ID列表获取市场
 func (c *polymarketGammaClient) GetMarketsByConditionIDs(conditionIDs []string) ([]types.GammaMarket, error) {
+	return c.GetMarketsByConditionIDsContext(context.Background(), conditionIDs)
+}
+
+func (c *polymarketGammaClient) GetMarketsByConditionIDsContext(ctx context.Context, conditionIDs []string) ([]types.GammaMarket, error) {
 	if len(conditionIDs) == 0 {
 		return []types.GammaMarket{}, nil
 	}
-	return c.getMarkets(500, WithConditionIDs(conditionIDs))
+	return c.getMarketsContext(ctx, 500, WithConditionIDs(conditionIDs))
 }
 
 // GetMarkets 获取市场列表（支持分页和过滤）
 // limit 是每页的数量，options 是过滤选项
 func (c *polymarketGammaClient) GetMarkets(limit int, options ...GetMarketsOption) ([]types.GammaMarket, error) {
-	return c.getMarkets(limit, options...)
+	return c.GetMarketsContext(context.Background(), limit, options...)
+}
+
+func (c *polymarketGammaClient) GetMarketsContext(ctx context.Context, limit int, options ...GetMarketsOption) ([]types.GammaMarket, error) {
+	return c.getMarketsContext(ctx, limit, options...)
 }
 
 // GetAllMarkets 获取所有历史市场数据（自动分页）
 // 自动处理分页，返回所有市场数据，不限制状态（包括活跃、关闭、归档等所有市场）
 func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
+	return c.GetAllMarketsContext(context.Background())
+}
+
+func (c *polymarketGammaClient) GetAllMarketsContext(ctx context.Context) ([]types.GammaMarket, error) {
 	const pageSize = 100 // /markets/keyset 官方最大值
 	allMarkets := make([]types.GammaMarket, 0)
 	var afterCursor string
@@ -314,7 +343,7 @@ func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
 			pageOptions = append(pageOptions, WithAfterCursor(afterCursor))
 		}
 
-		markets, nextCursor, err := c.getMarketsPage(pageSize, pageOptions...)
+		markets, nextCursor, err := c.getMarketsPageContext(ctx, pageSize, pageOptions...)
 		if err != nil {
 			return nil, err
 		}
@@ -339,7 +368,11 @@ func (c *polymarketGammaClient) GetAllMarkets() ([]types.GammaMarket, error) {
 // limit 是必要参数，其他参数通过选项函数传入
 // 内部使用 raw 数据解析，确保所有字段都被正确解析
 func (c *polymarketGammaClient) getMarkets(limit int, options ...GetMarketsOption) ([]types.GammaMarket, error) {
-	markets, _, err := c.getMarketsPage(limit, options...)
+	return c.getMarketsContext(context.Background(), limit, options...)
+}
+
+func (c *polymarketGammaClient) getMarketsContext(ctx context.Context, limit int, options ...GetMarketsOption) ([]types.GammaMarket, error) {
+	markets, _, err := c.getMarketsPageContext(ctx, limit, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -352,6 +385,10 @@ type keysetMarketsResponse struct {
 }
 
 func (c *polymarketGammaClient) getMarketsPage(limit int, options ...GetMarketsOption) ([]types.GammaMarket, string, error) {
+	return c.getMarketsPageContext(context.Background(), limit, options...)
+}
+
+func (c *polymarketGammaClient) getMarketsPageContext(ctx context.Context, limit int, options ...GetMarketsOption) ([]types.GammaMarket, string, error) {
 	// 初始化默认选项
 	opts := &GetMarketsOptions{}
 
@@ -467,7 +504,7 @@ func (c *polymarketGammaClient) getMarketsPage(limit int, options ...GetMarketsO
 		path = internal.GetMarkets
 	}
 
-	rawJSON, err := http.GetRaw(c.baseURL, "GET", path, params, http.WithMultiParams(multiParams))
+	rawJSON, err := http.GetRawContext(ctx, c.baseURL, "GET", path, params, http.WithMultiParams(multiParams), http.WithService("gamma"))
 	if err != nil {
 		return nil, "", err
 	}
@@ -489,11 +526,15 @@ func (c *polymarketGammaClient) getMarketsPage(limit int, options ...GetMarketsO
 
 // GetSamplingSimplifiedMarkets 获取采样简化市场
 func (c *polymarketGammaClient) GetSamplingSimplifiedMarkets(limit int) ([]types.SimplifiedMarket, error) {
+	return c.GetSamplingSimplifiedMarketsContext(context.Background(), limit)
+}
+
+func (c *polymarketGammaClient) GetSamplingSimplifiedMarketsContext(ctx context.Context, limit int) ([]types.SimplifiedMarket, error) {
 	params := map[string]string{
 		"limit": strconv.Itoa(limit),
 	}
 
-	result, err := http.Get[[]types.SimplifiedMarket](c.baseURL, internal.GetSamplingSimplifiedMarkets, params)
+	result, err := http.GetContext[[]types.SimplifiedMarket](ctx, c.baseURL, internal.GetSamplingSimplifiedMarkets, params, http.WithService("gamma"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sampling simplified markets: %w", err)
 	}
@@ -507,11 +548,15 @@ func (c *polymarketGammaClient) GetSamplingSimplifiedMarkets(limit int) ([]types
 
 // GetSamplingMarkets 获取采样市场
 func (c *polymarketGammaClient) GetSamplingMarkets(limit int) ([]types.GammaMarket, error) {
+	return c.GetSamplingMarketsContext(context.Background(), limit)
+}
+
+func (c *polymarketGammaClient) GetSamplingMarketsContext(ctx context.Context, limit int) ([]types.GammaMarket, error) {
 	params := map[string]string{
 		"limit": strconv.Itoa(limit),
 	}
 
-	result, err := http.Get[[]types.GammaMarket](c.baseURL, internal.GetSamplingMarkets, params)
+	result, err := http.GetContext[[]types.GammaMarket](ctx, c.baseURL, internal.GetSamplingMarkets, params, http.WithService("gamma"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sampling markets: %w", err)
 	}
@@ -525,6 +570,10 @@ func (c *polymarketGammaClient) GetSamplingMarkets(limit int) ([]types.GammaMark
 
 // GetSimplifiedMarkets 获取简化市场列表
 func (c *polymarketGammaClient) GetSimplifiedMarkets(limit int, offset int, options ...GetMarketsOption) ([]types.SimplifiedMarket, error) {
+	return c.GetSimplifiedMarketsContext(context.Background(), limit, offset, options...)
+}
+
+func (c *polymarketGammaClient) GetSimplifiedMarketsContext(ctx context.Context, limit int, offset int, options ...GetMarketsOption) ([]types.SimplifiedMarket, error) {
 	// 初始化默认选项
 	opts := &GetMarketsOptions{}
 
@@ -580,7 +629,7 @@ func (c *polymarketGammaClient) GetSimplifiedMarkets(limit int, offset int, opti
 		multiParams["clob_token_ids"] = opts.TokenIDs
 	}
 
-	result, err := http.Get[[]types.SimplifiedMarket](c.baseURL, internal.GetSimplifiedMarkets, params, http.WithMultiParams(multiParams))
+	result, err := http.GetContext[[]types.SimplifiedMarket](ctx, c.baseURL, internal.GetSimplifiedMarkets, params, http.WithMultiParams(multiParams), http.WithService("gamma"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get simplified markets: %w", err)
 	}

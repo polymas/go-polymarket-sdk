@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/polymas/go-polymarket-sdk/http"
@@ -10,15 +11,19 @@ import (
 
 // IsOrderScoring 检查订单是否计分
 func (c *rewardClientImpl) IsOrderScoring(orderID types.Keccak256) (bool, error) {
+	return c.IsOrderScoringContext(context.Background(), orderID)
+}
+
+func (c *rewardClientImpl) IsOrderScoringContext(ctx context.Context, orderID types.Keccak256) (bool, error) {
 	params := map[string]string{"order_id": string(orderID)}
 
 	var result struct {
 		Scoring bool `json:"scoring"`
 	}
 
-	resp, err := http.Get[struct {
+	resp, err := http.GetContext[struct {
 		Scoring bool `json:"scoring"`
-	}](c.baseClient.baseURL, internal.IsOrderScoring, params)
+	}](ctx, c.baseClient.baseURL, internal.IsOrderScoring, params, http.WithService("clob"))
 	if err != nil {
 		return false, fmt.Errorf("failed to check order scoring: %w", err)
 	}
@@ -29,6 +34,10 @@ func (c *rewardClientImpl) IsOrderScoring(orderID types.Keccak256) (bool, error)
 
 // AreOrdersScoring 批量检查订单是否计分
 func (c *rewardClientImpl) AreOrdersScoring(orderIDs []types.Keccak256) (map[types.Keccak256]bool, error) {
+	return c.AreOrdersScoringContext(context.Background(), orderIDs)
+}
+
+func (c *rewardClientImpl) AreOrdersScoringContext(ctx context.Context, orderIDs []types.Keccak256) (map[types.Keccak256]bool, error) {
 	if len(orderIDs) == 0 {
 		return make(map[types.Keccak256]bool), nil
 	}
@@ -45,7 +54,7 @@ func (c *rewardClientImpl) AreOrdersScoring(orderIDs []types.Keccak256) (map[typ
 
 	// Make POST request
 	var result map[string]bool
-	resp, err := http.Post[map[string]bool](c.baseClient.baseURL, internal.AreOrdersScoring, requestBody)
+	resp, err := http.PostContext[map[string]bool](ctx, c.baseClient.baseURL, internal.AreOrdersScoring, requestBody, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("failed to check orders scoring: %w", err)
 	}
@@ -64,15 +73,19 @@ func (c *rewardClientImpl) AreOrdersScoring(orderIDs []types.Keccak256) (map[typ
 
 // IsOrderScoring 检查订单是否计分（只读客户端实现）
 func (c *readonlyRewardClientImpl) IsOrderScoring(orderID types.Keccak256) (bool, error) {
+	return c.IsOrderScoringContext(context.Background(), orderID)
+}
+
+func (c *readonlyRewardClientImpl) IsOrderScoringContext(ctx context.Context, orderID types.Keccak256) (bool, error) {
 	params := map[string]string{"order_id": string(orderID)}
 
 	var result struct {
 		Scoring bool `json:"scoring"`
 	}
 
-	resp, err := http.Get[struct {
+	resp, err := http.GetContext[struct {
 		Scoring bool `json:"scoring"`
-	}](c.readonlyBaseClient.baseURL, internal.IsOrderScoring, params)
+	}](ctx, c.readonlyBaseClient.baseURL, internal.IsOrderScoring, params, http.WithService("clob"))
 	if err != nil {
 		return false, fmt.Errorf("failed to check order scoring: %w", err)
 	}
@@ -83,6 +96,10 @@ func (c *readonlyRewardClientImpl) IsOrderScoring(orderID types.Keccak256) (bool
 
 // AreOrdersScoring 批量检查订单是否计分（只读客户端实现）
 func (c *readonlyRewardClientImpl) AreOrdersScoring(orderIDs []types.Keccak256) (map[types.Keccak256]bool, error) {
+	return c.AreOrdersScoringContext(context.Background(), orderIDs)
+}
+
+func (c *readonlyRewardClientImpl) AreOrdersScoringContext(ctx context.Context, orderIDs []types.Keccak256) (map[types.Keccak256]bool, error) {
 	if len(orderIDs) == 0 {
 		return make(map[types.Keccak256]bool), nil
 	}
@@ -99,7 +116,7 @@ func (c *readonlyRewardClientImpl) AreOrdersScoring(orderIDs []types.Keccak256) 
 
 	// Make POST request
 	var result map[string]bool
-	resp, err := http.Post[map[string]bool](c.readonlyBaseClient.baseURL, internal.AreOrdersScoring, requestBody)
+	resp, err := http.PostContext[map[string]bool](ctx, c.readonlyBaseClient.baseURL, internal.AreOrdersScoring, requestBody, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("failed to check orders scoring: %w", err)
 	}

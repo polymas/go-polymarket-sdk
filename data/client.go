@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,10 +15,15 @@ import (
 // Client 定义数据客户端的接口，供外部包使用
 type Client interface {
 	GetPositions(user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error)
+	GetPositionsContext(ctx context.Context, user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error)
 	GetTrades(limit int, offset int, options ...GetTradesOption) ([]types.Trade, error)
+	GetTradesContext(ctx context.Context, limit int, offset int, options ...GetTradesOption) ([]types.Trade, error)
 	GetActivity(user types.EthAddress, limit int, offset int, options ...GetActivityOption) ([]types.Activity, error)
+	GetActivityContext(ctx context.Context, user types.EthAddress, limit int, offset int, options ...GetActivityOption) ([]types.Activity, error)
 	GetValue(user types.EthAddress, conditionIDs interface{}) ([]types.ValueResponse, error)
+	GetValueContext(ctx context.Context, user types.EthAddress, conditionIDs interface{}) ([]types.ValueResponse, error)
 	GetTotalValue(user types.EthAddress, conditionIDs interface{}) (float64, error)
+	GetTotalValueContext(ctx context.Context, user types.EthAddress, conditionIDs interface{}) (float64, error)
 }
 
 // polymarketDataClient 处理数据API操作
@@ -118,6 +124,10 @@ func WithPositionsSort(sortBy string, sortDirection string) GetPositionsOption {
 // GetPositions 获取用户仓位
 // user 是必要参数，其他参数通过选项函数传入
 func (c *polymarketDataClient) GetPositions(user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error) {
+	return c.GetPositionsContext(context.Background(), user, options...)
+}
+
+func (c *polymarketDataClient) GetPositionsContext(ctx context.Context, user types.EthAddress, options ...GetPositionsOption) ([]types.Position, error) {
 	// 初始化默认选项
 	opts := &GetPositionsOptions{
 		Limit:         500, // 默认值
@@ -180,7 +190,7 @@ func (c *polymarketDataClient) GetPositions(user types.EthAddress, options ...Ge
 		params["sortDirection"] = opts.SortDirection
 	}
 
-	return http.GetSlice[types.Position](c.baseURL, "/positions", params)
+	return http.GetSliceContext[types.Position](ctx, c.baseURL, "/positions", params, http.WithService("data"))
 }
 
 // GetTradesOptions 包含 GetTrades 的所有可选参数
@@ -254,6 +264,10 @@ func WithTradesDateRange(start, end *time.Time) GetTradesOption {
 // GetTrades 获取交易记录
 // limit 和 offset 是必要参数，其他参数通过选项函数传入
 func (c *polymarketDataClient) GetTrades(limit int, offset int, options ...GetTradesOption) ([]types.Trade, error) {
+	return c.GetTradesContext(context.Background(), limit, offset, options...)
+}
+
+func (c *polymarketDataClient) GetTradesContext(ctx context.Context, limit int, offset int, options ...GetTradesOption) ([]types.Trade, error) {
 	// 初始化默认选项
 	opts := &GetTradesOptions{TakerOnly: true}
 
@@ -312,7 +326,7 @@ func (c *polymarketDataClient) GetTrades(limit int, offset int, options ...GetTr
 		params["end"] = strconv.FormatInt(opts.End.Unix(), 10)
 	}
 
-	return http.GetSlice[types.Trade](c.baseURL, "/trades", params)
+	return http.GetSliceContext[types.Trade](ctx, c.baseURL, "/trades", params, http.WithService("data"))
 }
 
 // GetActivityOptions 包含 GetActivity 的所有可选参数
@@ -386,6 +400,10 @@ func WithActivitySort(sortBy string, sortDirection string) GetActivityOption {
 // GetActivity 获取用户活动
 // user, limit, offset 是必要参数，其他参数通过选项函数传入
 func (c *polymarketDataClient) GetActivity(user types.EthAddress, limit int, offset int, options ...GetActivityOption) ([]types.Activity, error) {
+	return c.GetActivityContext(context.Background(), user, limit, offset, options...)
+}
+
+func (c *polymarketDataClient) GetActivityContext(ctx context.Context, user types.EthAddress, limit int, offset int, options ...GetActivityOption) ([]types.Activity, error) {
 	// 初始化默认选项
 	opts := &GetActivityOptions{}
 
@@ -461,7 +479,7 @@ func (c *polymarketDataClient) GetActivity(user types.EthAddress, limit int, off
 		params["sortDirection"] = opts.SortDirection
 	}
 
-	return http.GetSlice[types.Activity](c.baseURL, "/activity", params)
+	return http.GetSliceContext[types.Activity](ctx, c.baseURL, "/activity", params, http.WithService("data"))
 }
 
 // GetValue 获取仓位价值
@@ -469,6 +487,10 @@ func (c *polymarketDataClient) GetValue(
 	user types.EthAddress,
 	conditionIDs interface{}, // nil, string, or []string
 ) ([]types.ValueResponse, error) {
+	return c.GetValueContext(context.Background(), user, conditionIDs)
+}
+
+func (c *polymarketDataClient) GetValueContext(ctx context.Context, user types.EthAddress, conditionIDs interface{}) ([]types.ValueResponse, error) {
 	params := map[string]string{
 		"user": string(user),
 	}
@@ -482,7 +504,7 @@ func (c *polymarketDataClient) GetValue(
 		}
 	}
 
-	responses, err := http.GetSlice[types.ValueResponse](c.baseURL, "/value", params)
+	responses, err := http.GetSliceContext[types.ValueResponse](ctx, c.baseURL, "/value", params, http.WithService("data"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get value: %w", err)
 	}
@@ -495,7 +517,11 @@ func (c *polymarketDataClient) GetTotalValue(
 	user types.EthAddress,
 	conditionIDs interface{},
 ) (float64, error) {
-	values, err := c.GetValue(user, conditionIDs)
+	return c.GetTotalValueContext(context.Background(), user, conditionIDs)
+}
+
+func (c *polymarketDataClient) GetTotalValueContext(ctx context.Context, user types.EthAddress, conditionIDs interface{}) (float64, error) {
+	values, err := c.GetValueContext(ctx, user, conditionIDs)
 	if err != nil {
 		return 0, err
 	}

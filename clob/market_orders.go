@@ -38,7 +38,11 @@ func (c *marketDataClientImpl) CalculateMarketPrice(
 	amount float64,
 	orderType types.OrderType,
 ) (float64, error) {
-	return calculateMarketPriceAtURL(c.baseURL, tokenID, side, amount, orderType)
+	return c.CalculateMarketPriceContext(context.Background(), tokenID, side, amount, orderType)
+}
+
+func (c *marketDataClientImpl) CalculateMarketPriceContext(ctx context.Context, tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error) {
+	return calculateMarketPriceAtURLContext(ctx, c.baseURL, tokenID, side, amount, orderType)
 }
 
 // CalculateMarketPrice 是无鉴权的只读实现。
@@ -48,7 +52,11 @@ func (c *readonlyMarketDataClientImpl) CalculateMarketPrice(
 	amount float64,
 	orderType types.OrderType,
 ) (float64, error) {
-	return calculateMarketPriceAtURL(c.baseURL, tokenID, side, amount, orderType)
+	return c.CalculateMarketPriceContext(context.Background(), tokenID, side, amount, orderType)
+}
+
+func (c *readonlyMarketDataClientImpl) CalculateMarketPriceContext(ctx context.Context, tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error) {
+	return calculateMarketPriceAtURLContext(ctx, c.baseURL, tokenID, side, amount, orderType)
 }
 
 func calculateMarketPriceAtURL(
@@ -58,10 +66,14 @@ func calculateMarketPriceAtURL(
 	amount float64,
 	orderType types.OrderType,
 ) (float64, error) {
+	return calculateMarketPriceAtURLContext(context.Background(), baseURL, tokenID, side, amount, orderType)
+}
+
+func calculateMarketPriceAtURLContext(ctx context.Context, baseURL string, tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error) {
 	if err := validateOrderTokenIDs([]types.OrderArgs{{TokenID: tokenID}}); err != nil {
 		return 0, err
 	}
-	book, err := http.Get[types.OrderBookSummary](baseURL, internal.GetOrderBook, map[string]string{"token_id": tokenID})
+	book, err := http.GetContext[types.OrderBookSummary](ctx, baseURL, internal.GetOrderBook, map[string]string{"token_id": tokenID}, http.WithService("clob"))
 	if err != nil {
 		return 0, fmt.Errorf("get order book for market price: %w", err)
 	}
@@ -156,6 +168,10 @@ func normalizeMarketOrderType(orderType types.OrderType) (types.OrderType, error
 }
 
 func (c *orderClientImpl) prepareMarketOrder(args types.MarketOrderArgs) (*preparedMarketOrder, error) {
+	return c.prepareMarketOrderContext(context.Background(), args)
+}
+
+func (c *orderClientImpl) prepareMarketOrderContext(ctx context.Context, args types.MarketOrderArgs) (*preparedMarketOrder, error) {
 	if err := validateOrderTokenIDs([]types.OrderArgs{{TokenID: args.TokenID}}); err != nil {
 		return nil, err
 	}
@@ -205,7 +221,7 @@ func (c *orderClientImpl) prepareMarketOrder(args types.MarketOrderArgs) (*prepa
 			return nil, fmt.Errorf("protected market price %g must be in [%g, %g]", price, tick, 1-tick)
 		}
 	} else {
-		book, getErr := http.Get[types.OrderBookSummary](c.baseURL, internal.GetOrderBook, map[string]string{"token_id": args.TokenID})
+		book, getErr := http.GetContext[types.OrderBookSummary](ctx, c.baseURL, internal.GetOrderBook, map[string]string{"token_id": args.TokenID}, http.WithService("clob"))
 		if getErr != nil {
 			return nil, fmt.Errorf("get order book for market order: %w", getErr)
 		}
@@ -313,18 +329,26 @@ func tokenUnitsString(amount *big.Int) string {
 }
 
 func (c *orderClientImpl) CreateAndPostMarketOrder(args types.MarketOrderArgs) (*types.OrderPostResponse, error) {
-	return c.createAndPostMarketOrderWithMode(args, true)
+	return c.CreateAndPostMarketOrderContext(context.Background(), args)
+}
+
+func (c *orderClientImpl) CreateAndPostMarketOrderContext(ctx context.Context, args types.MarketOrderArgs) (*types.OrderPostResponse, error) {
+	return c.createAndPostMarketOrderWithModeContext(ctx, args, true)
 }
 
 func (c *orderClientImpl) CreateAndPostMarketOrderInstant(args types.MarketOrderArgs) (*types.OrderPostResponse, error) {
-	return c.createAndPostMarketOrderWithMode(args, false)
+	return c.CreateAndPostMarketOrderInstantContext(context.Background(), args)
+}
+
+func (c *orderClientImpl) CreateAndPostMarketOrderInstantContext(ctx context.Context, args types.MarketOrderArgs) (*types.OrderPostResponse, error) {
+	return c.createAndPostMarketOrderWithModeContext(ctx, args, false)
 }
 
 func (c *orderClientImpl) CreateAndPostMarketOrderAndWait(
 	ctx context.Context,
 	args types.MarketOrderArgs,
 ) (*types.OrderPostResponse, error) {
-	response, submitErr := c.CreateAndPostMarketOrderInstant(args)
+	response, submitErr := c.CreateAndPostMarketOrderInstantContext(ctx, args)
 	if response == nil {
 		return nil, submitErr
 	}
@@ -343,7 +367,11 @@ func (c *orderClientImpl) createAndPostMarketOrderWithMode(
 	args types.MarketOrderArgs,
 	waitForResult bool,
 ) (*types.OrderPostResponse, error) {
-	prepared, err := c.prepareMarketOrder(args)
+	return c.createAndPostMarketOrderWithModeContext(context.Background(), args, waitForResult)
+}
+
+func (c *orderClientImpl) createAndPostMarketOrderWithModeContext(ctx context.Context, args types.MarketOrderArgs, waitForResult bool) (*types.OrderPostResponse, error) {
+	prepared, err := c.prepareMarketOrderContext(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +379,7 @@ func (c *orderClientImpl) createAndPostMarketOrderWithMode(
 	orderTypes := []types.OrderType{prepared.orderType}
 	overrides := []orderAmountOverride{{maker: prepared.makerAmount, taker: prepared.takerAmount}}
 	results, postErr := resolveV2BatchAttempt(orderArgs, orderTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
-		return c.postOrdersBatchV2OnceWithAmounts(a, t, waitForResult, overrides, false)
+		return c.postOrdersBatchV2OnceWithAmountsContext(ctx, a, t, waitForResult, overrides, false)
 	})
 	return firstOrderResponse(results, postErr)
 }

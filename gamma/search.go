@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -76,6 +77,10 @@ func WithSearchSort(sort string, ascending bool) SearchOption {
 // Search performs a search
 // query 是必要参数，其他参数通过选项函数传入
 func (c *polymarketGammaClient) Search(query string, options ...SearchOption) (*types.SearchResult, error) {
+	return c.SearchContext(context.Background(), query, options...)
+}
+
+func (c *polymarketGammaClient) SearchContext(ctx context.Context, query string, options ...SearchOption) (*types.SearchResult, error) {
 	// 初始化默认选项
 	opts := &SearchOptions{}
 
@@ -113,5 +118,5 @@ func (c *polymarketGammaClient) Search(query string, options ...SearchOption) (*
 		params["ascending"] = strconv.FormatBool(*opts.Ascending)
 	}
 
-	return http.Get[types.SearchResult](c.baseURL, "/public-search", params)
+	return http.GetContext[types.SearchResult](ctx, c.baseURL, "/public-search", params, http.WithService("gamma"))
 }

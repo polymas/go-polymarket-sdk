@@ -30,7 +30,10 @@ import (
 // 全部已就位 → 返回 (nil, nil)，**不发任何 tx**。
 // 否则把所有需要的操作打包成**一笔 gasless batch** 发出去，返回 receipt。
 func (c *GaslessClient) EnsureV2Ready() (*types.TransactionReceipt, error) {
-	ctx := context.Background()
+	return c.EnsureV2ReadyContext(context.Background())
+}
+
+func (c *GaslessClient) EnsureV2ReadyContext(ctx context.Context) (*types.TransactionReceipt, error) {
 	safeStr, err := c.GetPolyProxyAddress()
 	if err != nil {
 		return nil, fmt.Errorf("GetPolyProxyAddress: %w", err)
@@ -49,7 +52,7 @@ func (c *GaslessClient) EnsureV2Ready() (*types.TransactionReceipt, error) {
 	if len(proxyTxns) == 0 {
 		return nil, nil
 	}
-	return c.executeGaslessBatch(proxyTxns, "Ensure V2 Ready", "ensure-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Ensure V2 Ready", "ensure-v2")
 }
 
 // EnsureV2ReadyOneByOne 把 buildEnsureBatch 生成的每一笔 proxy tx 各自单独提交一次，
@@ -58,7 +61,10 @@ func (c *GaslessClient) EnsureV2Ready() (*types.TransactionReceipt, error) {
 //
 // 没有任何 missing 项时返回 (nil, nil, nil)；中途某笔失败也继续提交后续，把所有结果返回让调用方看。
 func (c *GaslessClient) EnsureV2ReadyOneByOne() (receipts []*types.TransactionReceipt, errs []error, err error) {
-	ctx := context.Background()
+	return c.EnsureV2ReadyOneByOneContext(context.Background())
+}
+
+func (c *GaslessClient) EnsureV2ReadyOneByOneContext(ctx context.Context) (receipts []*types.TransactionReceipt, errs []error, err error) {
 	safeStr, err := c.GetPolyProxyAddress()
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetPolyProxyAddress: %w", err)
@@ -81,7 +87,7 @@ func (c *GaslessClient) EnsureV2ReadyOneByOne() (receipts []*types.TransactionRe
 	receipts = make([]*types.TransactionReceipt, len(proxyTxns))
 	errs = make([]error, len(proxyTxns))
 	for i, tx := range proxyTxns {
-		r, e := c.executeGaslessBatch([]map[string]interface{}{tx},
+		r, e := c.executeGaslessBatchContext(ctx, []map[string]interface{}{tx},
 			fmt.Sprintf("Ensure V2 (split %d/%d)", i+1, len(proxyTxns)),
 			fmt.Sprintf("ensure-v2-split-%d", i))
 		receipts[i] = r
@@ -98,7 +104,10 @@ func (c *GaslessClient) EnsureV2ReadyOneByOne() (receipts []*types.TransactionRe
 //	ready, missing, err := gasless.IsV2Ready()
 //	if !ready { /* 提示 / 自动调 EnsureV2Ready / 等等 */ }
 func (c *GaslessClient) IsV2Ready() (ready bool, missing []string, err error) {
-	ctx := context.Background()
+	return c.IsV2ReadyContext(context.Background())
+}
+
+func (c *GaslessClient) IsV2ReadyContext(ctx context.Context) (ready bool, missing []string, err error) {
 	safeStr, err := c.GetPolyProxyAddress()
 	if err != nil {
 		return false, nil, fmt.Errorf("GetPolyProxyAddress: %w", err)
@@ -245,15 +254,19 @@ func (c *GaslessClient) readV2State(ctx context.Context, safe common.Address) (*
 // 业务层下单前的"我的钱够不够"判定建议优先用这个：服务端 balance/allowance 缓存有时滞后于链上，
 // 而 EnsureV2Ready 刚 wrap 完时服务端还可能是旧值。
 func (c *GaslessClient) GetPUSDBalance() (float64, error) {
+	return c.GetPUSDBalanceContext(context.Background())
+}
+
+func (c *GaslessClient) GetPUSDBalanceContext(ctx context.Context) (float64, error) {
 	safeStr, err := c.GetPolyProxyAddress()
 	if err != nil {
 		return 0, fmt.Errorf("GetPolyProxyAddress: %w", err)
 	}
-	balance, err := c.baseClient.GetCollateralBalance(safeStr)
+	units, err := c.callERC20Uint(ctx, common.HexToAddress(internal.PolygonPUSD), "balanceOf", common.HexToAddress(string(safeStr)))
 	if err != nil {
 		return 0, err
 	}
-	return balance, nil
+	return baseUnitsToFloat(units), nil
 }
 
 // callERC20Uint 调 ERC20 view 函数（balanceOf / allowance 等返回 uint256）。

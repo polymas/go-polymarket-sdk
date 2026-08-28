@@ -190,7 +190,7 @@ func (ops *mockOnboardingOps) resolve(context.Context) (*WalletAccount, error) {
 	return ops.accounts[index], nil
 }
 
-func (ops *mockOnboardingOps) deploy() (*types.TransactionReceipt, error) {
+func (ops *mockOnboardingOps) deploy(context.Context) (*types.TransactionReceipt, error) {
 	ops.deployCalls++
 	if ops.deployErr != nil {
 		return nil, ops.deployErr
@@ -207,7 +207,7 @@ func (ops *mockOnboardingOps) state(context.Context, common.Address) (*v2State, 
 	return ops.states[index].state, ops.states[index].pusd, nil
 }
 
-func (ops *mockOnboardingOps) ensure() (*types.TransactionReceipt, error) {
+func (ops *mockOnboardingOps) ensure(context.Context) (*types.TransactionReceipt, error) {
 	ops.ensureCalls++
 	return &types.TransactionReceipt{Status: 1}, nil
 }

@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -12,6 +13,10 @@ import (
 
 // GetEvent 通过事件ID获取事件
 func (c *polymarketGammaClient) GetEvent(eventID int, includeChat *bool, includeTemplate *bool) (*types.Event, error) {
+	return c.GetEventContext(context.Background(), eventID, includeChat, includeTemplate)
+}
+
+func (c *polymarketGammaClient) GetEventContext(ctx context.Context, eventID int, includeChat *bool, includeTemplate *bool) (*types.Event, error) {
 	params := make(map[string]string)
 	if includeChat != nil {
 		params["include_chat"] = strconv.FormatBool(*includeChat)
@@ -19,11 +24,15 @@ func (c *polymarketGammaClient) GetEvent(eventID int, includeChat *bool, include
 	if includeTemplate != nil {
 		params["include_template"] = strconv.FormatBool(*includeTemplate)
 	}
-	return http.Get[types.Event](c.baseURL, fmt.Sprintf("/events/%d", eventID), params)
+	return http.GetContext[types.Event](ctx, c.baseURL, fmt.Sprintf("/events/%d", eventID), params, http.WithService("gamma"))
 }
 
 // GetEventBySlug 通过slug获取事件
 func (c *polymarketGammaClient) GetEventBySlug(slug string, includeChat *bool, includeTemplate *bool) (*types.Event, error) {
+	return c.GetEventBySlugContext(context.Background(), slug, includeChat, includeTemplate)
+}
+
+func (c *polymarketGammaClient) GetEventBySlugContext(ctx context.Context, slug string, includeChat *bool, includeTemplate *bool) (*types.Event, error) {
 	params := make(map[string]string)
 	if includeChat != nil {
 		params["include_chat"] = strconv.FormatBool(*includeChat)
@@ -31,37 +40,37 @@ func (c *polymarketGammaClient) GetEventBySlug(slug string, includeChat *bool, i
 	if includeTemplate != nil {
 		params["include_template"] = strconv.FormatBool(*includeTemplate)
 	}
-	return http.Get[types.Event](c.baseURL, fmt.Sprintf("/events/slug/%s", slug), params)
+	return http.GetContext[types.Event](ctx, c.baseURL, fmt.Sprintf("/events/slug/%s", slug), params, http.WithService("gamma"))
 }
 
 // GetEventsOptions 包含 GetEvents 的所有可选参数
 // 与 List events API 对齐: https://docs.polymarket.com/api-reference/events/list-events
 type GetEventsOptions struct {
-	Order          *string
-	Ascending      bool
-	EventIDs       interface{} // int, []int, or nil → 请求参数 id
-	Slugs          []string    // → 请求参数 slug (array)
-	Archived       *bool
-	Active         *bool
-	Closed         *bool
-	Featured       *bool
-	Cyom           *bool
-	IncludeChat    *bool
+	Order           *string
+	Ascending       bool
+	EventIDs        interface{} // int, []int, or nil → 请求参数 id
+	Slugs           []string    // → 请求参数 slug (array)
+	Archived        *bool
+	Active          *bool
+	Closed          *bool
+	Featured        *bool
+	Cyom            *bool
+	IncludeChat     *bool
 	IncludeTemplate *bool
-	Recurrence     string
-	ExcludeTagIDs  []int
-	LiquidityMin   *float64
-	LiquidityMax   *float64
-	VolumeMin      *float64
-	VolumeMax      *float64
-	StartDateMin   *time.Time
-	StartDateMax   *time.Time
-	EndDateMin     *time.Time
-	EndDateMax     *time.Time
-	Tag            *string
-	TagID          *int
-	TagSlug        *string
-	RelatedTags    bool
+	Recurrence      string
+	ExcludeTagIDs   []int
+	LiquidityMin    *float64
+	LiquidityMax    *float64
+	VolumeMin       *float64
+	VolumeMax       *float64
+	StartDateMin    *time.Time
+	StartDateMax    *time.Time
+	EndDateMin      *time.Time
+	EndDateMax      *time.Time
+	Tag             *string
+	TagID           *int
+	TagSlug         *string
+	RelatedTags     bool
 }
 
 // GetEventsOption 函数选项类型
@@ -209,6 +218,10 @@ func WithEventsExcludeTagIDs(tagIDs []int) GetEventsOption {
 // GetEvents 使用过滤器获取事件列表
 // limit 和 offset 是必要参数，其他参数通过选项函数传入
 func (c *polymarketGammaClient) GetEvents(limit int, offset int, options ...GetEventsOption) ([]types.Event, error) {
+	return c.GetEventsContext(context.Background(), limit, offset, options...)
+}
+
+func (c *polymarketGammaClient) GetEventsContext(ctx context.Context, limit int, offset int, options ...GetEventsOption) ([]types.Event, error) {
 	// 初始化默认选项
 	opts := &GetEventsOptions{}
 
@@ -311,5 +324,5 @@ func (c *polymarketGammaClient) GetEvents(limit int, offset int, options ...GetE
 		params["tag_slug"] = *opts.TagSlug
 	}
 
-	return http.GetSlice[types.Event](c.baseURL, internal.Events, params, http.WithMultiParams(multiParams))
+	return http.GetSliceContext[types.Event](ctx, c.baseURL, internal.Events, params, http.WithMultiParams(multiParams), http.WithService("gamma"))
 }

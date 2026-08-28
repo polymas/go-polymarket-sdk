@@ -23,6 +23,10 @@ const (
 // GetOrder 按官方订单哈希查询单个订单。该端点与只返回活跃订单列表的
 // GET /data/orders 语义不同，可用于下单结果不明确时对账。
 func (c *orderClientImpl) GetOrder(orderID types.Keccak256) (*types.OpenOrder, error) {
+	return c.GetOrderContext(context.Background(), orderID)
+}
+
+func (c *orderClientImpl) GetOrderContext(ctx context.Context, orderID types.Keccak256) (*types.OpenOrder, error) {
 	if err := orderID.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid order ID: %w", err)
 	}
@@ -32,7 +36,7 @@ func (c *orderClientImpl) GetOrder(orderID types.Keccak256) (*types.OpenOrder, e
 	if err != nil {
 		return nil, err
 	}
-	order, err := polhttp.Get[types.OpenOrder](c.baseClient.baseURL, path, nil, polhttp.WithHeaders(headers))
+	order, err := polhttp.GetContext[types.OpenOrder](ctx, c.baseClient.baseURL, path, nil, polhttp.WithHeaders(headers), polhttp.WithService("clob"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get order %s: %w", orderID, err)
 	}
@@ -47,13 +51,17 @@ func (c *orderClientImpl) GetOrder(orderID types.Keccak256) (*types.OpenOrder, e
 
 // GetTrades 获取当前认证用户的成交记录，并按照官方 next_cursor 自动分页。
 func (c *orderClientImpl) GetTrades(params *types.ClobTradeParams) ([]types.ClobTrade, error) {
+	return c.GetTradesContext(context.Background(), params)
+}
+
+func (c *orderClientImpl) GetTradesContext(ctx context.Context, params *types.ClobTradeParams) ([]types.ClobTrade, error) {
 	query := tradeQueryParams(params)
 	allTrades := make([]types.ClobTrade, 0)
 	nextCursor := "MA=="
 
 	for nextCursor != internal.EndCursor {
 		query["next_cursor"] = nextCursor
-		page, err := c.getTradesPage(query)
+		page, err := c.getTradesPageContext(ctx, query)
 		if err != nil {
 			return nil, err
 		}
@@ -93,15 +101,20 @@ func tradeQueryParams(params *types.ClobTradeParams) map[string]string {
 }
 
 func (c *orderClientImpl) getTradesPage(query map[string]string) (*types.PaginatedResponse[types.ClobTrade], error) {
+	return c.getTradesPageContext(context.Background(), query)
+}
+
+func (c *orderClientImpl) getTradesPageContext(ctx context.Context, query map[string]string) (*types.PaginatedResponse[types.ClobTrade], error) {
 	headers, err := c.level2GETHeaders(internal.Trades)
 	if err != nil {
 		return nil, err
 	}
-	page, err := polhttp.Get[types.PaginatedResponse[types.ClobTrade]](
+	page, err := polhttp.GetContext[types.PaginatedResponse[types.ClobTrade]](
+		ctx,
 		c.baseClient.baseURL,
 		internal.Trades,
 		query,
-		polhttp.WithHeaders(headers),
+		polhttp.WithHeaders(headers), polhttp.WithService("clob"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trades: %w", err)
@@ -347,7 +360,7 @@ func (c *orderClientImpl) waitForTradeIDs(
 					return
 				}
 
-				trade, found, err := c.getTradeByID(id)
+				trade, found, err := c.getTradeByIDContext(ctx, id)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
@@ -423,7 +436,7 @@ func (c *orderClientImpl) reconcileExpectedOrders(
 					return
 				}
 
-				order, err := c.GetOrder(id)
+				order, err := c.GetOrderContext(ctx, id)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
@@ -457,7 +470,11 @@ func (c *orderClientImpl) reconcileExpectedOrders(
 }
 
 func (c *orderClientImpl) getTradeByID(id string) (types.ClobTrade, bool, error) {
-	page, err := c.getTradesPage(map[string]string{
+	return c.getTradeByIDContext(context.Background(), id)
+}
+
+func (c *orderClientImpl) getTradeByIDContext(ctx context.Context, id string) (types.ClobTrade, bool, error) {
+	page, err := c.getTradesPageContext(ctx, map[string]string{
 		"id":          id,
 		"next_cursor": "MA==",
 	})

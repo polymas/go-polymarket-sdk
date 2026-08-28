@@ -1,6 +1,7 @@
 package web3
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/big"
@@ -28,6 +29,10 @@ import (
 // amount 为人类单位（1.0 = 1 pUSD），internal 按 6 decimals 转 uint256。
 // negRisk=false 走 CtfCollateralAdapter；negRisk=true 走 NegRiskCtfCollateralAdapter。
 func (c *GaslessClient) SplitPosition(amount float64, conditionID types.Keccak256, negRisk bool) (*types.TransactionReceipt, error) {
+	return c.SplitPositionContext(context.Background(), amount, conditionID, negRisk)
+}
+
+func (c *GaslessClient) SplitPositionContext(ctx context.Context, amount float64, conditionID types.Keccak256, negRisk bool) (*types.TransactionReceipt, error) {
 	if err := conditionID.Validate(); err != nil {
 		return nil, fmt.Errorf("conditionID: %w", err)
 	}
@@ -42,12 +47,16 @@ func (c *GaslessClient) SplitPosition(amount float64, conditionID types.Keccak25
 	}
 
 	proxyTxns := []map[string]any{callTxn(adapterAddrV2(negRisk), data)}
-	return c.executeGaslessBatch(proxyTxns, "Split Position V2", "split-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Split Position V2", "split-v2")
 }
 
 // MergePositions 把 YES+NO 位置 token 合回 pUSD。随时可做，无需等结算。
 // amount 为人类单位（1.0 = 合并 1 pUSD 规模的完整 set）。
 func (c *GaslessClient) MergePositions(conditionID types.Keccak256, amount float64, negRisk bool) (*types.TransactionReceipt, error) {
+	return c.MergePositionsContext(context.Background(), conditionID, amount, negRisk)
+}
+
+func (c *GaslessClient) MergePositionsContext(ctx context.Context, conditionID types.Keccak256, amount float64, negRisk bool) (*types.TransactionReceipt, error) {
 	if err := conditionID.Validate(); err != nil {
 		return nil, fmt.Errorf("conditionID: %w", err)
 	}
@@ -62,7 +71,7 @@ func (c *GaslessClient) MergePositions(conditionID types.Keccak256, amount float
 	}
 
 	proxyTxns := []map[string]any{callTxn(adapterAddrV2(negRisk), data)}
-	return c.executeGaslessBatch(proxyTxns, "Merge Positions V2", "merge-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Merge Positions V2", "merge-v2")
 }
 
 // RedeemPositionInfo V2 redeem 单位参数。
@@ -105,6 +114,10 @@ type RedeemPositionInfo struct {
 //     redeem + wrap → Safe 收 **pUSD**
 //   - 前置 CTF.setApprovalForAll(adapter,true)（adapter 要 burn Safe 的 position token）
 func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.TransactionReceipt, error) {
+	return c.RedeemPositionsContext(context.Background(), positions)
+}
+
+func (c *GaslessClient) RedeemPositionsContext(ctx context.Context, positions []RedeemPositionInfo) (*types.TransactionReceipt, error) {
 	if len(positions) == 0 {
 		return nil, fmt.Errorf("no positions to redeem")
 	}
@@ -166,7 +179,7 @@ func (c *GaslessClient) RedeemPositions(positions []RedeemPositionInfo) (*types.
 		proxyTxns = append(proxyTxns, callTxn(to, data))
 	}
 
-	return c.executeGaslessBatch(proxyTxns, "Redeem Positions V2", "redeem-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Redeem Positions V2", "redeem-v2")
 }
 
 // toUnits6 把 float 金额按其十进制表示精确转换成 6 decimals uint256。

@@ -19,50 +19,79 @@ const negRiskPrefetchConcurrency = 8
 // OrderClient 订单相关操作的轻量接口
 type OrderClient interface {
 	GetOrder(orderID types.Keccak256) (*types.OpenOrder, error)
+	GetOrderContext(ctx context.Context, orderID types.Keccak256) (*types.OpenOrder, error)
 	GetOrders(orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error)
+	GetOrdersContext(ctx context.Context, orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error)
 	GetTrades(params *types.ClobTradeParams) ([]types.ClobTrade, error)
+	GetTradesContext(ctx context.Context, params *types.ClobTradeParams) ([]types.ClobTrade, error)
 	WaitForOrderFillSettlement(ctx context.Context, response types.OrderPostResponse) (*types.OrderFillSettlement, error)
 	AwaitOrderResult(ctx context.Context, response types.OrderPostResponse) (*types.OrderPostResponse, error)
 	AwaitOrderResults(ctx context.Context, responses []types.OrderPostResponse) ([]types.OrderPostResponse, error)
 	CreateAndPostOrders(orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
+	CreateAndPostOrdersContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
 	CreateAndPostOrdersInstant(orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
+	CreateAndPostOrdersInstantContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
 	CreateAndPostOrdersAndWait(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
 	CancelOrders(orderIDs []types.Keccak256) (*types.OrderCancelResponse, error)
+	CancelOrdersContext(ctx context.Context, orderIDs []types.Keccak256) (*types.OrderCancelResponse, error)
 	CancelAll() (*types.OrderCancelResponse, error)
+	CancelAllContext(ctx context.Context) (*types.OrderCancelResponse, error)
 	PostOrder(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
+	PostOrderContext(ctx context.Context, orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
 	PostOrderInstant(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
+	PostOrderInstantContext(ctx context.Context, orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
 	PostOrderAndWait(ctx context.Context, orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error)
 	CreateAndPostMarketOrder(orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
+	CreateAndPostMarketOrderContext(ctx context.Context, orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
 	CreateAndPostMarketOrderInstant(orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
+	CreateAndPostMarketOrderInstantContext(ctx context.Context, orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
 	CreateAndPostMarketOrderAndWait(ctx context.Context, orderArgs types.MarketOrderArgs) (*types.OrderPostResponse, error)
 	CancelOrder(orderID types.Keccak256) (*types.OrderCancelResponse, error)
+	CancelOrderContext(ctx context.Context, orderID types.Keccak256) (*types.OrderCancelResponse, error)
 	CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error)
+	CancelMarketOrdersContext(ctx context.Context, conditionID types.Keccak256) (*types.OrderCancelResponse, error)
 	CancelMarketOrdersByFilter(params types.CancelMarketOrdersParams) (*types.OrderCancelResponse, error)
+	CancelMarketOrdersByFilterContext(ctx context.Context, params types.CancelMarketOrdersParams) (*types.OrderCancelResponse, error)
 }
 
 // MarketDataClient 市场数据相关操作的轻量接口
 type MarketDataClient interface {
 	GetOrderBook(tokenID string) (*types.OrderBookSummary, error)
+	GetOrderBookContext(ctx context.Context, tokenID string) (*types.OrderBookSummary, error)
 	GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummary, error)
+	GetMultipleOrderBooksContext(ctx context.Context, requests []types.BookParams) ([]types.OrderBookSummary, error)
 	GetMidpoint(tokenID string) (*types.Midpoint, error)
+	GetMidpointContext(ctx context.Context, tokenID string) (*types.Midpoint, error)
 	GetMidpoints(tokenIDs []string) ([]types.Midpoint, error)
+	GetMidpointsContext(ctx context.Context, tokenIDs []string) ([]types.Midpoint, error)
 	GetPrice(tokenID string, side types.OrderSide) (*types.Price, error)
+	GetPriceContext(ctx context.Context, tokenID string, side types.OrderSide) (*types.Price, error)
 	GetPrices(requests []types.BookParams) ([]types.Price, error)
+	GetPricesContext(ctx context.Context, requests []types.BookParams) ([]types.Price, error)
 	GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error)
+	GetPricesHistoryContext(ctx context.Context, market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error)
 	GetSpread(tokenID string) (*types.Spread, error)
+	GetSpreadContext(ctx context.Context, tokenID string) (*types.Spread, error)
 	GetSpreads(tokenIDs []string) ([]types.Spread, error)
+	GetSpreadsContext(ctx context.Context, tokenIDs []string) ([]types.Spread, error)
 	GetLastTradePrice(tokenID string) (*types.LastTradePrice, error)
+	GetLastTradePriceContext(ctx context.Context, tokenID string) (*types.LastTradePrice, error)
 	GetLastTradesPrices(tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error)
+	GetLastTradesPricesContext(ctx context.Context, tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error)
 	// CalculateMarketPrice 按当前订单簿估算市价单的最差成交价。
 	// BUY 的 amount 是 pUSD 金额，SELL 的 amount 是 shares。
 	CalculateMarketPrice(tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error)
+	CalculateMarketPriceContext(ctx context.Context, tokenID string, side types.OrderSide, amount float64, orderType types.OrderType) (float64, error)
 	// GetTickSize 显式查询 token 当前的最小价格步长；SDK 不隐藏缓存。
 	// 下单方法不会隐式调用；业务层可选择默认值或提前调用本方法。
 	GetTickSize(tokenID string) (types.TickSize, error)
+	GetTickSizeContext(ctx context.Context, tokenID string) (types.TickSize, error)
 	GetNegRisk(tokenID string) (bool, error)
+	GetNegRiskContext(ctx context.Context, tokenID string) (bool, error)
 	PrimeNegRisk(tokenID string, value bool) error
 	InvalidateNegRisk(tokenID string) error
 	GetTime() (time.Time, error)
+	GetTimeContext(ctx context.Context) (time.Time, error)
 }
 
 // AccountClient 账户相关操作的轻量接口
@@ -73,24 +102,35 @@ type AccountClient interface {
 	// Use GetCollateralBalance for trading funds.
 	GetUSDCBalance() (float64, error)
 	GetBalanceAllowance() (*types.BalanceAllowance, error)
+	GetBalanceAllowanceContext(ctx context.Context) (*types.BalanceAllowance, error)
 	UpdateBalanceAllowance(amount float64) (*types.BalanceAllowance, error)
+	UpdateBalanceAllowanceContext(ctx context.Context, amount float64) (*types.BalanceAllowance, error)
 	GetNotifications(limit int, offset int) ([]types.Notification, error)
+	GetNotificationsContext(ctx context.Context, limit int, offset int) ([]types.Notification, error)
 	DropNotifications(notificationIDs []string) error
+	DropNotificationsContext(ctx context.Context, notificationIDs []string) error
 }
 
 // APIKeyClient API Keys 管理相关操作的轻量接口
 type APIKeyClient interface {
 	GetAPIKeys() ([]types.APIKey, error)
+	GetAPIKeysContext(ctx context.Context) ([]types.APIKey, error)
 	DeleteAPIKey(keyID string) error
+	DeleteAPIKeyContext(ctx context.Context, keyID string) error
 	CreateReadonlyAPIKey() (*types.APIKey, error)
+	CreateReadonlyAPIKeyContext(ctx context.Context) (*types.APIKey, error)
 	GetReadonlyAPIKeys() ([]types.APIKey, error)
+	GetReadonlyAPIKeysContext(ctx context.Context) ([]types.APIKey, error)
 	DeleteReadonlyAPIKey(keyID string) error
+	DeleteReadonlyAPIKeyContext(ctx context.Context, keyID string) error
 }
 
 // RewardClient 奖励相关操作的轻量接口
 type RewardClient interface {
 	IsOrderScoring(orderID types.Keccak256) (bool, error)
+	IsOrderScoringContext(ctx context.Context, orderID types.Keccak256) (bool, error)
 	AreOrdersScoring(orderIDs []types.Keccak256) (map[types.Keccak256]bool, error)
+	AreOrdersScoringContext(ctx context.Context, orderIDs []types.Keccak256) (map[types.Keccak256]bool, error)
 }
 
 // ReadonlyClient 只读客户端接口，不需要私钥和API凭证
@@ -227,6 +267,12 @@ func NewReadonlyClient() ReadonlyClient {
 // 只使用当前 V2 订单协议。生产 CLOB 不再兼容 V1；WithV2() 仅为源码兼容
 // 保留，已经不再需要。
 func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
+	return NewClientContext(context.Background(), web3Client, opts...)
+}
+
+// NewClientContext initializes a CLOB client while allowing API credential
+// creation/derivation to be canceled by the caller.
+func NewClientContext(ctx context.Context, web3Client web3.Client, opts ...ClientOption) (Client, error) {
 	// 从 web3.Client 获取所需信息
 	signatureType := web3Client.GetSignatureType()
 	address := web3Client.GetBaseAddress()
@@ -247,7 +293,7 @@ func NewClient(web3Client web3.Client, opts ...ClientOption) (Client, error) {
 	}
 
 	// 自动创建或派生 API 凭证
-	derivedCreds, err := base.CreateOrDeriveAPICreds()
+	derivedCreds, err := base.CreateOrDeriveAPICredsContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create/derive API creds: %w", err)
 	}
@@ -304,11 +350,15 @@ func (c *baseClient) GetAPICreds() *types.ApiCreds {
 // 与 marketDataClientImpl.GetNegRisk 共用 baseClient.negRisk 缓存；查不到时
 // 退回 false，由调用方的 negRisk 重试兜底。
 func (c *baseClient) negRiskForToken(tokenID string) (bool, error) {
+	return c.negRiskForTokenContext(context.Background(), tokenID)
+}
+
+func (c *baseClient) negRiskForTokenContext(ctx context.Context, tokenID string) (bool, error) {
 	canonical, err := canonicalNegRiskTokenID(tokenID)
 	if err != nil {
 		return false, err
 	}
-	return getNegRiskCached(c.baseURL, c.negRisk, canonical)
+	return getNegRiskCachedContext(ctx, c.baseURL, c.negRisk, canonical)
 }
 
 // negRiskFetchList 计算一批订单里"NegRisk 状态未知、需要现查"的去重 tokenID
@@ -346,6 +396,10 @@ func (c *baseClient) negRiskFetchList(orderArgsList []types.OrderArgs) []string 
 //
 // 并发安全：缓存自身加锁，同一 token 的并发冷启动查询由 singleflight 合并。
 func (c *baseClient) prefetchNegRisk(orderArgsList []types.OrderArgs) {
+	c.prefetchNegRiskContext(context.Background(), orderArgsList)
+}
+
+func (c *baseClient) prefetchNegRiskContext(ctx context.Context, orderArgsList []types.OrderArgs) {
 	need := c.negRiskFetchList(orderArgsList)
 	if len(need) <= 1 {
 		return // 0 或 1 个，串行查即可，不值得起 goroutine
@@ -359,7 +413,7 @@ func (c *baseClient) prefetchNegRisk(orderArgsList []types.OrderArgs) {
 		go func(id string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			_, _ = getNegRiskCached(c.baseURL, c.negRisk, id)
+			_, _ = getNegRiskCachedContext(ctx, c.baseURL, c.negRisk, id)
 		}(id)
 	}
 	wg.Wait()
@@ -367,20 +421,24 @@ func (c *baseClient) prefetchNegRisk(orderArgsList []types.OrderArgs) {
 
 // CreateOrDeriveAPICreds creates or derives API credentials
 func (c *baseClient) CreateOrDeriveAPICreds() (*types.ApiCreds, error) {
+	return c.CreateOrDeriveAPICredsContext(context.Background())
+}
+
+func (c *baseClient) CreateOrDeriveAPICredsContext(ctx context.Context) (*types.ApiCreds, error) {
 	// Try to create first
 	headers, err := internal.CreateLevel1Headers(c.web3Client.GetSigner(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create level 1 headers: %w", err)
 	}
 
-	creds, err := http.Post[types.ApiCreds](c.baseURL, internal.CreateAPIKey, nil, http.WithHeaders(headers))
+	creds, err := http.PostContext[types.ApiCreds](ctx, c.baseURL, internal.CreateAPIKey, nil, http.WithHeaders(headers), http.WithService("clob"), http.WithAmbiguousOnTimeout("create API credentials"))
 	if err != nil {
 		// If creation fails, try to derive (need to recreate headers for GET request)
 		headers, err = internal.CreateLevel1Headers(c.web3Client.GetSigner(), nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create level 1 headers for derive: %w", err)
 		}
-		creds, err = http.Get[types.ApiCreds](c.baseURL, internal.DeriveAPIKey, nil, http.WithHeaders(headers))
+		creds, err = http.GetContext[types.ApiCreds](ctx, c.baseURL, internal.DeriveAPIKey, nil, http.WithHeaders(headers), http.WithService("clob"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create or derive API creds: %w", err)
 		}

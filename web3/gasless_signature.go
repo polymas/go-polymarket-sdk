@@ -70,8 +70,12 @@ func (c *GaslessClient) signSafeTransaction(
 	safeTxn map[string]interface{},
 	nonce int,
 ) ([]byte, error) {
+	return c.signSafeTransactionContext(context.Background(), safeTxn, nonce)
+}
+
+func (c *GaslessClient) signSafeTransactionContext(ctx context.Context, safeTxn map[string]interface{}, nonce int) ([]byte, error) {
 	// Get Safe contract address (proxy address)
-	safeAddr, err := c.getSafeProxyAddress()
+	safeAddr, err := c.getSafeProxyAddressContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get safe address: %w", err)
 	}
@@ -134,7 +138,7 @@ func (c *GaslessClient) signSafeTransaction(
 		Data: packed,
 	}
 
-	txHashBytes, err := c.callContractWithRetry(context.Background(), callMsg, nil)
+	txHashBytes, err := c.callContractWithRetry(ctx, callMsg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call getTransactionHash: %w", err)
 	}
@@ -165,6 +169,10 @@ func (c *GaslessClient) signSafeTransaction(
 
 // getSafeProxyAddress gets the Safe proxy address for the base address
 func (c *GaslessClient) getSafeProxyAddress() (types.EthAddress, error) {
+	return c.getSafeProxyAddressContext(context.Background())
+}
+
+func (c *GaslessClient) getSafeProxyAddressContext(ctx context.Context) (types.EthAddress, error) {
 	// Safe proxy factory address
 	safeProxyFactoryAddr := common.HexToAddress(internal.SafeProxyFactory)
 
@@ -187,7 +195,7 @@ func (c *GaslessClient) getSafeProxyAddress() (types.EthAddress, error) {
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
+	result, err := c.callContractWithRetry(ctx, callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call computeProxyAddress: %w", err)
 	}
@@ -206,7 +214,7 @@ func (c *GaslessClient) getSafeProxyAddress() (types.EthAddress, error) {
 // This is the ground-truth nonce — the Safe contract's storage slot that execTransaction
 // checks against. Relayer's /nonce endpoint is a cache and can diverge from chain state.
 func (c *GaslessClient) getSafeNonceOnChain(ctx context.Context) (uint64, error) {
-	safeAddr, err := c.getSafeProxyAddress()
+	safeAddr, err := c.getSafeProxyAddressContext(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get safe address: %w", err)
 	}

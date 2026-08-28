@@ -18,6 +18,11 @@ const MaxCancelOrdersPerRequest = 3000
 
 // GetOrders 获取活跃订单
 func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error) {
+	return c.GetOrdersContext(context.Background(), orderID, conditionID, tokenID)
+}
+
+// GetOrdersContext is GetOrders with caller-controlled cancellation/deadline.
+func (c *orderClientImpl) GetOrdersContext(ctx context.Context, orderID *types.Keccak256, conditionID *types.Keccak256, tokenID *string) ([]types.OpenOrder, error) {
 	// Validate API credentials
 	if c.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -56,7 +61,7 @@ func (c *orderClientImpl) GetOrders(orderID *types.Keccak256, conditionID *types
 	for nextCursor != internal.EndCursor {
 		params["next_cursor"] = nextCursor
 
-		response, err := http.Get[types.PaginatedResponse[types.OpenOrder]](c.baseClient.baseURL, internal.Orders, params, http.WithHeaders(headers))
+		response, err := http.GetContext[types.PaginatedResponse[types.OpenOrder]](ctx, c.baseClient.baseURL, internal.Orders, params, http.WithHeaders(headers), http.WithService("clob"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get orders: %w", err)
 		}
@@ -82,7 +87,15 @@ func (c *orderClientImpl) CreateAndPostOrders(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 ) ([]types.OrderPostResponse, error) {
-	return c.createAndPostOrdersWith(orderArgsList, orderTypes, c.postOrdersBatchV2)
+	return c.CreateAndPostOrdersContext(context.Background(), orderArgsList, orderTypes)
+}
+
+// CreateAndPostOrdersContext is CreateAndPostOrders with caller-controlled
+// cancellation/deadline for both submission and reconciliation.
+func (c *orderClientImpl) CreateAndPostOrdersContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error) {
+	return c.createAndPostOrdersWith(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType, retry ...bool) ([]types.OrderPostResponse, error) {
+		return c.postOrdersBatchV2Context(ctx, a, t, retry...)
+	})
 }
 
 // CreateAndPostOrdersInstant 只等待 CLOB 的 POST /orders 响应，不等待异步
@@ -92,7 +105,16 @@ func (c *orderClientImpl) CreateAndPostOrdersInstant(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 ) ([]types.OrderPostResponse, error) {
-	return c.createAndPostOrdersWith(orderArgsList, orderTypes, c.postOrdersBatchV2Instant)
+	return c.CreateAndPostOrdersInstantContext(context.Background(), orderArgsList, orderTypes)
+}
+
+// CreateAndPostOrdersInstantContext is the immediate-return variant with a
+// caller-controlled submission deadline. A timeout is reported as ambiguous
+// and is never automatically resent.
+func (c *orderClientImpl) CreateAndPostOrdersInstantContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error) {
+	return c.createAndPostOrdersWith(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType, retry ...bool) ([]types.OrderPostResponse, error) {
+		return c.postOrdersBatchV2InstantContext(ctx, a, t, retry...)
+	})
 }
 
 // CreateAndPostOrdersAndWait 提交后自动完成 unknown order-hash 对账和异步成交
@@ -102,7 +124,7 @@ func (c *orderClientImpl) CreateAndPostOrdersAndWait(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
 ) ([]types.OrderPostResponse, error) {
-	results, submitErr := c.CreateAndPostOrdersInstant(orderArgsList, orderTypes)
+	results, submitErr := c.CreateAndPostOrdersInstantContext(ctx, orderArgsList, orderTypes)
 	if len(results) == 0 {
 		return results, submitErr
 	}
@@ -244,13 +266,21 @@ func runOrderBatches(
 
 // PostOrder 提交单个订单
 func (c *orderClientImpl) PostOrder(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
-	results, err := c.CreateAndPostOrders([]types.OrderArgs{orderArgs}, []types.OrderType{orderType})
+	return c.PostOrderContext(context.Background(), orderArgs, orderType)
+}
+
+func (c *orderClientImpl) PostOrderContext(ctx context.Context, orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
+	results, err := c.CreateAndPostOrdersContext(ctx, []types.OrderArgs{orderArgs}, []types.OrderType{orderType})
 	return firstOrderResponse(results, err)
 }
 
 // PostOrderInstant 是单笔立即返回版本。
 func (c *orderClientImpl) PostOrderInstant(orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
-	results, err := c.CreateAndPostOrdersInstant([]types.OrderArgs{orderArgs}, []types.OrderType{orderType})
+	return c.PostOrderInstantContext(context.Background(), orderArgs, orderType)
+}
+
+func (c *orderClientImpl) PostOrderInstantContext(ctx context.Context, orderArgs types.OrderArgs, orderType types.OrderType) (*types.OrderPostResponse, error) {
+	results, err := c.CreateAndPostOrdersInstantContext(ctx, []types.OrderArgs{orderArgs}, []types.OrderType{orderType})
 	return firstOrderResponse(results, err)
 }
 
@@ -277,6 +307,10 @@ func firstOrderResponse(results []types.OrderPostResponse, err error) (*types.Or
 // CancelOrders cancels multiple orders
 // According to Polymarket API docs: DELETE /orders with body as string[] (orderID array)
 func (c *orderClientImpl) CancelOrders(orderIDs []types.Keccak256) (*types.OrderCancelResponse, error) {
+	return c.CancelOrdersContext(context.Background(), orderIDs)
+}
+
+func (c *orderClientImpl) CancelOrdersContext(ctx context.Context, orderIDs []types.Keccak256) (*types.OrderCancelResponse, error) {
 	if len(orderIDs) == 0 {
 		return emptyOrderCancelResponse(), nil
 	}
@@ -326,17 +360,25 @@ func (c *orderClientImpl) CancelOrders(orderIDs []types.Keccak256) (*types.Order
 	}
 
 	// 执行请求，使用格式化后的 JSON body
-	response, err := http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelOrders, bodyJSON, http.WithHeaders(headers))
+	response, err := http.DeleteRawContext[types.OrderCancelResponse](ctx, c.baseClient.baseURL, internal.CancelOrders, bodyJSON, http.WithHeaders(headers), http.WithService("clob"))
 	return normalizeOrderCancelResponse(response), err
 }
 
 // CancelOrder 取消单个订单
 func (c *orderClientImpl) CancelOrder(orderID types.Keccak256) (*types.OrderCancelResponse, error) {
-	return c.CancelOrders([]types.Keccak256{orderID})
+	return c.CancelOrderContext(context.Background(), orderID)
+}
+
+func (c *orderClientImpl) CancelOrderContext(ctx context.Context, orderID types.Keccak256) (*types.OrderCancelResponse, error) {
+	return c.CancelOrdersContext(ctx, []types.Keccak256{orderID})
 }
 
 // CancelAll cancels all orders
 func (c *orderClientImpl) CancelAll() (*types.OrderCancelResponse, error) {
+	return c.CancelAllContext(context.Background())
+}
+
+func (c *orderClientImpl) CancelAllContext(ctx context.Context) (*types.OrderCancelResponse, error) {
 	requestArgs := &types.RequestArgs{
 		Method:      "DELETE",
 		RequestPath: internal.CancelAll,
@@ -345,7 +387,7 @@ func (c *orderClientImpl) CancelAll() (*types.OrderCancelResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
-	response, err := http.Delete[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelAll, nil, http.WithHeaders(headers))
+	response, err := http.DeleteContext[types.OrderCancelResponse](ctx, c.baseClient.baseURL, internal.CancelAll, nil, http.WithHeaders(headers), http.WithService("clob"))
 	return normalizeOrderCancelResponse(response), err
 }
 
@@ -353,11 +395,15 @@ func (c *orderClientImpl) CancelAll() (*types.OrderCancelResponse, error) {
 // 保留该方法用于源码兼容；需要按 token 或 condition+token 过滤时使用
 // CancelMarketOrdersByFilter。
 func (c *orderClientImpl) CancelMarketOrders(conditionID types.Keccak256) (*types.OrderCancelResponse, error) {
+	return c.CancelMarketOrdersContext(context.Background(), conditionID)
+}
+
+func (c *orderClientImpl) CancelMarketOrdersContext(ctx context.Context, conditionID types.Keccak256) (*types.OrderCancelResponse, error) {
 	parsed, err := types.ParseConditionID(conditionID.String())
 	if err != nil {
 		return nil, fmt.Errorf("invalid condition ID: %w", err)
 	}
-	return c.CancelMarketOrdersByFilter(types.CancelMarketOrdersParams{ConditionID: parsed})
+	return c.CancelMarketOrdersByFilterContext(ctx, types.CancelMarketOrdersParams{ConditionID: parsed})
 }
 
 type cancelMarketOrdersWire struct {
@@ -367,6 +413,10 @@ type cancelMarketOrdersWire struct {
 
 // CancelMarketOrdersByFilter 按 condition、token 或两者的交集取消订单。
 func (c *orderClientImpl) CancelMarketOrdersByFilter(params types.CancelMarketOrdersParams) (*types.OrderCancelResponse, error) {
+	return c.CancelMarketOrdersByFilterContext(context.Background(), params)
+}
+
+func (c *orderClientImpl) CancelMarketOrdersByFilterContext(ctx context.Context, params types.CancelMarketOrdersParams) (*types.OrderCancelResponse, error) {
 	requestBody := cancelMarketOrdersWire{}
 	if params.ConditionID != (types.ConditionID{}) {
 		requestBody.Market = params.ConditionID.String()
@@ -418,7 +468,7 @@ func (c *orderClientImpl) CancelMarketOrdersByFilter(params types.CancelMarketOr
 	}
 
 	// Execute DELETE request with body
-	response, err := http.DeleteRaw[types.OrderCancelResponse](c.baseClient.baseURL, internal.CancelMarketOrders, bodyJSON, http.WithHeaders(headers))
+	response, err := http.DeleteRawContext[types.OrderCancelResponse](ctx, c.baseClient.baseURL, internal.CancelMarketOrders, bodyJSON, http.WithHeaders(headers), http.WithService("clob"))
 	return normalizeOrderCancelResponse(response), err
 }
 

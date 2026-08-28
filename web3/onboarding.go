@@ -111,9 +111,9 @@ type DepositWalletOnboardingResult struct {
 
 type depositWalletOnboardingOps interface {
 	resolve(context.Context) (*WalletAccount, error)
-	deploy() (*types.TransactionReceipt, error)
+	deploy(context.Context) (*types.TransactionReceipt, error)
 	state(context.Context, common.Address) (*v2State, *big.Int, error)
-	ensure() (*types.TransactionReceipt, error)
+	ensure(context.Context) (*types.TransactionReceipt, error)
 }
 
 type gaslessDepositWalletOnboardingOps struct{ client *GaslessClient }
@@ -122,8 +122,8 @@ func (ops gaslessDepositWalletOnboardingOps) resolve(ctx context.Context) (*Wall
 	return ops.client.ResolveWalletAccount(ctx)
 }
 
-func (ops gaslessDepositWalletOnboardingOps) deploy() (*types.TransactionReceipt, error) {
-	return ops.client.DeployDepositWallet(false)
+func (ops gaslessDepositWalletOnboardingOps) deploy(ctx context.Context) (*types.TransactionReceipt, error) {
+	return ops.client.DeployDepositWalletContext(ctx, false)
 }
 
 func (ops gaslessDepositWalletOnboardingOps) state(ctx context.Context, wallet common.Address) (*v2State, *big.Int, error) {
@@ -138,8 +138,8 @@ func (ops gaslessDepositWalletOnboardingOps) state(ctx context.Context, wallet c
 	return state, pusd, nil
 }
 
-func (ops gaslessDepositWalletOnboardingOps) ensure() (*types.TransactionReceipt, error) {
-	return ops.client.EnsureV2Ready()
+func (ops gaslessDepositWalletOnboardingOps) ensure(ctx context.Context) (*types.TransactionReceipt, error) {
+	return ops.client.EnsureV2ReadyContext(ctx)
 }
 
 // OnboardDepositWallet runs an idempotent deploy → funding checkpoint →
@@ -167,7 +167,7 @@ func runDepositWalletOnboarding(ctx context.Context, minimumPUSD float64, ops de
 	}
 	result := &DepositWalletOnboardingResult{Account: *account, MinimumPUSD: minimumPUSD}
 	if !account.Deployed {
-		result.DeployReceipt, err = ops.deploy()
+		result.DeployReceipt, err = ops.deploy(ctx)
 		if err != nil {
 			return result, fmt.Errorf("deploy Deposit Wallet: %w", err)
 		}
@@ -193,7 +193,7 @@ func runDepositWalletOnboarding(ctx context.Context, minimumPUSD float64, ops de
 	}
 
 	result.Stage = OnboardingStageApprovalsPending
-	result.ApprovalReceipt, err = ops.ensure()
+	result.ApprovalReceipt, err = ops.ensure(ctx)
 	if err != nil {
 		return result, fmt.Errorf("ensure V2 approvals: %w", err)
 	}

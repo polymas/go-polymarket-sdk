@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/polymas/go-polymarket-sdk/errors"
@@ -29,19 +31,19 @@ func Chain(middlewares ...Middleware) Middleware {
 
 // RetryMiddleware 重试中间件
 type RetryMiddleware struct {
-	MaxRetries          int
-	BackoffBase         time.Duration
-	BackoffMax          time.Duration
+	MaxRetries           int
+	BackoffBase          time.Duration
+	BackoffMax           time.Duration
 	RetryableStatusCodes []int
 }
 
 // NewRetryMiddleware 创建重试中间件
 func NewRetryMiddleware(maxRetries int, backoffBase, backoffMax time.Duration) Middleware {
 	retryMW := &RetryMiddleware{
-		MaxRetries:          maxRetries,
-		BackoffBase:         backoffBase,
-		BackoffMax:          backoffMax,
-		RetryableStatusCodes: []int{500, 502, 503, 504, 408, 429},
+		MaxRetries:           maxRetries,
+		BackoffBase:          backoffBase,
+		BackoffMax:           backoffMax,
+		RetryableStatusCodes: []int{425, 500, 502, 503, 504, 408, 429},
 	}
 	return retryMW.Wrap
 }
@@ -49,6 +51,9 @@ func NewRetryMiddleware(maxRetries int, backoffBase, backoffMax time.Duration) M
 // Wrap 包装请求函数
 func (m *RetryMiddleware) Wrap(next RequestFunc) RequestFunc {
 	return func(ctx context.Context, req *http.Request) (*http.Response, error) {
+		if !isIdempotentMethod(req.Method) || (req.Body != nil && req.GetBody == nil) {
+			return next(ctx, req.WithContext(ctx))
+		}
 		var lastErr error
 		var lastResp *http.Response
 
@@ -71,7 +76,15 @@ func (m *RetryMiddleware) Wrap(next RequestFunc) RequestFunc {
 			}
 
 			// 执行请求
-			resp, err := next(ctx, req)
+			attemptReq := req.Clone(ctx)
+			if req.Body != nil && req.GetBody != nil {
+				body, bodyErr := req.GetBody()
+				if bodyErr != nil {
+					return nil, bodyErr
+				}
+				attemptReq.Body = body
+			}
+			resp, err := next(ctx, attemptReq)
 			if err != nil {
 				lastErr = err
 				// 检查是否可重试
@@ -84,11 +97,10 @@ func (m *RetryMiddleware) Wrap(next RequestFunc) RequestFunc {
 			// 检查状态码是否可重试
 			if m.isRetryableStatusCode(resp.StatusCode) {
 				lastResp = resp
-				// 读取并关闭响应体
-				io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
-
 				if attempt < m.MaxRetries {
+					// Only consume a response when another attempt will follow.
+					_, _ = io.Copy(io.Discard, resp.Body)
+					_ = resp.Body.Close()
 					internal.LogWarn("收到可重试状态码 %d，将重试", resp.StatusCode)
 					continue
 				}
@@ -107,6 +119,15 @@ func (m *RetryMiddleware) Wrap(next RequestFunc) RequestFunc {
 		}
 
 		return nil, errors.NewNetworkError("请求失败，已达到最大重试次数", nil)
+	}
+}
+
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodDelete:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -141,7 +162,7 @@ func (m *LoggingMiddleware) Wrap(next RequestFunc) RequestFunc {
 		start := time.Now()
 
 		if m.EnableRequestLog {
-			internal.LogDebug("HTTP 请求: %s %s", req.Method, req.URL.String())
+			internal.LogDebug("HTTP 请求: %s %s", req.Method, redactedURL(req.URL))
 		}
 
 		resp, err := next(ctx, req)
@@ -151,18 +172,34 @@ func (m *LoggingMiddleware) Wrap(next RequestFunc) RequestFunc {
 		if err != nil {
 			if m.EnableRequestLog {
 				internal.LogError("HTTP 请求失败: %s %s (耗时: %v): %v",
-					req.Method, req.URL.String(), duration, err)
+					req.Method, redactedURL(req.URL), duration, err)
 			}
 			return nil, err
 		}
 
 		if m.EnableResponseLog {
 			internal.LogDebug("HTTP 响应: %s %s - %d (耗时: %v)",
-				req.Method, req.URL.String(), resp.StatusCode, duration)
+				req.Method, redactedURL(req.URL), resp.StatusCode, duration)
 		}
 
 		return resp, nil
 	}
+}
+
+func redactedURL(input *url.URL) string {
+	if input == nil {
+		return ""
+	}
+	copyURL := *input
+	query := copyURL.Query()
+	for key := range query {
+		normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", ""))
+		if strings.Contains(normalized, "secret") || strings.Contains(normalized, "passphrase") || strings.Contains(normalized, "privatekey") || strings.Contains(normalized, "signature") || strings.Contains(normalized, "authorization") || normalized == "apikey" {
+			query.Set(key, "***")
+		}
+	}
+	copyURL.RawQuery = query.Encode()
+	return copyURL.String()
 }
 
 // TimeoutMiddleware 超时中间件

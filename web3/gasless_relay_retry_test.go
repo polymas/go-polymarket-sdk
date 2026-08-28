@@ -1,6 +1,7 @@
 package web3
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -161,6 +162,40 @@ func TestExecuteGaslessBatch_NoRetryOnOtherErrors(t *testing.T) {
 	var httpErr *sdkerrors.RelayHTTPError
 	if !errors.As(err, &httpErr) || httpErr.Status != http.StatusBadRequest {
 		t.Fatalf("expected RelayHTTPError with 400, got: %v", err)
+	}
+}
+
+func TestExecuteGaslessBatchContextTimeoutIsAmbiguousAndNotRetried(t *testing.T) {
+	var submits int64
+	srv := mockRelayer(t, &submits, func(w http.ResponseWriter) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"transactionID":"late","state":"STATE_NEW"}`))
+	})
+	c := newRetryTestClient(t, srv.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := c.executeGaslessBatchContext(ctx, testTxn(), "test timeout", "test")
+	if !sdkerrors.IsAmbiguousOutcome(err) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%T %v, want ambiguous deadline", err, err)
+	}
+	if got := atomic.LoadInt64(&submits); got != 1 {
+		t.Fatalf("submit calls=%d, want exactly one", got)
+	}
+}
+
+func TestRelayerHTTPErrorWrapsRedactedAPIError(t *testing.T) {
+	var submits int64
+	srv := mockRelayer(t, &submits, respJSON(http.StatusTooManyRequests,
+		`{"error":{"code":"RATE_LIMIT","message":"slow down"},"signature":"0xsecret"}`))
+	c := newRetryTestClient(t, srv.URL)
+	_, err := c.executeGaslessBatch(testTxn(), "test", "test")
+	var apiErr *sdkerrors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Service != "relayer" || apiErr.Status != http.StatusTooManyRequests || apiErr.ErrorCode != "RATE_LIMIT" {
+		t.Fatalf("error=%T %v, want relayer APIError", err, err)
+	}
+	if strings.Contains(apiErr.RawResponse, "0xsecret") {
+		t.Fatalf("response leaked signature: %s", apiErr.RawResponse)
 	}
 }
 

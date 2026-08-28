@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -36,6 +37,10 @@ func WithSeriesClosed(closed bool) GetSeriesOption {
 
 // GetSeries 获取系列列表
 func (c *polymarketGammaClient) GetSeries(limit int, offset int, options ...GetSeriesOption) ([]types.Series, error) {
+	return c.GetSeriesContext(context.Background(), limit, offset, options...)
+}
+
+func (c *polymarketGammaClient) GetSeriesContext(ctx context.Context, limit int, offset int, options ...GetSeriesOption) ([]types.Series, error) {
 	opts := &GetSeriesOptions{}
 	for _, opt := range options {
 		opt(opts)
@@ -54,7 +59,7 @@ func (c *polymarketGammaClient) GetSeries(limit int, offset int, options ...GetS
 		params["closed"] = strconv.FormatBool(*opts.Closed)
 	}
 
-	result, err := http.Get[[]types.Series](c.baseURL, internal.GetSeries, params)
+	result, err := http.GetContext[[]types.Series](ctx, c.baseURL, internal.GetSeries, params, http.WithService("gamma"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get series: %w", err)
 	}
@@ -68,10 +73,18 @@ func (c *polymarketGammaClient) GetSeries(limit int, offset int, options ...GetS
 
 // GetSeriesSummaryByID 通过 ID 获取系列摘要。
 func (c *polymarketGammaClient) GetSeriesSummaryByID(id string) (*types.SeriesSummary, error) {
-	return http.Get[types.SeriesSummary](c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesSummary, id), nil)
+	return c.GetSeriesSummaryByIDContext(context.Background(), id)
+}
+
+func (c *polymarketGammaClient) GetSeriesSummaryByIDContext(ctx context.Context, id string) (*types.SeriesSummary, error) {
+	return http.GetContext[types.SeriesSummary](ctx, c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesSummary, id), nil, http.WithService("gamma"))
 }
 
 // GetSeriesSummaryBySlug 通过 slug 获取系列摘要。
 func (c *polymarketGammaClient) GetSeriesSummaryBySlug(slug string) (*types.SeriesSummary, error) {
-	return http.Get[types.SeriesSummary](c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesSummaryBySlug, slug), nil)
+	return c.GetSeriesSummaryBySlugContext(context.Background(), slug)
+}
+
+func (c *polymarketGammaClient) GetSeriesSummaryBySlugContext(ctx context.Context, slug string) (*types.SeriesSummary, error) {
+	return http.GetContext[types.SeriesSummary](ctx, c.baseURL, fmt.Sprintf("%s%s", internal.GetSeriesSummaryBySlug, slug), nil, http.WithService("gamma"))
 }

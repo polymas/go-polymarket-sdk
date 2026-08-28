@@ -103,7 +103,11 @@ func (c *orderClientImpl) postOrdersBatchV2(
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
-	return c.postOrdersBatchV2WithMode(orderArgsList, orderTypes, true, isRetry...)
+	return c.postOrdersBatchV2Context(context.Background(), orderArgsList, orderTypes, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2Context(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType, isRetry ...bool) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2WithModeContext(ctx, orderArgsList, orderTypes, true, isRetry...)
 }
 
 func (c *orderClientImpl) postOrdersBatchV2Instant(
@@ -111,7 +115,11 @@ func (c *orderClientImpl) postOrdersBatchV2Instant(
 	orderTypes []types.OrderType,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
-	return c.postOrdersBatchV2WithMode(orderArgsList, orderTypes, false, isRetry...)
+	return c.postOrdersBatchV2InstantContext(context.Background(), orderArgsList, orderTypes, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2InstantContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType, isRetry ...bool) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2WithModeContext(ctx, orderArgsList, orderTypes, false, isRetry...)
 }
 
 func (c *orderClientImpl) postOrdersBatchV2WithMode(
@@ -120,8 +128,12 @@ func (c *orderClientImpl) postOrdersBatchV2WithMode(
 	waitForResult bool,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2WithModeContext(context.Background(), orderArgsList, orderTypes, waitForResult, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2WithModeContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType, waitForResult bool, isRetry ...bool) ([]types.OrderPostResponse, error) {
 	return resolveV2BatchAttempt(orderArgsList, orderTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
-		return c.postOrdersBatchV2Once(a, t, waitForResult, isRetry...)
+		return c.postOrdersBatchV2OnceContext(ctx, a, t, waitForResult, isRetry...)
 	})
 }
 
@@ -269,7 +281,11 @@ func (c *orderClientImpl) postOrdersBatchV2Once(
 	waitForResult bool,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
-	return c.postOrdersBatchV2OnceWithAmounts(orderArgsList, orderTypes, waitForResult, nil, isRetry...)
+	return c.postOrdersBatchV2OnceContext(context.Background(), orderArgsList, orderTypes, waitForResult, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2OnceContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType, waitForResult bool, isRetry ...bool) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2OnceWithAmountsContext(ctx, orderArgsList, orderTypes, waitForResult, nil, isRetry...)
 }
 
 func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
@@ -279,6 +295,10 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 	amountOverrides []orderAmountOverride,
 	isRetry ...bool,
 ) ([]types.OrderPostResponse, error) {
+	return c.postOrdersBatchV2OnceWithAmountsContext(context.Background(), orderArgsList, orderTypes, waitForResult, amountOverrides, isRetry...)
+}
+
+func (c *orderClientImpl) postOrdersBatchV2OnceWithAmountsContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType, waitForResult bool, amountOverrides []orderAmountOverride, isRetry ...bool) ([]types.OrderPostResponse, error) {
 	batchStart := time.Now()
 	isRetryCall := len(isRetry) > 0 && isRetry[0]
 	if len(orderArgsList) == 0 {
@@ -303,7 +323,7 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 	// 循环里逐个串行 GET /neg-risk 压成约 1 次往返的墙钟时间。重试路径强制 true，
 	// 无需预取。
 	if !isRetryCall {
-		c.baseClient.prefetchNegRisk(orderArgsList)
+		c.baseClient.prefetchNegRiskContext(ctx, orderArgsList)
 	}
 
 	for i, orderArgs := range orderArgsList {
@@ -321,7 +341,7 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 					c.baseClient.negRisk.set(canonical, perOrderNegRisk, negRiskSourceOrderArg)
 				}
 			} else {
-				perOrderNegRisk, _ = c.baseClient.negRiskForToken(orderArgs.TokenID)
+				perOrderNegRisk, _ = c.baseClient.negRiskForTokenContext(ctx, orderArgs.TokenID)
 			}
 		}
 
@@ -380,12 +400,13 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 	}
 
 	postStart := time.Now()
-	responseBody, err := http.PostRaw(c.baseClient.baseURL, internal.PostOrders, bodyJSON, http.WithHeaders(headers))
+	responseBody, err := http.PostRawContext(ctx, c.baseClient.baseURL, internal.PostOrders, bodyJSON,
+		http.WithHeaders(headers), http.WithService("clob"), http.WithAmbiguousOnTimeout("post orders"))
 	postDuration := time.Since(postStart)
 	if err != nil {
 		if waitForResult && !topLevelHTTP4xxRegex.MatchString(err.Error()) {
-			if reconciled, complete := c.reconcileAmbiguousPost(
-				expectedOrderIDs, requestBody, batchStart, postDuration,
+			if reconciled, complete := c.reconcileAmbiguousPostContext(
+				ctx, expectedOrderIDs, requestBody, batchStart, postDuration,
 			); len(reconciled) > 0 {
 				if complete {
 					return reconciled, nil
@@ -410,8 +431,8 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 	if len(responseBody) > 0 {
 		if err := json.Unmarshal(responseBody, &resp); err != nil {
 			if waitForResult {
-				if reconciled, complete := c.reconcileAmbiguousPost(
-					expectedOrderIDs, requestBody, batchStart, postDuration,
+				if reconciled, complete := c.reconcileAmbiguousPostContext(
+					ctx, expectedOrderIDs, requestBody, batchStart, postDuration,
 				); len(reconciled) > 0 {
 					if complete {
 						return reconciled, nil
@@ -466,7 +487,7 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 			}
 		}
 		retryResults, err := resolveV2BatchAttempt(retryArgs, retryTypes, func(a []types.OrderArgs, t []types.OrderType) ([]types.OrderPostResponse, error) {
-			return c.postOrdersBatchV2OnceWithAmounts(a, t, waitForResult, retryOverrides, true)
+			return c.postOrdersBatchV2OnceWithAmountsContext(ctx, a, t, waitForResult, retryOverrides, true)
 		})
 		if err != nil {
 			internal.LogError("V2 重试订单失败: %v", err)
@@ -486,7 +507,9 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmounts(
 			needsSettlement[i] = len(resp[i].TradeIDs) > 0 && len(resp[i].TransactionsHashes) == 0
 		}
 		settlementStart := time.Now()
-		c.resolveOrderTransactions(resp, orderSettlementTimeout)
+		settlementCtx, cancel := context.WithTimeout(ctx, orderSettlementTimeout)
+		_ = c.resolveOrderTransactionsContext(settlementCtx, resp)
+		cancel()
 		settlementDuration = time.Since(settlementStart)
 	}
 	for i := range resp {
@@ -530,7 +553,17 @@ func (c *orderClientImpl) reconcileAmbiguousPost(
 	batchStart time.Time,
 	postDuration time.Duration,
 ) ([]types.OrderPostResponse, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), orderSettlementTimeout)
+	return c.reconcileAmbiguousPostContext(context.Background(), expectedOrderIDs, requestBody, batchStart, postDuration)
+}
+
+func (c *orderClientImpl) reconcileAmbiguousPostContext(
+	parent context.Context,
+	expectedOrderIDs []types.Keccak256,
+	requestBody []orderRequestV2,
+	batchStart time.Time,
+	postDuration time.Duration,
+) ([]types.OrderPostResponse, bool) {
+	ctx, cancel := context.WithTimeout(parent, orderSettlementTimeout)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	orders, timing, _ := c.reconcileExpectedOrders(ctx, expectedOrderIDs, orderSettlementPollInterval)

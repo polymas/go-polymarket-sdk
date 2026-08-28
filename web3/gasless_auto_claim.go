@@ -41,6 +41,10 @@ func init() {
 // 开启：Polymarket 后端在市场结算后自动把赢家仓位换成 pUSD 送回 Safe，用户不用手动 redeem。
 // 关闭：立即撤销 operator 权限，回到手动 redeem。之前已发送的自动 redeem tx 不受影响。
 func (c *GaslessClient) SetAutoClaim(enabled bool) (*types.TransactionReceipt, error) {
+	return c.SetAutoClaimContext(context.Background(), enabled)
+}
+
+func (c *GaslessClient) SetAutoClaimContext(ctx context.Context, enabled bool) (*types.TransactionReceipt, error) {
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
 	claimer := common.HexToAddress(internal.PolymarketAutoClaimer)
 
@@ -55,12 +59,16 @@ func (c *GaslessClient) SetAutoClaim(enabled bool) (*types.TransactionReceipt, e
 		label = "Disable Polymarket auto-claim"
 		tag = "auto-claim-off"
 	}
-	return c.executeGaslessBatch([]map[string]any{callTxn(ctf, data)}, label, tag)
+	return c.executeGaslessBatchContext(ctx, []map[string]any{callTxn(ctf, data)}, label, tag)
 }
 
 // IsAutoClaimEnabled 只读查询当前 Safe 对 PolymarketAutoClaimer 的 operator 授权状态。
 // 走 eth_call，不发链上交易。
 func (c *GaslessClient) IsAutoClaimEnabled() (bool, error) {
+	return c.IsAutoClaimEnabledContext(context.Background())
+}
+
+func (c *GaslessClient) IsAutoClaimEnabledContext(ctx context.Context) (bool, error) {
 	safeStr, err := c.GetPolyProxyAddress()
 	if err != nil {
 		return false, fmt.Errorf("GetPolyProxyAddress: %w", err)
@@ -73,7 +81,7 @@ func (c *GaslessClient) IsAutoClaimEnabled() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("pack isApprovedForAll: %w", err)
 	}
-	out, err := c.callContractWithRetry(context.Background(), ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
+	out, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
 	if err != nil {
 		return false, fmt.Errorf("eth_call isApprovedForAll: %w", err)
 	}
@@ -94,25 +102,33 @@ func packSetApprovalForAllWithFlag(operator common.Address, approved bool) ([]by
 // (nil, nil)；未开则调用 SetAutoClaim(true) 发一笔 gasless tx。
 // 适合放进钱包初始化 / 用户首次进场的"确保 X 已就位"流程，重复调用零成本。
 func (c *GaslessClient) EnableAutoClaim() (*types.TransactionReceipt, error) {
-	on, err := c.IsAutoClaimEnabled()
+	return c.EnableAutoClaimContext(context.Background())
+}
+
+func (c *GaslessClient) EnableAutoClaimContext(ctx context.Context) (*types.TransactionReceipt, error) {
+	on, err := c.IsAutoClaimEnabledContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if on {
 		return nil, nil
 	}
-	return c.SetAutoClaim(true)
+	return c.SetAutoClaimContext(ctx, true)
 }
 
 // DisableAutoClaim 幂等地关闭 auto-claim，与 EnableAutoClaim 对称。
 // 已关则直接返回 (nil, nil)。
 func (c *GaslessClient) DisableAutoClaim() (*types.TransactionReceipt, error) {
-	on, err := c.IsAutoClaimEnabled()
+	return c.DisableAutoClaimContext(context.Background())
+}
+
+func (c *GaslessClient) DisableAutoClaimContext(ctx context.Context) (*types.TransactionReceipt, error) {
+	on, err := c.IsAutoClaimEnabledContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
 	if !on {
 		return nil, nil
 	}
-	return c.SetAutoClaim(false)
+	return c.SetAutoClaimContext(ctx, false)
 }

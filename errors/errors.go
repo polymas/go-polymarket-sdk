@@ -1,9 +1,73 @@
 package errors
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
+
+// APIError is the stable error returned for non-2xx API responses.
+// RawResponse is length-limited and has credential-like fields redacted.
+type APIError struct {
+	Service     string
+	Method      string
+	Path        string
+	Status      int
+	RequestID   string
+	ErrorCode   string
+	Message     string
+	RetryAfter  time.Duration
+	RawResponse string
+	Retryable   bool
+}
+
+func (e *APIError) Error() string {
+	location := e.Path
+	if e.Service != "" {
+		location = e.Service + " " + location
+	}
+	code := ""
+	if e.ErrorCode != "" {
+		code = " code=" + e.ErrorCode
+	}
+	requestID := ""
+	if e.RequestID != "" {
+		requestID = " request_id=" + e.RequestID
+	}
+	return fmt.Sprintf("%s %s: HTTP %d%s%s: %s", e.Method, location, e.Status, code, requestID, e.Message)
+}
+
+// IsRetryable reports whether the server status normally permits a retry.
+// Mutating callers must still reconcile before retrying an ambiguous request.
+func (e *APIError) IsRetryable() bool { return e.Retryable }
+
+// AmbiguousOutcomeError means a mutating request timed out or was canceled
+// after submission may have begun. The caller must reconcile state before any
+// retry; the SDK intentionally does not resend it automatically.
+type AmbiguousOutcomeError struct {
+	Service   string
+	Method    string
+	Path      string
+	Operation string
+	Cause     error
+}
+
+func (e *AmbiguousOutcomeError) Error() string {
+	operation := e.Operation
+	if operation == "" {
+		operation = e.Method + " " + e.Path
+	}
+	return fmt.Sprintf("ambiguous outcome for %s: reconcile before retry: %v", operation, e.Cause)
+}
+
+func (e *AmbiguousOutcomeError) Unwrap() error { return e.Cause }
+
+// IsAmbiguousOutcome identifies requests that must be reconciled before retry.
+func IsAmbiguousOutcome(err error) bool {
+	var ambiguous *AmbiguousOutcomeError
+	return errors.As(err, &ambiguous)
+}
 
 // ErrorType 错误类型
 type ErrorType string
@@ -149,7 +213,8 @@ func WrapError(err error, errorType ErrorType, message string) *SDKError {
 // isRetryableStatusCode 判断状态码是否可重试
 func isRetryableStatusCode(statusCode int) bool {
 	switch statusCode {
-	case http.StatusInternalServerError,
+	case http.StatusTooEarly,
+		http.StatusInternalServerError,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
 		http.StatusGatewayTimeout,
@@ -163,8 +228,9 @@ func isRetryableStatusCode(statusCode int) bool {
 
 // IsRetryableError 判断错误是否可重试
 func IsRetryableError(err error) bool {
-	if sdkErr, ok := err.(*SDKError); ok {
-		return sdkErr.IsRetryable()
+	var retryable interface{ IsRetryable() bool }
+	if errors.As(err, &retryable) {
+		return retryable.IsRetryable()
 	}
 	return false
 }
@@ -196,9 +262,15 @@ func (e *RelayFailedError) Error() string {
 // 上层可通过 errors.As(err, &httpErr) 拿到状态码做针对性处理（401 重新鉴权、429 限流等）。
 type RelayHTTPError struct {
 	Status int    // HTTP 状态码
-	Body   string // 响应体（可能被截断）
+	Body   string // 已脱敏且可能被截断的响应体
+	API    *APIError
 }
 
 func (e *RelayHTTPError) Error() string {
+	if e.API != nil {
+		return e.API.Error()
+	}
 	return fmt.Sprintf("relay returned error: HTTP %d: %s", e.Status, e.Body)
 }
+
+func (e *RelayHTTPError) Unwrap() error { return e.API }

@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -13,34 +14,42 @@ import (
 //   - 多市场事件: {WebDomain}/event/{event_slug}/{market_slug}
 //   - 单市场事件（event_slug == market_slug）: {WebDomain}/event/{event_slug}
 func (c *polymarketGammaClient) GetEventURLByMarketID(marketID string) (string, error) {
+	return c.GetEventURLByMarketIDContext(context.Background(), marketID)
+}
+
+func (c *polymarketGammaClient) GetEventURLByMarketIDContext(ctx context.Context, marketID string) (string, error) {
 	if marketID == "" {
 		return "", fmt.Errorf("marketID is empty")
 	}
-	market, err := c.findMarketByID(marketID)
+	market, err := c.findMarketByIDContext(ctx, marketID)
 	if err != nil {
 		return "", fmt.Errorf("get market by id %s: %w", marketID, err)
 	}
 	if market == nil {
 		return "", fmt.Errorf("market not found: %s", marketID)
 	}
-	return c.buildEventURL(market)
+	return c.buildEventURLContext(ctx, market)
 }
 
 // findMarketByID 通过 List markets 端点按 id 过滤，返回包含 events 的完整响应
 // /markets/{id} 端点不返回 events 字段，因此改走 list 端点
 func (c *polymarketGammaClient) findMarketByID(marketID string) (*types.GammaMarket, error) {
+	return c.findMarketByIDContext(context.Background(), marketID)
+}
+
+func (c *polymarketGammaClient) findMarketByIDContext(ctx context.Context, marketID string) (*types.GammaMarket, error) {
 	id, err := strconv.Atoi(marketID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid marketID %q: %w", marketID, err)
 	}
-	markets, err := c.getMarkets(1, WithMarketIDs([]int{id}))
+	markets, err := c.getMarketsContext(ctx, 1, WithMarketIDs([]int{id}))
 	if err != nil {
 		return nil, err
 	}
 	if len(markets) > 0 {
 		return &markets[0], nil
 	}
-	markets, err = c.getMarkets(1, WithMarketIDs([]int{id}), WithClosed(true))
+	markets, err = c.getMarketsContext(ctx, 1, WithMarketIDs([]int{id}), WithClosed(true))
 	if err != nil {
 		return nil, err
 	}
@@ -53,45 +62,57 @@ func (c *polymarketGammaClient) findMarketByID(marketID string) (*types.GammaMar
 // GetEventURLByConditionID 通过 conditionID 获取事件页 URL
 // 先按活跃市场查询，未命中则回退为包含 closed 的查询，以覆盖已结算市场
 func (c *polymarketGammaClient) GetEventURLByConditionID(conditionID string) (string, error) {
+	return c.GetEventURLByConditionIDContext(context.Background(), conditionID)
+}
+
+func (c *polymarketGammaClient) GetEventURLByConditionIDContext(ctx context.Context, conditionID string) (string, error) {
 	if conditionID == "" {
 		return "", fmt.Errorf("conditionID is empty")
 	}
-	market, err := c.findMarketByConditionID(conditionID)
+	market, err := c.findMarketByConditionIDContext(ctx, conditionID)
 	if err != nil {
 		return "", fmt.Errorf("get markets by condition id %s: %w", conditionID, err)
 	}
 	if market == nil {
 		return "", fmt.Errorf("market not found for conditionID: %s", conditionID)
 	}
-	return c.buildEventURL(market)
+	return c.buildEventURLContext(ctx, market)
 }
 
 // GetEventURLByTokenID 通过 clob tokenID 获取事件页 URL
 // 先按活跃市场查询，未命中则回退为包含 closed 的查询
 func (c *polymarketGammaClient) GetEventURLByTokenID(tokenID string) (string, error) {
+	return c.GetEventURLByTokenIDContext(context.Background(), tokenID)
+}
+
+func (c *polymarketGammaClient) GetEventURLByTokenIDContext(ctx context.Context, tokenID string) (string, error) {
 	if tokenID == "" {
 		return "", fmt.Errorf("tokenID is empty")
 	}
-	market, err := c.findMarketByTokenID(tokenID)
+	market, err := c.findMarketByTokenIDContext(ctx, tokenID)
 	if err != nil {
 		return "", fmt.Errorf("get markets by token id %s: %w", tokenID, err)
 	}
 	if market == nil {
 		return "", fmt.Errorf("market not found for tokenID: %s", tokenID)
 	}
-	return c.buildEventURL(market)
+	return c.buildEventURLContext(ctx, market)
 }
 
 // findMarketByConditionID 查询 market，覆盖活跃和已关闭市场
 func (c *polymarketGammaClient) findMarketByConditionID(conditionID string) (*types.GammaMarket, error) {
-	markets, err := c.GetMarketsByConditionIDs([]string{conditionID})
+	return c.findMarketByConditionIDContext(context.Background(), conditionID)
+}
+
+func (c *polymarketGammaClient) findMarketByConditionIDContext(ctx context.Context, conditionID string) (*types.GammaMarket, error) {
+	markets, err := c.GetMarketsByConditionIDsContext(ctx, []string{conditionID})
 	if err != nil {
 		return nil, err
 	}
 	if len(markets) > 0 {
 		return &markets[0], nil
 	}
-	markets, err = c.getMarkets(1, WithConditionIDs([]string{conditionID}), WithClosed(true))
+	markets, err = c.getMarketsContext(ctx, 1, WithConditionIDs([]string{conditionID}), WithClosed(true))
 	if err != nil {
 		return nil, err
 	}
@@ -103,14 +124,18 @@ func (c *polymarketGammaClient) findMarketByConditionID(conditionID string) (*ty
 
 // findMarketByTokenID 查询 market，覆盖活跃和已关闭市场
 func (c *polymarketGammaClient) findMarketByTokenID(tokenID string) (*types.GammaMarket, error) {
-	markets, err := c.GetMarkets(1, WithTokenIDs([]string{tokenID}))
+	return c.findMarketByTokenIDContext(context.Background(), tokenID)
+}
+
+func (c *polymarketGammaClient) findMarketByTokenIDContext(ctx context.Context, tokenID string) (*types.GammaMarket, error) {
+	markets, err := c.GetMarketsContext(ctx, 1, WithTokenIDs([]string{tokenID}))
 	if err != nil {
 		return nil, err
 	}
 	if len(markets) > 0 {
 		return &markets[0], nil
 	}
-	markets, err = c.getMarkets(1, WithTokenIDs([]string{tokenID}), WithClosed(true))
+	markets, err = c.getMarketsContext(ctx, 1, WithTokenIDs([]string{tokenID}), WithClosed(true))
 	if err != nil {
 		return nil, err
 	}
@@ -123,11 +148,15 @@ func (c *polymarketGammaClient) findMarketByTokenID(tokenID string) (*types.Gamm
 // buildEventURL 根据 market 信息拼接事件页 URL。
 // 优先使用 market.Events[0].Slug（单市场端点已返回），否则通过 market.EventID 调用 GetEvent
 func (c *polymarketGammaClient) buildEventURL(market *types.GammaMarket) (string, error) {
+	return c.buildEventURLContext(context.Background(), market)
+}
+
+func (c *polymarketGammaClient) buildEventURLContext(ctx context.Context, market *types.GammaMarket) (string, error) {
 	if market.Slug == "" {
 		return "", fmt.Errorf("market %s has empty slug", market.MarketID)
 	}
 
-	eventSlug, err := c.resolveEventSlug(market)
+	eventSlug, err := c.resolveEventSlugContext(ctx, market)
 	if err != nil {
 		return "", err
 	}
@@ -143,6 +172,10 @@ func (c *polymarketGammaClient) buildEventURL(market *types.GammaMarket) (string
 
 // resolveEventSlug 解析事件 slug。优先用内嵌 Events，退化到 GetEvent(EventID)
 func (c *polymarketGammaClient) resolveEventSlug(market *types.GammaMarket) (string, error) {
+	return c.resolveEventSlugContext(context.Background(), market)
+}
+
+func (c *polymarketGammaClient) resolveEventSlugContext(ctx context.Context, market *types.GammaMarket) (string, error) {
 	for _, e := range market.Events {
 		if e.Slug != "" {
 			return e.Slug, nil
@@ -155,7 +188,7 @@ func (c *polymarketGammaClient) resolveEventSlug(market *types.GammaMarket) (str
 	if err != nil {
 		return "", fmt.Errorf("invalid eventID %q on market %s: %w", market.EventID, market.MarketID, err)
 	}
-	event, err := c.GetEvent(eventID, nil, nil)
+	event, err := c.GetEventContext(ctx, eventID, nil, nil)
 	if err != nil {
 		return "", fmt.Errorf("get event %d: %w", eventID, err)
 	}

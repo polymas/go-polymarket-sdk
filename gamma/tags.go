@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -28,6 +29,10 @@ func WithTagsOrder(order string, ascending bool) GetTagsOption {
 
 // GetTags 获取标签列表
 func (c *polymarketGammaClient) GetTags(limit int, offset int, options ...GetTagsOption) ([]types.Tag, error) {
+	return c.GetTagsContext(context.Background(), limit, offset, options...)
+}
+
+func (c *polymarketGammaClient) GetTagsContext(ctx context.Context, limit int, offset int, options ...GetTagsOption) ([]types.Tag, error) {
 	opts := &GetTagsOptions{}
 	for _, opt := range options {
 		opt(opts)
@@ -43,7 +48,7 @@ func (c *polymarketGammaClient) GetTags(limit int, offset int, options ...GetTag
 		params["ascending"] = strconv.FormatBool(opts.Ascending)
 	}
 
-	result, err := http.Get[[]types.Tag](c.baseURL, internal.GetTags, params)
+	result, err := http.GetContext[[]types.Tag](ctx, c.baseURL, internal.GetTags, params, http.WithService("gamma"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tags: %w", err)
 	}
@@ -57,10 +62,18 @@ func (c *polymarketGammaClient) GetTags(limit int, offset int, options ...GetTag
 
 // GetTag 获取单个标签
 func (c *polymarketGammaClient) GetTag(tagID int) (*types.Tag, error) {
-	return http.Get[types.Tag](c.baseURL, fmt.Sprintf("%s%d", internal.GetTag, tagID), nil)
+	return c.GetTagContext(context.Background(), tagID)
+}
+
+func (c *polymarketGammaClient) GetTagContext(ctx context.Context, tagID int) (*types.Tag, error) {
+	return http.GetContext[types.Tag](ctx, c.baseURL, fmt.Sprintf("%s%d", internal.GetTag, tagID), nil, http.WithService("gamma"))
 }
 
 // GetTagBySlug 通过 slug 获取标签
 func (c *polymarketGammaClient) GetTagBySlug(slug string) (*types.Tag, error) {
-	return http.Get[types.Tag](c.baseURL, fmt.Sprintf("%s%s", internal.GetTagBySlug, slug), nil)
+	return c.GetTagBySlugContext(context.Background(), slug)
+}
+
+func (c *polymarketGammaClient) GetTagBySlugContext(ctx context.Context, slug string) (*types.Tag, error) {
+	return http.GetContext[types.Tag](ctx, c.baseURL, fmt.Sprintf("%s%s", internal.GetTagBySlug, slug), nil, http.WithService("gamma"))
 }

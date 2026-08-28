@@ -2,6 +2,7 @@ package clob
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -136,9 +137,13 @@ func WithPricesHistoryFidelity(minutes int) PricesHistoryOption {
 // getTickSize 显式查询代币的 tick 大小，供认证和只读客户端共用。
 // 本方法不隐藏缓存；是否缓存、何时刷新由业务层决定。
 func getTickSize(baseURL string, tokenID string) (types.TickSize, error) {
+	return getTickSizeContext(context.Background(), baseURL, tokenID)
+}
+
+func getTickSizeContext(ctx context.Context, baseURL string, tokenID string) (types.TickSize, error) {
 	return getTickSizeWithFetcher(tokenID, func(tokenID string) (map[string]interface{}, error) {
 		params := map[string]string{"token_id": tokenID}
-		resp, err := http.Get[map[string]interface{}](baseURL, internal.GetTickSize, params)
+		resp, err := http.GetContext[map[string]interface{}](ctx, baseURL, internal.GetTickSize, params, http.WithService("clob"))
 		if err != nil {
 			return nil, err
 		}
@@ -180,33 +185,53 @@ func getTickSizeWithFetcher(tokenID string, fetch func(string) (map[string]inter
 
 // GetTickSize 显式获取代币的 tick 大小。下单路径不会隐式调用本方法。
 func (c *marketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
-	return getTickSize(c.baseClient.baseURL, tokenID)
+	return c.GetTickSizeContext(context.Background(), tokenID)
+}
+
+func (c *marketDataClientImpl) GetTickSizeContext(ctx context.Context, tokenID string) (types.TickSize, error) {
+	return getTickSizeContext(ctx, c.baseClient.baseURL, tokenID)
 }
 
 // GetTickSize 显式获取代币的 tick 大小。
 func (c *readonlyMarketDataClientImpl) GetTickSize(tokenID string) (types.TickSize, error) {
-	return getTickSize(c.readonlyBaseClient.baseURL, tokenID)
+	return c.GetTickSizeContext(context.Background(), tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetTickSizeContext(ctx context.Context, tokenID string) (types.TickSize, error) {
+	return getTickSizeContext(ctx, c.readonlyBaseClient.baseURL, tokenID)
 }
 
 // GetNegRisk 获取代币的负风险状态。首次查询通过 singleflight 合并同 token
 // 的并发请求，后续从进程生命周期缓存读取。
 func (c *marketDataClientImpl) GetNegRisk(tokenID string) (bool, error) {
-	return c.baseClient.negRiskForToken(tokenID)
+	return c.GetNegRiskContext(context.Background(), tokenID)
+}
+
+func (c *marketDataClientImpl) GetNegRiskContext(ctx context.Context, tokenID string) (bool, error) {
+	return c.baseClient.negRiskForTokenContext(ctx, tokenID)
 }
 
 func (c *readonlyMarketDataClientImpl) GetNegRisk(tokenID string) (bool, error) {
+	return c.GetNegRiskContext(context.Background(), tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetNegRiskContext(ctx context.Context, tokenID string) (bool, error) {
 	canonical, err := canonicalNegRiskTokenID(tokenID)
 	if err != nil {
 		return false, err
 	}
-	return getNegRiskCached(c.readonlyBaseClient.baseURL, c.readonlyBaseClient.negRisk, canonical)
+	return getNegRiskCachedContext(ctx, c.readonlyBaseClient.baseURL, c.readonlyBaseClient.negRisk, canonical)
 }
 
 func getNegRiskCached(baseURL string, cache *negRiskCache, tokenID string) (bool, error) {
+	return getNegRiskCachedContext(context.Background(), baseURL, cache, tokenID)
+}
+
+func getNegRiskCachedContext(ctx context.Context, baseURL string, cache *negRiskCache, tokenID string) (bool, error) {
 	return cache.getOrFetch(tokenID, func() (bool, error) {
-		resp, err := http.Get[struct {
+		resp, err := http.GetContext[struct {
 			NegRisk bool `json:"neg_risk"`
-		}](baseURL, internal.GetNegRisk, map[string]string{"token_id": tokenID})
+		}](ctx, baseURL, internal.GetNegRisk, map[string]string{"token_id": tokenID}, http.WithService("clob"))
 		if err != nil {
 			return false, fmt.Errorf("get neg risk for token %s: %w", tokenID, err)
 		}
@@ -254,14 +279,22 @@ func invalidateNegRisk(cache *negRiskCache, tokenID string) error {
 
 // GetOrderBook 获取代币的订单簿
 func (c *marketDataClientImpl) GetOrderBook(tokenID string) (*types.OrderBookSummary, error) {
+	return c.GetOrderBookContext(context.Background(), tokenID)
+}
+
+func (c *marketDataClientImpl) GetOrderBookContext(ctx context.Context, tokenID string) (*types.OrderBookSummary, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.OrderBookSummary](c.baseClient.baseURL, internal.GetOrderBook, params)
+	return http.GetContext[types.OrderBookSummary](ctx, c.baseClient.baseURL, internal.GetOrderBook, params, http.WithService("clob"))
 }
 
 // GetOrderBook 获取代币的订单簿（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetOrderBook(tokenID string) (*types.OrderBookSummary, error) {
+	return c.GetOrderBookContext(context.Background(), tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetOrderBookContext(ctx context.Context, tokenID string) (*types.OrderBookSummary, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.OrderBookSummary](c.readonlyBaseClient.baseURL, internal.GetOrderBook, params)
+	return http.GetContext[types.OrderBookSummary](ctx, c.readonlyBaseClient.baseURL, internal.GetOrderBook, params, http.WithService("clob"))
 }
 
 // GetMultipleOrderBooks 批量获取多个订单簿摘要
@@ -270,6 +303,10 @@ func (c *readonlyMarketDataClientImpl) GetOrderBook(tokenID string) (*types.Orde
 // 最大数组长度: 500
 // 返回: 订单簿摘要数组
 func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummary, error) {
+	return c.GetMultipleOrderBooksContext(context.Background(), requests)
+}
+
+func (c *marketDataClientImpl) GetMultipleOrderBooksContext(ctx context.Context, requests []types.BookParams) ([]types.OrderBookSummary, error) {
 	cleaned := sanitizeBookParams(requests)
 	// 与 GetMidpoints/GetSpreads/GetLastTradesPrices 行为对齐：sanitize 后为空
 	// 直接返回空切片，不发请求也不报错，让业务层透明处理坏 tokenId。
@@ -297,7 +334,7 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 		return nil, fmt.Errorf("批量获取订单簿失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetOrderBooks, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.baseClient.baseURL, internal.GetOrderBooks, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取订单簿失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -311,6 +348,10 @@ func (c *marketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams
 
 // GetMultipleOrderBooks 批量获取多个订单簿摘要（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.BookParams) ([]types.OrderBookSummary, error) {
+	return c.GetMultipleOrderBooksContext(context.Background(), requests)
+}
+
+func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooksContext(ctx context.Context, requests []types.BookParams) ([]types.OrderBookSummary, error) {
 	cleaned := sanitizeBookParams(requests)
 	if len(cleaned) == 0 {
 		return []types.OrderBookSummary{}, nil
@@ -336,7 +377,7 @@ func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.Bo
 		return nil, fmt.Errorf("批量获取订单簿失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetOrderBooks, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.readonlyBaseClient.baseURL, internal.GetOrderBooks, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取订单簿失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -350,12 +391,20 @@ func (c *readonlyMarketDataClientImpl) GetMultipleOrderBooks(requests []types.Bo
 
 // GetMidpoint 获取单个代币的中间价
 func (c *marketDataClientImpl) GetMidpoint(tokenID string) (*types.Midpoint, error) {
+	return c.GetMidpointContext(context.Background(), tokenID)
+}
+
+func (c *marketDataClientImpl) GetMidpointContext(ctx context.Context, tokenID string) (*types.Midpoint, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.Midpoint](c.baseClient.baseURL, internal.MidPoint, params)
+	return http.GetContext[types.Midpoint](ctx, c.baseClient.baseURL, internal.MidPoint, params, http.WithService("clob"))
 }
 
 // GetMidpoints 批量获取多个代币的中间价
 func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint, error) {
+	return c.GetMidpointsContext(context.Background(), tokenIDs)
+}
+
+func (c *marketDataClientImpl) GetMidpointsContext(ctx context.Context, tokenIDs []string) ([]types.Midpoint, error) {
 	cleaned := sanitizeTokenIDs(tokenIDs)
 	if len(cleaned) == 0 {
 		return []types.Midpoint{}, nil
@@ -379,7 +428,7 @@ func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint
 		return nil, fmt.Errorf("批量获取中间价失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.MidPoints, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.baseClient.baseURL, internal.MidPoints, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取中间价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -410,15 +459,23 @@ func (c *marketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint
 
 // GetPrice 获取指定方向的价格
 func (c *marketDataClientImpl) GetPrice(tokenID string, side types.OrderSide) (*types.Price, error) {
+	return c.GetPriceContext(context.Background(), tokenID, side)
+}
+
+func (c *marketDataClientImpl) GetPriceContext(ctx context.Context, tokenID string, side types.OrderSide) (*types.Price, error) {
 	params := map[string]string{
 		"token_id": tokenID,
 		"side":     string(side),
 	}
-	return http.Get[types.Price](c.baseClient.baseURL, internal.Price, params)
+	return http.GetContext[types.Price](ctx, c.baseClient.baseURL, internal.Price, params, http.WithService("clob"))
 }
 
 // GetPrices 批量获取多个代币的价格
 func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.Price, error) {
+	return c.GetPricesContext(context.Background(), requests)
+}
+
+func (c *marketDataClientImpl) GetPricesContext(ctx context.Context, requests []types.BookParams) ([]types.Price, error) {
 	cleaned := sanitizeBookParams(requests)
 	if len(cleaned) == 0 {
 		return []types.Price{}, nil
@@ -444,7 +501,7 @@ func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.P
 		return nil, fmt.Errorf("批量获取价格失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetPrices, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.baseClient.baseURL, internal.GetPrices, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -504,12 +561,20 @@ func (c *marketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.P
 
 // GetSpread 获取单个代币的价差
 func (c *marketDataClientImpl) GetSpread(tokenID string) (*types.Spread, error) {
+	return c.GetSpreadContext(context.Background(), tokenID)
+}
+
+func (c *marketDataClientImpl) GetSpreadContext(ctx context.Context, tokenID string) (*types.Spread, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.Spread](c.baseClient.baseURL, internal.GetSpread, params)
+	return http.GetContext[types.Spread](ctx, c.baseClient.baseURL, internal.GetSpread, params, http.WithService("clob"))
 }
 
 // GetSpreads 批量获取多个代币的价差
 func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, error) {
+	return c.GetSpreadsContext(context.Background(), tokenIDs)
+}
+
+func (c *marketDataClientImpl) GetSpreadsContext(ctx context.Context, tokenIDs []string) ([]types.Spread, error) {
 	cleaned := sanitizeTokenIDs(tokenIDs)
 	if len(cleaned) == 0 {
 		return []types.Spread{}, nil
@@ -533,7 +598,7 @@ func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, er
 		return nil, fmt.Errorf("批量获取价差失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.baseClient.baseURL, internal.GetSpreads, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.baseClient.baseURL, internal.GetSpreads, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价差失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -565,15 +630,27 @@ func (c *marketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, er
 // GetLastTradePrice 获取单个代币的最后成交价。官方对从未成交的 token 返回
 // {"price":"0.5","side":""}；SDK 将该占位值和兼容性的 null 统一为 nil。
 func (c *marketDataClientImpl) GetLastTradePrice(tokenID string) (*types.LastTradePrice, error) {
-	return getLastTradePrice(c.baseClient.baseURL, tokenID)
+	return c.GetLastTradePriceContext(context.Background(), tokenID)
+}
+
+func (c *marketDataClientImpl) GetLastTradePriceContext(ctx context.Context, tokenID string) (*types.LastTradePrice, error) {
+	return getLastTradePriceContext(ctx, c.baseClient.baseURL, tokenID)
 }
 
 // GetLastTradesPrices 批量获取最后成交价。未成交 token 不出现在返回 map 中。
 func (c *marketDataClientImpl) GetLastTradesPrices(tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
-	return getLastTradesPrices(c.baseClient.baseURL, tokenIDs)
+	return c.GetLastTradesPricesContext(context.Background(), tokenIDs)
+}
+
+func (c *marketDataClientImpl) GetLastTradesPricesContext(ctx context.Context, tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
+	return getLastTradesPricesContext(ctx, c.baseClient.baseURL, tokenIDs)
 }
 
 func getLastTradePrice(baseURL, tokenID string) (*types.LastTradePrice, error) {
+	return getLastTradePriceContext(context.Background(), baseURL, tokenID)
+}
+
+func getLastTradePriceContext(ctx context.Context, baseURL, tokenID string) (*types.LastTradePrice, error) {
 	parsedTokenID, err := types.ParseTokenID(strings.TrimSpace(tokenID))
 	if err != nil || parsedTokenID == (types.TokenID{}) {
 		if err == nil {
@@ -582,7 +659,7 @@ func getLastTradePrice(baseURL, tokenID string) (*types.LastTradePrice, error) {
 		return nil, fmt.Errorf("get last trade price: %w", err)
 	}
 
-	rawBytes, err := http.GetRaw(baseURL, "GET", internal.GetLastTradePrice, map[string]string{"token_id": parsedTokenID.String()})
+	rawBytes, err := http.GetRawContext(ctx, baseURL, "GET", internal.GetLastTradePrice, map[string]string{"token_id": parsedTokenID.String()}, http.WithService("clob"))
 	if err != nil {
 		return nil, fmt.Errorf("get last trade price: %w", err)
 	}
@@ -605,6 +682,10 @@ func getLastTradePrice(baseURL, tokenID string) (*types.LastTradePrice, error) {
 }
 
 func getLastTradesPrices(baseURL string, tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
+	return getLastTradesPricesContext(context.Background(), baseURL, tokenIDs)
+}
+
+func getLastTradesPricesContext(ctx context.Context, baseURL string, tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
 	cleaned := sanitizeTokenIDs(tokenIDs)
 	if len(cleaned) == 0 {
 		return map[types.TokenID]types.LastTradePrice{}, nil
@@ -626,7 +707,7 @@ func getLastTradesPrices(baseURL string, tokenIDs []string) (map[types.TokenID]t
 		return nil, fmt.Errorf("批量获取最后成交价失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(baseURL, internal.GetLastTradesPrices, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, baseURL, internal.GetLastTradesPrices, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取最后成交价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -654,6 +735,10 @@ func getLastTradesPrices(baseURL string, tokenIDs []string) (map[types.TokenID]t
 // GetPricesHistory 获取市场的历史价格时序（GET /prices-history）
 // market 为必填的 asset id；可选参数见 PricesHistoryOption
 func (c *marketDataClientImpl) GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
+	return c.GetPricesHistoryContext(context.Background(), market, opts...)
+}
+
+func (c *marketDataClientImpl) GetPricesHistoryContext(ctx context.Context, market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
 	if market == "" {
 		return nil, fmt.Errorf("market is required")
 	}
@@ -674,13 +759,17 @@ func (c *marketDataClientImpl) GetPricesHistory(market string, opts ...PricesHis
 	if options.Fidelity != nil {
 		params["fidelity"] = strconv.Itoa(*options.Fidelity)
 	}
-	return http.Get[types.PricesHistoryResponse](c.baseClient.baseURL, internal.GetPricesHistory, params)
+	return http.GetContext[types.PricesHistoryResponse](ctx, c.baseClient.baseURL, internal.GetPricesHistory, params, http.WithService("clob"))
 }
 
 // GetTime 获取服务器时间
 func (c *marketDataClientImpl) GetTime() (time.Time, error) {
+	return c.GetTimeContext(context.Background())
+}
+
+func (c *marketDataClientImpl) GetTimeContext(ctx context.Context) (time.Time, error) {
 	// API返回的是纯数字（Unix时间戳），不是JSON对象
-	rawBytes, err := http.GetRaw(c.baseClient.baseURL, "GET", internal.Time, nil)
+	rawBytes, err := http.GetRawContext(ctx, c.baseClient.baseURL, "GET", internal.Time, nil, http.WithService("clob"))
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get server time: %w", err)
 	}
@@ -725,12 +814,20 @@ func (c *marketDataClientImpl) GetTime() (time.Time, error) {
 
 // GetMidpoint 获取单个代币的中间价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetMidpoint(tokenID string) (*types.Midpoint, error) {
+	return c.GetMidpointContext(context.Background(), tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetMidpointContext(ctx context.Context, tokenID string) (*types.Midpoint, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.Midpoint](c.readonlyBaseClient.baseURL, internal.MidPoint, params)
+	return http.GetContext[types.Midpoint](ctx, c.readonlyBaseClient.baseURL, internal.MidPoint, params, http.WithService("clob"))
 }
 
 // GetMidpoints 批量获取多个代币的中间价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.Midpoint, error) {
+	return c.GetMidpointsContext(context.Background(), tokenIDs)
+}
+
+func (c *readonlyMarketDataClientImpl) GetMidpointsContext(ctx context.Context, tokenIDs []string) ([]types.Midpoint, error) {
 	cleaned := sanitizeTokenIDs(tokenIDs)
 	if len(cleaned) == 0 {
 		return []types.Midpoint{}, nil
@@ -754,7 +851,7 @@ func (c *readonlyMarketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.
 		return nil, fmt.Errorf("批量获取中间价失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.MidPoints, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.readonlyBaseClient.baseURL, internal.MidPoints, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取中间价失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -785,15 +882,23 @@ func (c *readonlyMarketDataClientImpl) GetMidpoints(tokenIDs []string) ([]types.
 
 // GetPrice 获取指定方向的价格（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetPrice(tokenID string, side types.OrderSide) (*types.Price, error) {
+	return c.GetPriceContext(context.Background(), tokenID, side)
+}
+
+func (c *readonlyMarketDataClientImpl) GetPriceContext(ctx context.Context, tokenID string, side types.OrderSide) (*types.Price, error) {
 	params := map[string]string{
 		"token_id": tokenID,
 		"side":     string(side),
 	}
-	return http.Get[types.Price](c.readonlyBaseClient.baseURL, internal.Price, params)
+	return http.GetContext[types.Price](ctx, c.readonlyBaseClient.baseURL, internal.Price, params, http.WithService("clob"))
 }
 
 // GetPrices 批量获取多个代币的价格（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetPrices(requests []types.BookParams) ([]types.Price, error) {
+	return c.GetPricesContext(context.Background(), requests)
+}
+
+func (c *readonlyMarketDataClientImpl) GetPricesContext(ctx context.Context, requests []types.BookParams) ([]types.Price, error) {
 	if len(requests) == 0 {
 		return []types.Price{}, nil
 	}
@@ -818,7 +923,7 @@ func (c *readonlyMarketDataClientImpl) GetPrices(requests []types.BookParams) ([
 		return nil, fmt.Errorf("批量获取价格失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetPrices, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.readonlyBaseClient.baseURL, internal.GetPrices, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价格失败: %w", err)
 	}
@@ -878,12 +983,20 @@ func (c *readonlyMarketDataClientImpl) GetPrices(requests []types.BookParams) ([
 
 // GetSpread 获取单个代币的价差（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetSpread(tokenID string) (*types.Spread, error) {
+	return c.GetSpreadContext(context.Background(), tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetSpreadContext(ctx context.Context, tokenID string) (*types.Spread, error) {
 	params := map[string]string{"token_id": tokenID}
-	return http.Get[types.Spread](c.readonlyBaseClient.baseURL, internal.GetSpread, params)
+	return http.GetContext[types.Spread](ctx, c.readonlyBaseClient.baseURL, internal.GetSpread, params, http.WithService("clob"))
 }
 
 // GetSpreads 批量获取多个代币的价差（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Spread, error) {
+	return c.GetSpreadsContext(context.Background(), tokenIDs)
+}
+
+func (c *readonlyMarketDataClientImpl) GetSpreadsContext(ctx context.Context, tokenIDs []string) ([]types.Spread, error) {
 	cleaned := sanitizeTokenIDs(tokenIDs)
 	if len(cleaned) == 0 {
 		return []types.Spread{}, nil
@@ -907,7 +1020,7 @@ func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Sp
 		return nil, fmt.Errorf("批量获取价差失败: failed to marshal request body: %w", err)
 	}
 
-	rawBytes, err := http.PostRaw(c.readonlyBaseClient.baseURL, internal.GetSpreads, bodyBytes)
+	rawBytes, err := http.PostRawContext(ctx, c.readonlyBaseClient.baseURL, internal.GetSpreads, bodyBytes, http.WithService("clob"), http.WithIdempotent())
 	if err != nil {
 		return nil, fmt.Errorf("批量获取价差失败 (n=%d, payload=%s): %w", len(cleaned), payloadSnippet(bodyBytes), err)
 	}
@@ -938,16 +1051,28 @@ func (c *readonlyMarketDataClientImpl) GetSpreads(tokenIDs []string) ([]types.Sp
 
 // GetLastTradePrice 获取单个代币的最后成交价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetLastTradePrice(tokenID string) (*types.LastTradePrice, error) {
-	return getLastTradePrice(c.readonlyBaseClient.baseURL, tokenID)
+	return c.GetLastTradePriceContext(context.Background(), tokenID)
+}
+
+func (c *readonlyMarketDataClientImpl) GetLastTradePriceContext(ctx context.Context, tokenID string) (*types.LastTradePrice, error) {
+	return getLastTradePriceContext(ctx, c.readonlyBaseClient.baseURL, tokenID)
 }
 
 // GetLastTradesPrices 批量获取多个代币的最后成交价（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetLastTradesPrices(tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
-	return getLastTradesPrices(c.readonlyBaseClient.baseURL, tokenIDs)
+	return c.GetLastTradesPricesContext(context.Background(), tokenIDs)
+}
+
+func (c *readonlyMarketDataClientImpl) GetLastTradesPricesContext(ctx context.Context, tokenIDs []string) (map[types.TokenID]types.LastTradePrice, error) {
+	return getLastTradesPricesContext(ctx, c.readonlyBaseClient.baseURL, tokenIDs)
 }
 
 // GetPricesHistory 获取市场的历史价格时序（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetPricesHistory(market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
+	return c.GetPricesHistoryContext(context.Background(), market, opts...)
+}
+
+func (c *readonlyMarketDataClientImpl) GetPricesHistoryContext(ctx context.Context, market string, opts ...PricesHistoryOption) (*types.PricesHistoryResponse, error) {
 	if market == "" {
 		return nil, fmt.Errorf("market is required")
 	}
@@ -968,13 +1093,17 @@ func (c *readonlyMarketDataClientImpl) GetPricesHistory(market string, opts ...P
 	if options.Fidelity != nil {
 		params["fidelity"] = strconv.Itoa(*options.Fidelity)
 	}
-	return http.Get[types.PricesHistoryResponse](c.readonlyBaseClient.baseURL, internal.GetPricesHistory, params)
+	return http.GetContext[types.PricesHistoryResponse](ctx, c.readonlyBaseClient.baseURL, internal.GetPricesHistory, params, http.WithService("clob"))
 }
 
 // GetTime 获取服务器时间（只读客户端实现）
 func (c *readonlyMarketDataClientImpl) GetTime() (time.Time, error) {
+	return c.GetTimeContext(context.Background())
+}
+
+func (c *readonlyMarketDataClientImpl) GetTimeContext(ctx context.Context) (time.Time, error) {
 	// API返回的是纯数字（Unix时间戳），不是JSON对象
-	rawBytes, err := http.GetRaw(c.readonlyBaseClient.baseURL, "GET", internal.Time, nil)
+	rawBytes, err := http.GetRawContext(ctx, c.readonlyBaseClient.baseURL, "GET", internal.Time, nil, http.WithService("clob"))
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get server time: %w", err)
 	}

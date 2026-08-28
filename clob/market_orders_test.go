@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -9,7 +10,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
 )
@@ -286,5 +289,46 @@ func TestCreateAndPostMarketOrderInstantUsesMarketAmountWireValues(t *testing.T)
 	}
 	if request.OrderType != string(types.OrderTypeFAK) || request.PostOnly || request.DeferExec {
 		t.Fatalf("wire execution fields = %+v", request)
+	}
+}
+
+func TestCreateAndPostMarketOrderInstantContextTimeoutIsAmbiguousAndNotRetried(t *testing.T) {
+	var submits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/orders" {
+			submits.Add(1)
+			time.Sleep(100 * time.Millisecond)
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	w3, err := web3.NewClient(marketOrderTestPrivateKey, types.EOASignatureType, types.Polygon, server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w3.Close()
+	client := &orderClientImpl{baseClient: &baseClient{
+		address: w3.GetBaseAddress(), proxyAddress: w3.GetBaseAddress(), baseURL: server.URL,
+		signatureType: types.EOASignatureType, negRisk: newNegRiskCache(), web3Client: w3,
+		deriveCreds: &types.ApiCreds{Key: "00000000-0000-0000-0000-000000000001", Secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", Passphrase: "test-passphrase"},
+	}}
+	negRisk := false
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	response, err := client.CreateAndPostMarketOrderInstantContext(ctx, types.MarketOrderArgs{
+		TokenID: "111", Side: types.OrderSideBUY, Amount: 5, MaxPrice: 0.37,
+		TickSize: types.TickSize0_01, OrderType: types.OrderTypeFAK, NegRisk: &negRisk,
+	})
+	if !sdkerrors.IsAmbiguousOutcome(err) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%T %v, want ambiguous deadline", err, err)
+	}
+	if submits.Load() != 1 {
+		t.Fatalf("submits=%d, want exactly one", submits.Load())
+	}
+	if response == nil || response.Status != OrderUnknownStatus || response.ExpectedOrderID == "" {
+		t.Fatalf("response=%+v, want aligned unknown result with expected hash", response)
 	}
 }

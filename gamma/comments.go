@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -33,6 +34,10 @@ func WithCommentHoldersOnly(holdersOnly bool) GetCommentsOption {
 
 // GetComments 按父实体获取评论。
 func (c *polymarketGammaClient) GetComments(parentType types.CommentParentEntityType, parentID int, limit int, offset int, options ...GetCommentsOption) ([]types.Comment, error) {
+	return c.GetCommentsContext(context.Background(), parentType, parentID, limit, offset, options...)
+}
+
+func (c *polymarketGammaClient) GetCommentsContext(ctx context.Context, parentType types.CommentParentEntityType, parentID int, limit int, offset int, options ...GetCommentsOption) ([]types.Comment, error) {
 	opts := &GetCommentsOptions{}
 	for _, option := range options {
 		option(opts)
@@ -56,7 +61,7 @@ func (c *polymarketGammaClient) GetComments(parentType types.CommentParentEntity
 		params["holders_only"] = strconv.FormatBool(*opts.HoldersOnly)
 	}
 
-	result, err := http.Get[[]types.Comment](c.baseURL, internal.GetComments, params)
+	result, err := http.GetContext[[]types.Comment](ctx, c.baseURL, internal.GetComments, params, http.WithService("gamma"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get comments: %w", err)
 	}
@@ -70,9 +75,13 @@ func (c *polymarketGammaClient) GetComments(parentType types.CommentParentEntity
 
 // GetComment 获取指定 ID 的评论。官方响应形状为数组。
 func (c *polymarketGammaClient) GetComment(commentID int, getPositions bool) ([]types.Comment, error) {
-	result, err := http.Get[[]types.Comment](c.baseURL, fmt.Sprintf("%s%d", internal.GetComment, commentID), map[string]string{
+	return c.GetCommentContext(context.Background(), commentID, getPositions)
+}
+
+func (c *polymarketGammaClient) GetCommentContext(ctx context.Context, commentID int, getPositions bool) ([]types.Comment, error) {
+	result, err := http.GetContext[[]types.Comment](ctx, c.baseURL, fmt.Sprintf("%s%d", internal.GetComment, commentID), map[string]string{
 		"get_positions": strconv.FormatBool(getPositions),
-	})
+	}, http.WithService("gamma"))
 	if err != nil {
 		return nil, err
 	}

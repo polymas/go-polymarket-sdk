@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
+	sdkhttp "github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
@@ -44,6 +45,10 @@ type CWIADeployBody struct {
 // 注意：DepositWallet 的 ID 字段约定为 bytes32(uint160(EOA))；这是
 // Polymarket 后端 operator 自己选的 salt，本地不参与。
 func (c *GaslessClient) DeployDepositWallet(force bool) (*types.TransactionReceipt, error) {
+	return c.DeployDepositWalletContext(context.Background(), force)
+}
+
+func (c *GaslessClient) DeployDepositWalletContext(ctx context.Context, force bool) (*types.TransactionReceipt, error) {
 	if c.signatureType != types.CWIASignatureType {
 		return nil, fmt.Errorf("DeployDepositWallet 只支持 CWIASignatureType (=3)，当前=%d", c.signatureType)
 	}
@@ -55,7 +60,7 @@ func (c *GaslessClient) DeployDepositWallet(force bool) (*types.TransactionRecei
 	wallet := common.HexToAddress(string(walletHex))
 
 	if !force {
-		deployed, err := c.baseClient.IsDepositWalletDeployed(context.Background(), wallet)
+		deployed, err := c.baseClient.IsDepositWalletDeployed(ctx, wallet)
 		if err != nil {
 			return nil, fmt.Errorf("check deploy status: %w", err)
 		}
@@ -70,7 +75,7 @@ func (c *GaslessClient) DeployDepositWallet(force bool) (*types.TransactionRecei
 		From: string(c.baseAddress),
 		To:   internal.PolygonDepositWalletFactory,
 	}
-	return c.submitGaslessSimple(body, "WALLET-CREATE")
+	return c.submitGaslessSimpleContext(ctx, body, "WALLET-CREATE")
 }
 
 // submitGaslessSimple 提交一个简单的 relayer body（不像 batch 那样有 proxyTxns
@@ -79,12 +84,16 @@ func (c *GaslessClient) DeployDepositWallet(force bool) (*types.TransactionRecei
 // 这里没复用 executeGaslessBatch 是因为它的入口签名 (proxyTxns []map) 不适合
 // 单笔无 calls 的请求；后续若需要更多 relayer 类型可以再统一抽。
 func (c *GaslessClient) submitGaslessSimple(body interface{}, label string) (*types.TransactionReceipt, error) {
+	return c.submitGaslessSimpleContext(context.Background(), body, label)
+}
+
+func (c *GaslessClient) submitGaslessSimpleContext(ctx context.Context, body interface{}, label string) (*types.TransactionReceipt, error) {
 	bodyJSON, err := formatJSONWithSpaces(body)
 	if err != nil {
 		return nil, fmt.Errorf("format body: %w", err)
 	}
 	callCount := atomic.AddInt64(&c.relayerCallCount, 1)
-	log.Printf("[Relayer调用 #%d] 提交 %s 到 relayer，body: %s", callCount, label, string(bodyJSON))
+	log.Printf("[Relayer调用 #%d] 提交 %s 到 relayer，body_bytes=%d", callCount, label, len(bodyJSON))
 
 	headers, err := c.localSigner.SignRequest("POST", "/submit", body)
 	if err != nil {
@@ -92,7 +101,7 @@ func (c *GaslessClient) submitGaslessSimple(body interface{}, label string) (*ty
 	}
 
 	url := fmt.Sprintf("%s/submit", c.relayURL)
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -103,17 +112,15 @@ func (c *GaslessClient) submitGaslessSimple(body interface{}, label string) (*ty
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("submit: %w", err)
+		return nil, &sdkerrors.AmbiguousOutcomeError{Service: "relayer", Method: "POST", Path: "/submit", Operation: label, Cause: err}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		errMsg := string(bodyBytes)
-		if len(errMsg) > 200 {
-			errMsg = errMsg[:200] + "..."
-		}
-		return nil, fmt.Errorf("relay returned HTTP %d: %s", resp.StatusCode, errMsg)
+		errMsg := sdkhttp.SanitizeErrorResponse(bodyBytes, 200)
+		apiErr := sdkhttp.APIErrorFromResponse("relayer", "POST", "/submit", resp, bodyBytes)
+		return nil, &sdkerrors.RelayHTTPError{Status: resp.StatusCode, Body: errMsg, API: apiErr}
 	}
 
 	var gaslessResp map[string]interface{}
@@ -155,19 +162,19 @@ func (c *GaslessClient) submitGaslessSimple(body interface{}, label string) (*ty
 		if txID == "" {
 			return nil, fmt.Errorf("WALLET-CREATE returned neither transactionHash nor transactionID")
 		}
-		if err := c.waitForRelayerConfirmed(txID); err != nil {
+		if err := c.waitForRelayerConfirmedContext(ctx, txID); err != nil {
 			return nil, fmt.Errorf("wait WALLET-CREATE confirmation: %w", err)
 		}
 		return nil, nil
 	}
 
 	log.Printf("[OK] [Relayer调用 #%d] %s 成功，txHash=%s", callCount, label, txHashStr)
-	receipt, err := c.waitForTransactionReceipt(common.HexToHash(txHashStr))
+	receipt, err := c.waitForTransactionReceiptContext(ctx, common.HexToHash(txHashStr))
 	if err != nil {
 		return nil, fmt.Errorf("wait for receipt: %w", err)
 	}
 	if txID, _ := gaslessResp["transactionID"].(string); txID != "" {
-		if err := c.waitForRelayerConfirmed(txID); err != nil {
+		if err := c.waitForRelayerConfirmedContext(ctx, txID); err != nil {
 			return nil, fmt.Errorf("wait WALLET-CREATE confirmation: %w", err)
 		}
 	}

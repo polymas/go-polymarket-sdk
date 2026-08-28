@@ -395,6 +395,26 @@ result, err := clobClient.CancelMarketOrdersByFilter(types.CancelMarketOrdersPar
 两个字段不能同时为零值，以防空请求意外扩大撤单范围。SDK 对外统一使用
 `ConditionID/TokenID`，发送给官方接口时分别编码为 `market/asset_id`。
 
+### Context、错误与重试
+
+所有会发出 HTTP 请求的公开方法都提供 `...Context` 版本；原方法继续保留，等价于
+传入 `context.Background()`。新业务建议给整条调用链设置 deadline，例如：
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+
+books, err := clobClient.GetMultipleOrderBooksContext(ctx, requests)
+orders, err := clobClient.CreateAndPostOrdersInstantContext(ctx, args, orderTypes)
+```
+
+非 2xx 响应可用 `errors.As` 取得 `*sdkerrors.APIError`，其中包含 service、method、
+path、status、request ID、error code、message 与 Retry-After；原始响应会限长并脱敏。
+SDK 仅自动重试 GET/HEAD/OPTIONS/DELETE 及显式标记为只读的批量 POST，并处理
+425/408/429/500/502/503/504。下单、RFQ 和 Relayer POST 不自动重发：如果 deadline
+或传输超时发生在请求可能已经送达之后，会返回 `*sdkerrors.AmbiguousOutcomeError`。
+此时先按本地 order hash、订单查询或 Relayer transaction 状态对账，再决定是否重发。
+
 ### 批量获取市场数据
 
 ```go
@@ -580,24 +600,15 @@ SDK 采用现代化的 Go 架构模式：
 ### 1. 错误处理
 
 ```go
-import "github.com/polymas/go-polymarket-sdk/errors"
-
-result, err := clobClient.GetOrderBook(tokenID)
-if err != nil {
-    if errors.IsRetryableError(err) {
-        // 可重试的错误
-        // 可以在这里实现重试逻辑
-    }
-    
-    switch errors.GetErrorType(err) {
-    case errors.ErrorTypeNetwork:
-        // 网络错误处理
-    case errors.ErrorTypeAPI:
-        // API 错误处理
-    case errors.ErrorTypeAuth:
-        // 认证错误处理
-    }
-    return err
+var apiErr *sdkerrors.APIError
+var ambiguous *sdkerrors.AmbiguousOutcomeError
+switch {
+case stderrors.As(err, &ambiguous):
+    // 写请求结果未知：先对账，不要直接重发
+case stderrors.As(err, &apiErr):
+    log.Printf("status=%d request_id=%s retry_after=%s", apiErr.Status, apiErr.RequestID, apiErr.RetryAfter)
+case stderrors.Is(err, context.DeadlineExceeded):
+    // 已取消或超过调用方 deadline
 }
 ```
 

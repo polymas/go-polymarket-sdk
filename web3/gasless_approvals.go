@@ -1,6 +1,7 @@
 package web3
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -75,11 +76,15 @@ func packSetApprovalForAll(operator common.Address) ([]byte, error) {
 //
 // 四笔通过 Relayer 打包在一次 gasless 交易里。退役的 NegRiskAdapter 不再授权。
 func (c *GaslessClient) SetV2Allowances() (*types.TransactionReceipt, error) {
+	return c.SetV2AllowancesContext(context.Background())
+}
+
+func (c *GaslessClient) SetV2AllowancesContext(ctx context.Context) (*types.TransactionReceipt, error) {
 	proxyTxns, err := buildV2AllowanceTransactions()
 	if err != nil {
 		return nil, err
 	}
-	return c.executeGaslessBatch(proxyTxns, "Set V2 Allowances", "approve-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Set V2 Allowances", "approve-v2")
 }
 
 // buildV2AllowanceTransactions 只构造 V2 撮合所需的授权调用，不发送交易。
@@ -123,6 +128,10 @@ func buildV2AllowanceTransactions() ([]map[string]any, error) {
 // amountUSDC 传人类单位（如 40.0 = 40 USDC.e），内部按 6 decimals 转成最小单位。
 // 只接受 Safe 签名类型（wrap 的 to 用 proxy 地址，EOA 路径下 pUSD 会发到 EOA，V2 Exchange 看不到）。
 func (c *GaslessClient) WrapAndApproveV2(amountUSDC float64) (*types.TransactionReceipt, error) {
+	return c.WrapAndApproveV2Context(context.Background(), amountUSDC)
+}
+
+func (c *GaslessClient) WrapAndApproveV2Context(ctx context.Context, amountUSDC float64) (*types.TransactionReceipt, error) {
 	amountInt, err := toUnits6(amountUSDC)
 	if err != nil {
 		return nil, fmt.Errorf("amountUSDC: %w", err)
@@ -175,7 +184,7 @@ func (c *GaslessClient) WrapAndApproveV2(amountUSDC float64) (*types.Transaction
 		}
 		proxyTxns = append(proxyTxns, callTxn(ctf, data))
 	}
-	return c.executeGaslessBatch(proxyTxns, "Wrap USDC.e and approve pUSD for V2", "wrap-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Wrap USDC.e and approve pUSD for V2", "wrap-v2")
 }
 
 // ApproveAdaptersV2 补上 V2 split/merge/redeem 必需的 4 笔 approve：
@@ -187,6 +196,10 @@ func (c *GaslessClient) WrapAndApproveV2(amountUSDC float64) (*types.Transaction
 // 钱包若只跑过老版 WrapAndApproveV2（只补到 V2 Exchange / NegRisk / NRAdapter 三个 spender），
 // 必须再跑一次此函数才能调 splitPosition / mergePositions / redeemPositions via adapter。
 func (c *GaslessClient) ApproveAdaptersV2() (*types.TransactionReceipt, error) {
+	return c.ApproveAdaptersV2Context(context.Background())
+}
+
+func (c *GaslessClient) ApproveAdaptersV2Context(ctx context.Context) (*types.TransactionReceipt, error) {
 	pusd := common.HexToAddress(internal.PolygonPUSD)
 	ctf := common.HexToAddress(internal.PolygonConditionalTokens)
 	ctfAdapter := common.HexToAddress(internal.PolygonCtfCollateralAdapter)
@@ -209,5 +222,5 @@ func (c *GaslessClient) ApproveAdaptersV2() (*types.TransactionReceipt, error) {
 		}
 		proxyTxns = append(proxyTxns, callTxn(ctf, data))
 	}
-	return c.executeGaslessBatch(proxyTxns, "Approve V2 CTF collateral adapters", "approve-adapters-v2")
+	return c.executeGaslessBatchContext(ctx, proxyTxns, "Approve V2 CTF collateral adapters", "approve-adapters-v2")
 }

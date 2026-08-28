@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/polymas/go-polymarket-sdk/http"
@@ -10,6 +11,10 @@ import (
 
 // GetAPIKeys 获取所有 API 密钥
 func (c *apiKeyClientImpl) GetAPIKeys() ([]types.APIKey, error) {
+	return c.GetAPIKeysContext(context.Background())
+}
+
+func (c *apiKeyClientImpl) GetAPIKeysContext(ctx context.Context) ([]types.APIKey, error) {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -31,7 +36,7 @@ func (c *apiKeyClientImpl) GetAPIKeys() ([]types.APIKey, error) {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	result, err := http.Get[[]types.APIKey](c.baseClient.baseURL, internal.GetAPIKeys, nil, http.WithHeaders(headers))
+	result, err := http.GetContext[[]types.APIKey](ctx, c.baseClient.baseURL, internal.GetAPIKeys, nil, http.WithHeaders(headers), http.WithService("clob"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get API keys: %w", err)
 	}
@@ -45,6 +50,10 @@ func (c *apiKeyClientImpl) GetAPIKeys() ([]types.APIKey, error) {
 
 // DeleteAPIKey 删除 API 密钥
 func (c *apiKeyClientImpl) DeleteAPIKey(keyID string) error {
+	return c.DeleteAPIKeyContext(context.Background(), keyID)
+}
+
+func (c *apiKeyClientImpl) DeleteAPIKeyContext(ctx context.Context, keyID string) error {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return fmt.Errorf("API credentials not set")
@@ -66,12 +75,16 @@ func (c *apiKeyClientImpl) DeleteAPIKey(keyID string) error {
 		return fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	_, err = http.Delete[map[string]interface{}](c.baseClient.baseURL, fmt.Sprintf("%s/%s", internal.DeleteAPIKey, keyID), nil, http.WithHeaders(headers))
+	_, err = http.DeleteContext[map[string]interface{}](ctx, c.baseClient.baseURL, fmt.Sprintf("%s/%s", internal.DeleteAPIKey, keyID), nil, http.WithHeaders(headers), http.WithService("clob"))
 	return err
 }
 
 // CreateReadonlyAPIKey 创建只读 API 密钥
 func (c *apiKeyClientImpl) CreateReadonlyAPIKey() (*types.APIKey, error) {
+	return c.CreateReadonlyAPIKeyContext(context.Background())
+}
+
+func (c *apiKeyClientImpl) CreateReadonlyAPIKeyContext(ctx context.Context) (*types.APIKey, error) {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -93,11 +106,15 @@ func (c *apiKeyClientImpl) CreateReadonlyAPIKey() (*types.APIKey, error) {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	return http.Post[types.APIKey](c.baseClient.baseURL, internal.CreateReadonlyAPIKey, nil, http.WithHeaders(headers))
+	return http.PostContext[types.APIKey](ctx, c.baseClient.baseURL, internal.CreateReadonlyAPIKey, nil, http.WithHeaders(headers), http.WithService("clob"), http.WithAmbiguousOnTimeout("create readonly API key"))
 }
 
 // GetReadonlyAPIKeys 获取只读 API 密钥列表
 func (c *apiKeyClientImpl) GetReadonlyAPIKeys() ([]types.APIKey, error) {
+	return c.GetReadonlyAPIKeysContext(context.Background())
+}
+
+func (c *apiKeyClientImpl) GetReadonlyAPIKeysContext(ctx context.Context) ([]types.APIKey, error) {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -119,7 +136,7 @@ func (c *apiKeyClientImpl) GetReadonlyAPIKeys() ([]types.APIKey, error) {
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	result, err := http.Get[[]types.APIKey](c.baseClient.baseURL, internal.GetReadonlyAPIKeys, nil, http.WithHeaders(headers))
+	result, err := http.GetContext[[]types.APIKey](ctx, c.baseClient.baseURL, internal.GetReadonlyAPIKeys, nil, http.WithHeaders(headers), http.WithService("clob"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get readonly API keys: %w", err)
 	}
@@ -133,6 +150,10 @@ func (c *apiKeyClientImpl) GetReadonlyAPIKeys() ([]types.APIKey, error) {
 
 // DeleteReadonlyAPIKey 删除只读 API 密钥
 func (c *apiKeyClientImpl) DeleteReadonlyAPIKey(keyID string) error {
+	return c.DeleteReadonlyAPIKeyContext(context.Background(), keyID)
+}
+
+func (c *apiKeyClientImpl) DeleteReadonlyAPIKeyContext(ctx context.Context, keyID string) error {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return fmt.Errorf("API credentials not set")
@@ -154,6 +175,6 @@ func (c *apiKeyClientImpl) DeleteReadonlyAPIKey(keyID string) error {
 		return fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	_, err = http.Delete[map[string]interface{}](c.baseClient.baseURL, fmt.Sprintf("%s/%s", internal.DeleteReadonlyAPIKey, keyID), nil, http.WithHeaders(headers))
+	_, err = http.DeleteContext[map[string]interface{}](ctx, c.baseClient.baseURL, fmt.Sprintf("%s/%s", internal.DeleteReadonlyAPIKey, keyID), nil, http.WithHeaders(headers), http.WithService("clob"))
 	return err
 }

@@ -23,6 +23,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
+	sdkhttp "github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
@@ -45,7 +46,11 @@ func (c *GaslessClient) executeGaslessBatch(
 	operationName string,
 	metadata string,
 ) (*types.TransactionReceipt, error) {
-	receipt, err := c.executeGaslessBatchOnce(proxyTxns, operationName, metadata)
+	return c.executeGaslessBatchContext(context.Background(), proxyTxns, operationName, metadata)
+}
+
+func (c *GaslessClient) executeGaslessBatchContext(ctx context.Context, proxyTxns []map[string]interface{}, operationName string, metadata string) (*types.TransactionReceipt, error) {
+	receipt, err := c.executeGaslessBatchOnceContext(ctx, proxyTxns, operationName, metadata)
 	if err == nil {
 		return receipt, nil
 	}
@@ -58,16 +63,22 @@ func (c *GaslessClient) executeGaslessBatch(
 	case httpErr.Status == http.StatusUnauthorized:
 		log.Printf("[WARN] relayer 401（%s），作废 V2 key 重新派生后重试一次", httpErr.Body)
 		c.invalidateV2RelayerKey()
-		if kerr := c.ensureV2RelayerKey(context.Background()); kerr != nil {
+		if kerr := c.ensureV2RelayerKey(ctx); kerr != nil {
 			return nil, fmt.Errorf("relayer 401 且重新派生 V2 key 失败: %w（原错误: %v）", kerr, err)
 		}
 	case httpErr.Status == http.StatusBadRequest && strings.Contains(httpErr.Body, "would revert"):
 		log.Printf("[WARN] relayer 预模拟 revert，%v 后重建批次重试一次", relayRevertRetryDelay)
-		time.Sleep(relayRevertRetryDelay)
+		timer := time.NewTimer(relayRevertRetryDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	default:
 		return receipt, err
 	}
-	return c.executeGaslessBatchOnce(proxyTxns, operationName, metadata)
+	return c.executeGaslessBatchOnceContext(ctx, proxyTxns, operationName, metadata)
 }
 
 // executeGaslessBatchOnce 单次构建并提交 gasless batch，不做错误重试。
@@ -76,6 +87,10 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 	operationName string,
 	metadata string,
 ) (*types.TransactionReceipt, error) {
+	return c.executeGaslessBatchOnceContext(context.Background(), proxyTxns, operationName, metadata)
+}
+
+func (c *GaslessClient) executeGaslessBatchOnceContext(ctx context.Context, proxyTxns []map[string]interface{}, operationName string, metadata string) (*types.TransactionReceipt, error) {
 	if len(proxyTxns) == 0 {
 		return nil, fmt.Errorf("no transactions to execute")
 	}
@@ -85,9 +100,9 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 
 	switch c.signatureType {
 	case types.ProxySignatureType:
-		body, err = c.buildProxyRelayTransactionBatch(proxyTxns, metadata)
+		body, err = c.buildProxyRelayTransactionBatchContext(ctx, proxyTxns, metadata)
 	case types.CWIASignatureType:
-		body, err = c.buildCWIARelayTransactionBatch(proxyTxns, metadata)
+		body, err = c.buildCWIARelayTransactionBatchContext(ctx, proxyTxns, metadata)
 	case types.SafeSignatureType:
 		// Convert proxyTxns to Safe transaction format
 		safeTxns := make([]map[string]interface{}, len(proxyTxns))
@@ -99,7 +114,7 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 				"value":     proxyTxn["value"],
 			}
 		}
-		body, err = c.buildSafeRelayTransactionBatch(safeTxns, metadata)
+		body, err = c.buildSafeRelayTransactionBatchContext(ctx, safeTxns, metadata)
 	default:
 		return nil, fmt.Errorf("unsupported signature type: %d", c.signatureType)
 	}
@@ -122,29 +137,19 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 	// 记录 relayer 调用次数（在格式化 body 之后，用于日志）
 	callCount := atomic.AddInt64(&c.relayerCallCount, 1)
 
-	// Debug: log request body (truncated for security)
-	if len(bodyJSON) > 500 {
-		log.Printf("[DEBUG] [Relayer调用 #%d] 请求体 (前500字符): %s...", callCount, string(bodyJSON[:500]))
-	} else {
-		log.Printf("[DEBUG] [Relayer调用 #%d] 请求体: %s", callCount, string(bodyJSON))
-	}
+	log.Printf("[DEBUG] [Relayer调用 #%d] 请求体已生成: bytes=%d", callCount, len(bodyJSON))
 
-	// Debug: log encoded proxy data length and first bytes
+	// Only log encoded data length. The data may contain signatures.
 	var bodyMap map[string]interface{}
 	if err := json.Unmarshal(bodyJSON, &bodyMap); err == nil {
 		if encodedTxnHex, ok := bodyMap["data"].(string); ok {
-			previewLen := 100
-			if len(encodedTxnHex) < previewLen {
-				previewLen = len(encodedTxnHex)
-			}
-			log.Printf("[DEBUG] [Relayer调用 #%d] Proxy data length: %d bytes, first %d chars: %s",
-				callCount, len(encodedTxnHex), previewLen, encodedTxnHex[:previewLen])
+			log.Printf("[DEBUG] [Relayer调用 #%d] Proxy data length: %d chars", callCount, len(encodedTxnHex))
 		}
 	}
 
 	// 懒加载 V2 relayer key（首次进入会跑 SIWE）。
 	// 失败不阻塞 — ensureV2RelayerKey 内部已 log，并保持旧鉴权 fallback。
-	_ = c.ensureV2RelayerKey(context.Background())
+	_ = c.ensureV2RelayerKey(ctx)
 
 	// Sign request using LocalSigner
 	requestHeaders, err := c.localSigner.SignRequest("POST", "/submit", body)
@@ -156,7 +161,7 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 	requestURL := fmt.Sprintf("%s/submit", c.relayURL)
 	var gaslessResp map[string]interface{}
 
-	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(bodyJSON))
+	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -169,16 +174,13 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to submit transaction: %w", err)
+		return nil, &sdkerrors.AmbiguousOutcomeError{Service: "relayer", Method: "POST", Path: "/submit", Operation: operationName, Cause: err}
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		errorMsg := string(bodyBytes)
-		if len(errorMsg) > 200 {
-			errorMsg = errorMsg[:200] + "..."
-		}
+		errorMsg := sdkhttp.SanitizeErrorResponse(bodyBytes, 200)
 		bodyForLog := errorMsg
 		if bodyForLog == "" {
 			bodyForLog = "(empty body)"
@@ -188,7 +190,8 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 		if rayID := resp.Header.Get("cf-ray"); rayID != "" {
 			log.Printf("[ERROR] [Relayer调用 #%d] cf-ray=%s content-type=%s", callCount, rayID, resp.Header.Get("Content-Type"))
 		}
-		return nil, &sdkerrors.RelayHTTPError{Status: resp.StatusCode, Body: errorMsg}
+		apiErr := sdkhttp.APIErrorFromResponse("relayer", "POST", "/submit", resp, bodyBytes)
+		return nil, &sdkerrors.RelayHTTPError{Status: resp.StatusCode, Body: errorMsg, API: apiErr}
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&gaslessResp); err != nil {
@@ -233,7 +236,7 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 			}
 			log.Printf("[ERROR] [Relayer调用 #%d] 交易提交失败 (state: %s, transactionID: %s): %s",
 				callCount, state, transactionID, fullErrorMsg)
-			log.Printf("[ERROR] [Relayer调用 #%d] 完整响应 (JSON): %s", callCount, formatMapAsJSON(gaslessResp))
+			log.Printf("[ERROR] [Relayer调用 #%d] 响应摘要: %s", callCount, sanitizedRelayResponse(gaslessResp))
 			return nil, &sdkerrors.RelayFailedError{
 				State:         state,
 				TransactionID: transactionID,
@@ -252,11 +255,11 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 		} else {
 			// 如果状态不是失败但没有交易哈希，可能是还在处理中
 			if state, ok := gaslessResp["state"].(string); ok && state != "STATE_FAILED" {
-				log.Printf("[WARN] [Relayer调用 #%d] 响应中没有找到交易哈希，但状态为: %s，响应内容: %+v", callCount, state, gaslessResp)
-				return nil, fmt.Errorf("交易可能还在处理中，未返回交易哈希 (state: %s): %v", state, gaslessResp)
+				log.Printf("[WARN] [Relayer调用 #%d] 响应中没有找到交易哈希，但状态为: %s，响应摘要: %s", callCount, state, sanitizedRelayResponse(gaslessResp))
+				return nil, fmt.Errorf("交易可能还在处理中，未返回交易哈希 (state: %s): %s", state, sanitizedRelayResponse(gaslessResp))
 			}
-			log.Printf("[ERROR] [Relayer调用 #%d] 响应中没有找到交易哈希，响应内容: %+v", callCount, gaslessResp)
-			return nil, fmt.Errorf("no transaction hash in response: %v", gaslessResp)
+			log.Printf("[ERROR] [Relayer调用 #%d] 响应中没有找到交易哈希，响应摘要: %s", callCount, sanitizedRelayResponse(gaslessResp))
+			return nil, fmt.Errorf("no transaction hash in response: %s", sanitizedRelayResponse(gaslessResp))
 		}
 	}
 
@@ -271,39 +274,51 @@ func (c *GaslessClient) executeGaslessBatchOnce(
 			if id, ok := gaslessResp["transactionID"].(string); ok {
 				txID = id
 			}
-			log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空且状态为失败，响应内容: %+v", callCount, gaslessResp)
+			log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空且状态为失败，响应摘要: %s", callCount, sanitizedRelayResponse(gaslessResp))
 			return nil, &sdkerrors.RelayFailedError{State: state, TransactionID: txID, Message: errorMsg}
 		}
-		log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空，响应内容: %+v", callCount, gaslessResp)
-		return nil, fmt.Errorf("transaction hash is empty in response: %v", gaslessResp)
+		log.Printf("[ERROR] [Relayer调用 #%d] 交易哈希为空，响应摘要: %s", callCount, sanitizedRelayResponse(gaslessResp))
+		return nil, fmt.Errorf("transaction hash is empty in response: %s", sanitizedRelayResponse(gaslessResp))
 	}
 
 	log.Printf("[OK] [Relayer调用 #%d] 批量提交成功，交易哈希: %s", callCount, txHashStr)
 
 	// Wait for transaction receipt
 	txHash := common.HexToHash(txHashStr)
-	receipt, err := c.waitForTransactionReceipt(txHash)
+	receipt, err := c.waitForTransactionReceiptContext(ctx, txHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to wait for receipt: %w", err)
 	}
 
 	log.Printf("[OK] [Relayer调用 #%d] 交易已确认，区块号: %d", callCount, receipt.BlockNumber)
 	if transactionID, _ := gaslessResp["transactionID"].(string); transactionID != "" {
-		if err := c.waitForRelayerConfirmed(transactionID); err != nil {
+		if err := c.waitForRelayerConfirmedContext(ctx, transactionID); err != nil {
 			return nil, err
 		}
 	}
 	return receipt, nil
 }
 
+func sanitizedRelayResponse(response map[string]interface{}) string {
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return "(unavailable)"
+	}
+	return sdkhttp.SanitizeErrorResponse(encoded, 500)
+}
+
 // waitForRelayerConfirmed deliberately does not accept STATE_MINED. Deposit
 // Wallet registry updates may lag the chain receipt, and dependent WALLET
 // batches are only safe after the relayer reports STATE_CONFIRMED.
 func (c *GaslessClient) waitForRelayerConfirmed(transactionID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), internal.TransactionWaitTimeout)
+	return c.waitForRelayerConfirmedContext(context.Background(), transactionID)
+}
+
+func (c *GaslessClient) waitForRelayerConfirmedContext(parent context.Context, transactionID string) error {
+	ctx, cancel := context.WithTimeout(parent, internal.TransactionWaitTimeout)
 	defer cancel()
 	for {
-		txns, err := c.GetRelayerTransaction(transactionID)
+		txns, err := c.GetRelayerTransactionContext(ctx, transactionID)
 		if err != nil {
 			return fmt.Errorf("poll relayer transaction %s for STATE_CONFIRMED: %w", transactionID, err)
 		}
@@ -321,15 +336,6 @@ func (c *GaslessClient) waitForRelayerConfirmed(transactionID string) error {
 		case <-time.After(internal.TransactionDelay):
 		}
 	}
-}
-
-// formatMapAsJSON formats a map as JSON string for logging
-func formatMapAsJSON(m map[string]interface{}) string {
-	jsonBytes, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("%+v", m)
-	}
-	return string(jsonBytes)
 }
 
 // formatJSONWithSpaces formats JSON with spaces to match Python's json.dumps format
@@ -351,12 +357,16 @@ func (c *GaslessClient) buildProxyRelayTransactionBatch(
 	proxyTxns []map[string]interface{},
 	metadata string,
 ) (*ProxyRelayBody, error) {
+	return c.buildProxyRelayTransactionBatchContext(context.Background(), proxyTxns, metadata)
+}
+
+func (c *GaslessClient) buildProxyRelayTransactionBatchContext(ctx context.Context, proxyTxns []map[string]interface{}, metadata string) (*ProxyRelayBody, error) {
 	if len(proxyTxns) == 0 {
 		return nil, fmt.Errorf("no transactions to batch")
 	}
 
 	// Get relay nonce
-	nonce, err := c.getRelayNonce("PROXY")
+	nonce, err := c.getRelayNonceContext(ctx, "PROXY")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relay nonce: %w", err)
 	}
@@ -378,7 +388,7 @@ func (c *GaslessClient) buildProxyRelayTransactionBatch(
 		Data: encodedTxn,
 	}
 
-	estimatedGas, err := c.estimateGasWithRetry(context.Background(), callMsg)
+	estimatedGas, err := c.estimateGasWithRetry(ctx, callMsg)
 	if err != nil {
 		// Use default if estimation fails (increase for batch)
 		estimatedGas = internal.DefaultGasEstimate * uint64(len(proxyTxns))
@@ -534,12 +544,16 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 	safeTxns []map[string]interface{},
 	metadata string,
 ) (*SafeRelayBody, error) {
+	return c.buildSafeRelayTransactionBatchContext(context.Background(), safeTxns, metadata)
+}
+
+func (c *GaslessClient) buildSafeRelayTransactionBatchContext(ctx context.Context, safeTxns []map[string]interface{}, metadata string) (*SafeRelayBody, error) {
 	if len(safeTxns) == 0 {
 		return nil, fmt.Errorf("no transactions to batch")
 	}
 
 	// Get relay nonce for Safe wallet
-	relayerNonce, err := c.getRelayNonce("SAFE")
+	relayerNonce, err := c.getRelayNonceContext(ctx, "SAFE")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relay nonce: %w", err)
 	}
@@ -548,7 +562,7 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 	// nonce to match the contract's current nonce storage slot, so chain state is the
 	// ground truth. Relayer's /nonce is a cache that can drift (observed: relayer=60 vs
 	// chain=59 causing GS025 reverts). Prefer the on-chain value when they diverge.
-	onChainNonce, err := c.getSafeNonceOnChain(context.Background())
+	onChainNonce, err := c.getSafeNonceOnChain(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read on-chain safe nonce: %w", err)
 	}
@@ -579,7 +593,7 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 	}
 
 	// Sign Safe transaction
-	signature, err := c.signSafeTransaction(safeTxn, nonce)
+	signature, err := c.signSafeTransactionContext(ctx, safeTxn, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign safe transaction: %w", err)
 	}
@@ -595,7 +609,7 @@ func (c *GaslessClient) buildSafeRelayTransactionBatch(
 	}
 
 	// Get Safe proxy address
-	safeProxyAddr, err := c.getSafeProxyAddress()
+	safeProxyAddr, err := c.getSafeProxyAddressContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get safe proxy address: %w", err)
 	}
@@ -759,6 +773,10 @@ func pad32Bytes(b []byte) []byte {
 
 // getRelayNonce gets nonce from relay with retry mechanism
 func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
+	return c.getRelayNonceContext(context.Background(), walletType)
+}
+
+func (c *GaslessClient) getRelayNonceContext(parent context.Context, walletType string) (int, error) {
 	url := fmt.Sprintf("%s/nonce", c.relayURL)
 
 	// Retry up to 3 times with exponential backoff
@@ -769,7 +787,13 @@ func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
 		if attempt > 0 {
 			// Exponential backoff: 1s, 2s, 4s
 			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
-			time.Sleep(backoff)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-parent.Done():
+				timer.Stop()
+				return 0, parent.Err()
+			case <-timer.C:
+			}
 		}
 
 		req, err := http.NewRequest("GET", url, nil)
@@ -786,7 +810,7 @@ func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
 		// Create context with timeout for this specific request.
 		// Must defer cancel() so it runs only after we finish reading the response body;
 		// canceling before body read causes "context canceled" during json.Decode.
-		ctx, cancel := context.WithTimeout(context.Background(), internal.RelayNonceTimeout)
+		ctx, cancel := context.WithTimeout(parent, internal.RelayNonceTimeout)
 		req = req.WithContext(ctx)
 		defer cancel()
 
@@ -804,8 +828,13 @@ func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("relay returned error: HTTP %d", resp.StatusCode)
-			continue // Retry on non-200 status
+			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4097))
+			apiErr := sdkhttp.APIErrorFromResponse("relayer", "GET", "/nonce", resp, bodyBytes)
+			lastErr = &sdkerrors.RelayHTTPError{Status: resp.StatusCode, Body: apiErr.RawResponse, API: apiErr}
+			if !apiErr.Retryable {
+				return 0, lastErr
+			}
+			continue
 		}
 
 		var result map[string]interface{}
@@ -843,7 +872,11 @@ func (c *GaslessClient) getRelayNonce(walletType string) (int, error) {
 
 // waitForTransactionReceipt waits for a transaction receipt
 func (c *GaslessClient) waitForTransactionReceipt(txHash common.Hash) (*types.TransactionReceipt, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), internal.TransactionWaitTimeout)
+	return c.waitForTransactionReceiptContext(context.Background(), txHash)
+}
+
+func (c *GaslessClient) waitForTransactionReceiptContext(parent context.Context, txHash common.Hash) (*types.TransactionReceipt, error) {
+	ctx, cancel := context.WithTimeout(parent, internal.TransactionWaitTimeout)
 	defer cancel()
 
 	startTime := time.Now()
@@ -1046,20 +1079,24 @@ type RelayerTransactionInfo struct {
 // GetRelayerTransaction 用 transactionID 查询 relayer 那笔的状态详情。
 // 主要给 STATE_FAILED 的事故诊断用：拿到 transactionHash 后去 Polygonscan 看 revert reason。
 func (c *GaslessClient) GetRelayerTransaction(transactionID string) ([]RelayerTransactionInfo, error) {
+	return c.GetRelayerTransactionContext(context.Background(), transactionID)
+}
+
+func (c *GaslessClient) GetRelayerTransactionContext(ctx context.Context, transactionID string) ([]RelayerTransactionInfo, error) {
 	if transactionID == "" {
 		return nil, fmt.Errorf("transactionID required")
 	}
 
 	requestURL := fmt.Sprintf("%s/transaction?id=%s", c.relayURL, transactionID)
 
-	_ = c.ensureV2RelayerKey(context.Background())
+	_ = c.ensureV2RelayerKey(ctx)
 
 	headers, err := c.localSigner.SignRequest("GET", "/transaction", nil)
 	if err != nil {
 		return nil, fmt.Errorf("sign GET /transaction: %w", err)
 	}
 
-	req, err := http.NewRequest("GET", requestURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -1078,7 +1115,8 @@ func (c *GaslessClient) GetRelayerTransaction(transactionID string) ([]RelayerTr
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("relayer GET /transaction status=%d body=%s", resp.StatusCode, string(body))
+		apiErr := sdkhttp.APIErrorFromResponse("relayer", "GET", "/transaction", resp, body)
+		return nil, &sdkerrors.RelayHTTPError{Status: resp.StatusCode, Body: apiErr.RawResponse, API: apiErr}
 	}
 
 	var out []RelayerTransactionInfo

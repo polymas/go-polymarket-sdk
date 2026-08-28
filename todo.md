@@ -396,15 +396,18 @@
 - [x] clob tracked tests、race、vet 通过；Git 索引干净副本 `go test -short ./...` 全部通过，普通全仓测试除公共 OnFinality RPC 返回 429 外全部通过，`chainws` 已不再阻塞。
 - [x] 下游核查：`polyworker` 只调用签名不变的 `CancelOrders`，未调用 `CancelMarketOrders`，也没有自定义实现 SDK `Client`；本项无需修改 `polyworker`。
 
-### [ ] P1-5：重构 HTTP 错误、重试和 context
+### [x] P1-5：重构 HTTP 错误、重试和 context
 
 当前通用 HTTP 层主要返回格式化字符串错误，`errors`/middleware 中的结构没有贯穿公开客户端。
 
-- [ ] 所有公开请求接收 `context.Context`，允许调用方取消和设置 deadline。
-- [ ] 定义 `APIError`：service、method、path、status、requestID、errorCode、message、retryAfter、原始响应（脱敏）。
-- [ ] 处理官方 425、429、503 等状态；只对幂等请求或明确可安全重试的操作自动重试。
-- [ ] 下单/Relayer 超时必须返回 ambiguous outcome，先对账再决定是否重发。
-- [ ] 日志统一脱敏 API secret、passphrase、私钥、签名和完整鉴权头。
+- [x] 通用 HTTP、CLOB、Gamma、Data、RFQ 及 Gasless/Relayer 公开网络操作均提供 `...Context` 入口；旧签名保留为 `context.Background()` 兼容包装。等待型下单、订单/成交对账、Relayer nonce/submit/poll/receipt 与 onboarding 全链路传递同一个 context。
+- [x] 定义稳定的 `APIError`：service、method、path、status、requestID、errorCode、message、retryAfter、retryable 与限长脱敏的原始响应；Relayer 兼容错误通过 `Unwrap` 暴露同一个 typed error。
+- [x] 按官方状态表处理 425/408/429/500/502/503/504；默认只重试 GET/HEAD/OPTIONS/DELETE，批量 books/prices/midpoints/spreads/last-trades/scoring 等只读 POST 显式声明幂等，普通 POST 不重试。旧 middleware 同步限制为幂等方法并修正 response body 生命周期。
+- [x] CLOB order、RFQ mutation 与 Relayer `/submit` 超时返回 `AmbiguousOutcomeError` 且仅提交一次；订单结果仍按输入对齐为 `unknown` 并携带本地 expected order hash。等待型订单用调用方 ctx 对账，Relayer 已取得 transactionID 后用同一 ctx 轮询。
+- [x] 统一响应和 URL 脱敏 API secret/key、passphrase、private key、signature、authorization；移除 Relayer 请求体、calldata 前缀和完整响应日志，仅保留长度、状态、transactionID/hash 等诊断字段。
+- [x] mock 正负向测试覆盖 typed error、请求 ID/Retry-After、425/503 重试、只读 POST opt-in、写 POST 单次提交、deadline、ambiguous、CLOB expected hash、Relayer 兼容 unwrap、middleware body 与 URL 脱敏；生产只读验证 `GET /time` 成功、非法 `/book` 返回结构化 `APIError`，未鉴权、未下单、无资产变化。
+- [x] 官方核实：Error Codes 明确 425 matching engine restarting、429 exponential backoff、500 retry、503 paused/cancel-only；Rate Limits 明确 Cloudflare throttling 与 Relayer `/submit` 25/min；Relayer 文档明确 `/submit` 立即返回 transactionID 后应轮询 `/transaction`。
+- [x] clean tracked 副本 tests/race/vet 与示例构建通过；工作区原有未跟踪 live/probe 文件未纳入提交，`polyworker` 未修改。
 
 ### [x] P1-6：为 SDK 内部 negRisk 缓存增加并发安全和生命周期
 
@@ -637,13 +640,13 @@ Perps 是独立交易系统，建议不要塞入现有 `clob` 包。最小可用
 
 P0-1 至 P0-5、P0-12 已完成。业务层必须为每笔订单显式提供 tick size；批量返回区分已关闭、确定未提交、结果未知和逐单业务拒绝。matched 响应由 SDK 自动补全异步交易哈希，网络结果不明确时先按确定性 order hash 对账，不会直接重下。
 
-### [ ] 第二批：修复返回数据和实时连接
+### [x] 第二批：修复返回数据和实时连接
 
-P0-6 至 P0-14、P1-3、P1-4 已完成；下一项是 P1-8，然后继续 P1-10。
+P0-6 至 P0-14、P1-3、P1-4、P1-8、P1-10 已完成。
 
-### [ ] 第三批：稳定性和可恢复性
+### [x] 第三批：稳定性和可恢复性
 
-P1-1、P1-2 已完成；继续 P1-5 至 P1-9，并把真实资金路径纳入 mock + testnet/小额 production contract tests。至此全部 P0/P1 应关闭。
+P1-1 至 P1-10 已完成；资金路径采用 mock、只读生产验证与此前经授权的小额 production contract tests。至此全部 P0/P1 已关闭。
 
 ### [ ] 第四批：按业务批准补齐 API
 

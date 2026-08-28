@@ -2,115 +2,149 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
 	"github.com/polymas/go-polymarket-sdk/internal"
 )
 
-// httpClient HTTP客户端实现（不可导出）
+const (
+	defaultMaxRetries = 2
+	maxErrorBodyBytes = 4 << 10
+)
+
 type httpClient struct {
 	baseURL    string
 	httpClient *http.Client
 	headers    map[string]string
 }
 
-// HTTPOption HTTP请求选项
 type HTTPOption func(*httpRequestOptions)
 
-// httpRequestOptions HTTP请求选项
 type httpRequestOptions struct {
-	headers     map[string]string
-	multiParams map[string][]string // 同名参数（如 clob_token_ids=id1&clob_token_ids=id2）
+	headers            map[string]string
+	multiParams        map[string][]string
+	service            string
+	idempotent         *bool
+	maxRetries         *int
+	ambiguousOperation string
+	backoffBase        time.Duration
+	backoffMax         time.Duration
 }
 
-// WithHeaders 设置请求头（函数选项）
 func WithHeaders(headers map[string]string) HTTPOption {
 	return func(opts *httpRequestOptions) {
 		if opts.headers == nil {
 			opts.headers = make(map[string]string)
 		}
-		for k, v := range headers {
-			opts.headers[k] = v
+		for key, value := range headers {
+			opts.headers[key] = value
 		}
 	}
 }
 
-// WithHeader 设置单个请求头（函数选项）
-func WithHeader(key, value string) HTTPOption {
-	return func(opts *httpRequestOptions) {
-		if opts.headers == nil {
-			opts.headers = make(map[string]string)
-		}
-		opts.headers[key] = value
-	}
-}
+func WithHeader(key, value string) HTTPOption { return WithHeaders(map[string]string{key: value}) }
 
-// WithMultiParams 设置同名参数（函数选项）
-// 用于支持同名查询参数，如 clob_token_ids=id1&clob_token_ids=id2
 func WithMultiParams(multiParams map[string][]string) HTTPOption {
 	return func(opts *httpRequestOptions) {
-		if len(multiParams) == 0 {
-			return
-		}
-		for k, values := range multiParams {
-			if len(values) > 0 {
-				if opts.multiParams == nil {
-					opts.multiParams = make(map[string][]string)
-				}
-				opts.multiParams[k] = values
+		for key, values := range multiParams {
+			if len(values) == 0 {
+				continue
 			}
+			if opts.multiParams == nil {
+				opts.multiParams = make(map[string][]string)
+			}
+			opts.multiParams[key] = append([]string(nil), values...)
 		}
 	}
 }
 
-// getOrCreateClient 获取或创建 HTTP 客户端（使用缓存）
-var clientCache = make(map[string]*httpClient)
-var clientCacheMutex sync.RWMutex
+func WithService(service string) HTTPOption {
+	return func(opts *httpRequestOptions) { opts.service = service }
+}
+
+// WithIdempotent marks a POST-style read as safe to retry.
+func WithIdempotent() HTTPOption {
+	return func(opts *httpRequestOptions) {
+		value := true
+		opts.idempotent = &value
+	}
+}
+
+func WithoutRetry() HTTPOption {
+	return func(opts *httpRequestOptions) {
+		value := false
+		opts.idempotent = &value
+		zero := 0
+		opts.maxRetries = &zero
+	}
+}
+
+func WithMaxRetries(maxRetries int) HTTPOption {
+	return func(opts *httpRequestOptions) {
+		if maxRetries < 0 {
+			maxRetries = 0
+		}
+		opts.maxRetries = &maxRetries
+	}
+}
+
+// WithAmbiguousOnTimeout marks a mutation whose timeout/cancellation must be
+// reconciled before retry. Such requests are never automatically retried.
+func WithAmbiguousOnTimeout(operation string) HTTPOption {
+	return func(opts *httpRequestOptions) {
+		opts.ambiguousOperation = operation
+		value := false
+		opts.idempotent = &value
+		zero := 0
+		opts.maxRetries = &zero
+	}
+}
+
+var (
+	clientCache      = make(map[string]*httpClient)
+	clientCacheMutex sync.RWMutex
+)
 
 func getOrCreateClient(baseURL string) *httpClient {
 	clientCacheMutex.RLock()
-	if client, ok := clientCache[baseURL]; ok {
-		clientCacheMutex.RUnlock()
+	client := clientCache[baseURL]
+	clientCacheMutex.RUnlock()
+	if client != nil {
 		return client
 	}
-	clientCacheMutex.RUnlock()
-
 	clientCacheMutex.Lock()
 	defer clientCacheMutex.Unlock()
-
-	// 双重检查
-	if client, ok := clientCache[baseURL]; ok {
+	if client = clientCache[baseURL]; client != nil {
 		return client
 	}
-
-	// 创建安全的HTTP传输配置（限制连接池，防止高并发时连接风暴和 fd 耗尽）
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12, // 最低TLS 1.2版本
-			// 不跳过证书验证，使用系统默认的证书验证
-		},
-		Proxy:                 http.ProxyFromEnvironment, // 支持从环境变量读取代理配置
-		MaxConnsPerHost:       10,                        // 对同一 host 最多 10 个并发连接
-		MaxIdleConnsPerHost:   5,                         // 保留 5 个空闲连接复用
-		MaxIdleConns:          50,                        // 全局最多 50 个空闲连接
-		IdleConnTimeout:       30 * time.Second,          // 空闲 30s 后回收
-		ResponseHeaderTimeout: 10 * time.Second,          // 等待响应头最多 10s
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxConnsPerHost:       10,
+		MaxIdleConnsPerHost:   5,
+		MaxIdleConns:          50,
+		IdleConnTimeout:       30 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second, // 建连超时 5s
+			Timeout:   5 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 	}
-
-	client := &httpClient{
+	client = &httpClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout:   internal.HTTPClientTimeout,
@@ -122,463 +156,447 @@ func getOrCreateClient(baseURL string) *httpClient {
 	return client
 }
 
-// Get performs a GET request (包级泛型函数)
-// baseURL 为 API 基础 URL，params 为普通参数
-// options 为函数选项，可用于设置请求头和同名参数等
 func Get[T any](baseURL, path string, params map[string]string, options ...HTTPOption) (*T, error) {
-	// 解析选项
-	opts := &httpRequestOptions{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(opts)
-		}
-	}
-
-	// 获取或创建客户端
-	c := getOrCreateClient(baseURL)
-
-	// 合并普通参数和同名参数
-	var allParams map[string][]string
-	if len(opts.multiParams) > 0 {
-		allParams = make(map[string][]string)
-		// 先添加普通参数
-		for k, v := range params {
-			allParams[k] = []string{v}
-		}
-		// 再添加同名参数（会覆盖同名普通参数）
-		for k, values := range opts.multiParams {
-			allParams[k] = values
-		}
-	} else {
-		// 只有普通参数，转换为 map[string][]string
-		allParams = make(map[string][]string)
-		for k, v := range params {
-			allParams[k] = []string{v}
-		}
-	}
-
-	return request[T](c, "GET", path, allParams, nil, opts.headers)
+	return GetContext[T](context.Background(), baseURL, path, params, options...)
 }
 
-// Post performs a POST request (包级泛型函数)
-// baseURL 为 API 基础 URL，options 为函数选项，可用于设置请求头等
-func Post[T any](baseURL, path string, body interface{}, options ...HTTPOption) (*T, error) {
-	// 解析选项
-	opts := &httpRequestOptions{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(opts)
-		}
-	}
-
-	// 获取或创建客户端
-	c := getOrCreateClient(baseURL)
-
-	return request[T](c, "POST", path, nil, body, opts.headers)
-}
-
-// request performs a generic HTTP request with slice params
-// 这是一个内部辅助函数，使用泛型处理响应
-func request[T any](c *httpClient, method, path string, params map[string][]string, body interface{}, requestHeaders map[string]string) (*T, error) {
-	req, err := buildRequestWithSliceParams(c, method, path, params, body, "application/json", requestHeaders)
+func GetContext[T any](ctx context.Context, baseURL, path string, params map[string]string, options ...HTTPOption) (*T, error) {
+	body, err := do(ctx, baseURL, nethttpMethodGet, path, mergeParams(params, options), nil, "application/json", options...)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	responseBodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		sanitizedBody := sanitizeErrorResponse(responseBodyBytes, 500)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, sanitizedBody)
-	}
-
-	var result T
-	if len(responseBodyBytes) == 0 {
-		return &result, nil
-	}
-
-	if err := json.Unmarshal(responseBodyBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
+	return decode[T](body)
 }
 
-// GetRaw performs a request and returns raw bytes
-// baseURL 为 API 基础 URL，params 为普通参数
-// options 为函数选项，可用于设置请求头和同名参数等
+func Post[T any](baseURL, path string, body any, options ...HTTPOption) (*T, error) {
+	return PostContext[T](context.Background(), baseURL, path, body, options...)
+}
+
+func PostContext[T any](ctx context.Context, baseURL, path string, body any, options ...HTTPOption) (*T, error) {
+	encoded, err := marshalBody(body)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := do(ctx, baseURL, nethttpMethodPost, path, nil, encoded, "application/json", options...)
+	if err != nil {
+		return nil, err
+	}
+	return decode[T](raw)
+}
+
 func GetRaw(baseURL, method, path string, params map[string]string, options ...HTTPOption) ([]byte, error) {
-	// 解析选项
-	opts := &httpRequestOptions{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(opts)
-		}
-	}
+	return GetRawContext(context.Background(), baseURL, method, path, params, options...)
+}
 
-	// 获取或创建客户端
-	c := getOrCreateClient(baseURL)
+func GetRawContext(ctx context.Context, baseURL, method, path string, params map[string]string, options ...HTTPOption) ([]byte, error) {
+	return do(ctx, baseURL, method, path, mergeParams(params, options), nil, "application/octet-stream", options...)
+}
 
-	// 合并普通参数和同名参数
-	var allParams map[string][]string
-	if len(opts.multiParams) > 0 {
-		allParams = make(map[string][]string)
-		// 先添加普通参数
-		for k, v := range params {
-			allParams[k] = []string{v}
-		}
-		// 再添加同名参数（会覆盖同名普通参数）
-		for k, values := range opts.multiParams {
-			allParams[k] = values
-		}
-	} else {
-		// 只有普通参数，转换为 map[string][]string
-		allParams = make(map[string][]string)
-		for k, v := range params {
-			allParams[k] = []string{v}
-		}
-	}
+func PostRaw(baseURL, path string, body []byte, options ...HTTPOption) ([]byte, error) {
+	return PostRawContext(context.Background(), baseURL, path, body, options...)
+}
 
-	req, err := buildRequestWithSliceParams(c, method, path, allParams, nil, "application/octet-stream", opts.headers)
+func PostRawContext(ctx context.Context, baseURL, path string, body []byte, options ...HTTPOption) ([]byte, error) {
+	return do(ctx, baseURL, nethttpMethodPost, path, nil, body, "application/json", options...)
+}
+
+func DeleteRaw[T any](baseURL, path string, body []byte, options ...HTTPOption) (*T, error) {
+	return DeleteRawContext[T](context.Background(), baseURL, path, body, options...)
+}
+
+func DeleteRawContext[T any](ctx context.Context, baseURL, path string, body []byte, options ...HTTPOption) (*T, error) {
+	raw, err := do(ctx, baseURL, nethttpMethodDelete, path, nil, body, "application/json", options...)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		sanitizedBody := sanitizeErrorResponse(bodyBytes, 500)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, sanitizedBody)
-	}
-
-	return io.ReadAll(resp.Body)
+	return decode[T](raw)
 }
 
-// PostRaw performs a POST request with raw body bytes and returns raw bytes
-// baseURL 为 API 基础 URL，用于发送预格式化的 JSON（如带空格的 JSON，匹配 Python 的 json.dumps 格式）
-// options 为函数选项，可用于设置请求头等
-func PostRaw(baseURL, path string, bodyBytes []byte, options ...HTTPOption) ([]byte, error) {
-	// 解析选项
-	opts := &httpRequestOptions{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(opts)
-		}
-	}
-
-	// 获取或创建客户端
-	c := getOrCreateClient(baseURL)
-
-	// 使用安全的URL构建方法
-	requestURL, err := buildSafeURL(c.baseURL, path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build safe URL: %w", err)
-	}
-
-	req, err := http.NewRequest("POST", requestURL, bytes.NewBuffer(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers (preserve exact case)
-	// IMPORTANT: Set Content-Type first, then other headers (matching Python httpx behavior)
-	req.Header.Set("Content-Type", "application/json")
-
-	// 先设置客户端默认 headers
-	for k, v := range c.headers {
-		if len(v) > 0 {
-			req.Header[k] = []string{v}
-		}
-	}
-
-	// 再设置请求特定的 headers（会覆盖默认 headers）
-	for k, v := range opts.headers {
-		if len(v) > 0 {
-			req.Header[k] = []string{v}
-		}
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		sanitizedBody := sanitizeErrorResponse(responseBody, 500)
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, sanitizedBody)
-	}
-
-	return responseBody, nil
+func GetSlice[T any](baseURL, path string, params map[string]string, options ...HTTPOption) ([]T, error) {
+	return GetSliceContext[T](context.Background(), baseURL, path, params, options...)
 }
 
-// DeleteRaw performs a DELETE request with raw body bytes and returns parsed response
-// baseURL 为 API 基础 URL，用于发送预格式化的 JSON（如带空格的 JSON，匹配 Python 的 json.dumps 格式）
-// options 为函数选项，可用于设置请求头等
-func DeleteRaw[T any](baseURL, path string, bodyBytes []byte, options ...HTTPOption) (*T, error) {
-	// 解析选项
-	opts := &httpRequestOptions{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(opts)
+func GetSliceContext[T any](ctx context.Context, baseURL, path string, params map[string]string, options ...HTTPOption) ([]T, error) {
+	response, err := GetContext[[]T](ctx, baseURL, path, params, options...)
+	if err != nil {
+		return nil, err
+	}
+	if response == nil {
+		return []T{}, nil
+	}
+	return *response, nil
+}
+
+func Delete[T any](baseURL, path string, body any, options ...HTTPOption) (*T, error) {
+	return DeleteContext[T](context.Background(), baseURL, path, body, options...)
+}
+
+func DeleteContext[T any](ctx context.Context, baseURL, path string, body any, options ...HTTPOption) (*T, error) {
+	encoded, err := marshalBody(body)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := do(ctx, baseURL, nethttpMethodDelete, path, nil, encoded, "application/json", options...)
+	if err != nil {
+		return nil, err
+	}
+	return decode[T](raw)
+}
+
+const (
+	nethttpMethodGet    = "GET"
+	nethttpMethodPost   = "POST"
+	nethttpMethodDelete = "DELETE"
+)
+
+func mergeParams(params map[string]string, options []HTTPOption) map[string][]string {
+	opts := parseOptions(options)
+	merged := make(map[string][]string, len(params)+len(opts.multiParams))
+	for key, value := range params {
+		merged[key] = []string{value}
+	}
+	for key, values := range opts.multiParams {
+		merged[key] = append([]string(nil), values...)
+	}
+	return merged
+}
+
+func parseOptions(options []HTTPOption) *httpRequestOptions {
+	opts := &httpRequestOptions{backoffBase: 100 * time.Millisecond, backoffMax: 2 * time.Second}
+	for _, option := range options {
+		if option != nil {
+			option(opts)
 		}
 	}
+	return opts
+}
 
-	// 获取或创建客户端
-	c := getOrCreateClient(baseURL)
-
-	// 使用安全的URL构建方法
-	requestURL, err := buildSafeURL(c.baseURL, path)
+func marshalBody(body any) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build safe URL: %w", err)
+		return nil, fmt.Errorf("failed to marshal body: %w", err)
 	}
+	return encoded, nil
+}
 
-	req, err := http.NewRequest("DELETE", requestURL, bytes.NewBuffer(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers (preserve exact case)
-	// IMPORTANT: Set Content-Type first, then other headers (matching Python httpx behavior)
-	req.Header.Set("Content-Type", "application/json")
-
-	// 先设置客户端默认 headers
-	for k, v := range c.headers {
-		if len(v) > 0 {
-			req.Header[k] = []string{v}
-		}
-	}
-
-	// 再设置请求特定的 headers（会覆盖默认 headers）
-	for k, v := range opts.headers {
-		if len(v) > 0 {
-			req.Header[k] = []string{v}
-		}
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	rawBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(rawBytes))
-	}
-
+func decode[T any](body []byte) (*T, error) {
 	var result T
-	if len(rawBytes) == 0 {
+	if len(body) == 0 {
 		return &result, nil
 	}
-
-	if err := json.Unmarshal(rawBytes, &result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-
 	return &result, nil
 }
 
-// buildSafeURL 安全地构建URL，防止SSRF攻击
+func do(ctx context.Context, baseURL, method, path string, params map[string][]string, body []byte, contentType string, options ...HTTPOption) ([]byte, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("context must not be nil")
+	}
+	opts := parseOptions(options)
+	client := getOrCreateClient(baseURL)
+	requestURL, err := buildSafeURL(baseURL, path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build safe URL: %w", err)
+	}
+	parsedURL, _ := url.Parse(requestURL)
+	if len(params) != 0 {
+		query := parsedURL.Query()
+		for key, values := range params {
+			for _, value := range values {
+				if value != "" {
+					query.Add(key, value)
+				}
+			}
+		}
+		parsedURL.RawQuery = query.Encode()
+		requestURL = parsedURL.String()
+	}
+	service := opts.service
+	if service == "" {
+		service = parsedURL.Hostname()
+	}
+	idempotent := method == nethttpMethodGet || method == "HEAD" || method == "OPTIONS" || method == nethttpMethodDelete
+	if opts.idempotent != nil {
+		idempotent = *opts.idempotent
+	}
+	maxRetries := defaultMaxRetries
+	if opts.maxRetries != nil {
+		maxRetries = *opts.maxRetries
+	}
+	if !idempotent {
+		maxRetries = 0
+	}
+
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		request, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		for key, value := range client.headers {
+			request.Header[key] = []string{value}
+		}
+		for key, value := range opts.headers {
+			if value != "" {
+				request.Header[key] = []string{value}
+			}
+		}
+		if len(body) != 0 && contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		}
+
+		response, requestErr := client.httpClient.Do(request)
+		if requestErr != nil {
+			if opts.ambiguousOperation != "" && isTimeoutOrCancellation(requestErr) {
+				return nil, &sdkerrors.AmbiguousOutcomeError{Service: service, Method: method, Path: parsedURL.Path, Operation: opts.ambiguousOperation, Cause: requestErr}
+			}
+			if attempt < maxRetries && ctx.Err() == nil {
+				if err := waitForRetry(ctx, retryDelay(nil, attempt, opts)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			return nil, fmt.Errorf("%s %s request failed: %w", method, service, requestErr)
+		}
+
+		var responseReader io.Reader = response.Body
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			responseReader = io.LimitReader(response.Body, maxErrorBodyBytes+1)
+		}
+		responseBody, readErr := io.ReadAll(responseReader)
+		response.Body.Close()
+		if readErr != nil {
+			if attempt < maxRetries && ctx.Err() == nil {
+				if err := waitForRetry(ctx, retryDelay(response, attempt, opts)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			return nil, fmt.Errorf("read %s response: %w", service, readErr)
+		}
+		if response.StatusCode >= 200 && response.StatusCode < 300 {
+			return responseBody, nil
+		}
+		apiErr := APIErrorFromResponse(service, method, parsedURL.Path, response, responseBody)
+		if apiErr.Retryable && attempt < maxRetries {
+			if err := waitForRetry(ctx, retryDelay(response, attempt, opts)); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		return nil, apiErr
+	}
+}
+
+func isTimeoutOrCancellation(err error) bool {
+	if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return stderrors.As(err, &netErr) && netErr.Timeout()
+}
+
+func retryDelay(response *http.Response, attempt int, opts *httpRequestOptions) time.Duration {
+	if response != nil {
+		if delay := parseRetryAfter(response.Header.Get("Retry-After"), time.Now()); delay > 0 {
+			if delay > opts.backoffMax {
+				return opts.backoffMax
+			}
+			return delay
+		}
+	}
+	delay := opts.backoffBase << attempt
+	if delay > opts.backoffMax {
+		return opts.backoffMax
+	}
+	return delay
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
+}
+
+// APIErrorFromResponse builds the SDK's stable non-2xx error without retaining
+// credentials that may be present in a response payload.
+func APIErrorFromResponse(service, method, path string, response *http.Response, body []byte) *sdkerrors.APIError {
+	message, code := parseErrorPayload(body)
+	raw := sanitizeErrorResponse(body, 500)
+	message = credentialPattern.ReplaceAllString(message, `$1$2***`)
+	if len(message) > 500 {
+		message = message[:500] + "..."
+	}
+	if message == "" {
+		message = raw
+	}
+	if message == "" {
+		message = http.StatusText(response.StatusCode)
+	}
+	return &sdkerrors.APIError{
+		Service:     service,
+		Method:      method,
+		Path:        path,
+		Status:      response.StatusCode,
+		RequestID:   firstHeader(response.Header, "X-Request-ID", "X-Amzn-RequestId", "CF-Ray"),
+		ErrorCode:   code,
+		Message:     message,
+		RetryAfter:  parseRetryAfter(response.Header.Get("Retry-After"), time.Now()),
+		RawResponse: raw,
+		Retryable:   retryableStatus(response.StatusCode),
+	}
+}
+
+// SanitizeErrorResponse removes credential-like JSON fields and limits the
+// returned text. It is exported for clients (notably the relayer) that need a
+// custom transport while sharing the same redaction policy.
+func SanitizeErrorResponse(body []byte, maxLength int) string {
+	if maxLength <= 0 {
+		maxLength = 500
+	}
+	return sanitizeErrorResponse(body, maxLength)
+}
+
+func retryableStatus(status int) bool {
+	switch status {
+	case http.StatusTooEarly, http.StatusRequestTimeout, http.StatusTooManyRequests,
+		http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func parseErrorPayload(body []byte) (message, code string) {
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return strings.TrimSpace(string(body)), ""
+	}
+	for _, key := range []string{"error_code", "errorCode", "code"} {
+		if value, ok := payload[key]; ok {
+			code = fmt.Sprint(value)
+			break
+		}
+	}
+	for _, key := range []string{"message", "error_message", "errorMessage", "detail"} {
+		if value, ok := payload[key]; ok {
+			message = fmt.Sprint(value)
+			break
+		}
+	}
+	if value, ok := payload["error"]; ok {
+		switch typed := value.(type) {
+		case string:
+			if message == "" {
+				message = typed
+			}
+		case map[string]any:
+			if message == "" && typed["message"] != nil {
+				message = fmt.Sprint(typed["message"])
+			}
+			if code == "" && typed["code"] != nil {
+				code = fmt.Sprint(typed["code"])
+			}
+		}
+	}
+	return strings.TrimSpace(message), strings.TrimSpace(code)
+}
+
+func firstHeader(header http.Header, names ...string) string {
+	for _, name := range names {
+		if value := header.Get(name); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func buildSafeURL(baseURL, path string) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base URL: %w", err)
 	}
-
-	rel, err := url.Parse(path)
+	relative, err := url.Parse(path)
 	if err != nil {
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
-
-	finalURL := base.ResolveReference(rel)
-
-	// 生产请求只允许 HTTPS；loopback HTTP 仅用于本地 mock/集成测试。
+	finalURL := base.ResolveReference(relative)
 	host := finalURL.Hostname()
 	ip := net.ParseIP(host)
 	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
 	if finalURL.Scheme != "https" && !(finalURL.Scheme == "http" && loopback) {
 		return "", fmt.Errorf("only HTTPS protocol is allowed, got: %s", finalURL.Scheme)
 	}
-
-	// 验证主机名不为空
 	if finalURL.Host == "" {
 		return "", fmt.Errorf("empty host in URL")
 	}
-
 	return finalURL.String(), nil
 }
 
-// buildRequestWithSliceParams builds an HTTP request with slice params (支持同名参数)
-func buildRequestWithSliceParams(c *httpClient, method, path string, params map[string][]string, body interface{}, contentType string, requestHeaders map[string]string) (*http.Request, error) {
-	// 使用安全的URL构建方法
-	requestURL, err := buildSafeURL(c.baseURL, path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build safe URL: %w", err)
-	}
+var credentialPattern = regexp.MustCompile(`(?i)(api[_-]?secret|api[_-]?key|passphrase|private[_-]?key|signature|authorization)(["']?\s*[:=]\s*["']?)[^"'\s,}]+`)
 
-	var reqBody io.Reader
-	if body != nil {
-		jsonData, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal body: %w", err)
-		}
-		reqBody = bytes.NewBuffer(jsonData)
-	}
-
-	req, err := http.NewRequest(method, requestURL, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers (preserve exact case)
-	// 先设置客户端默认 headers
-	for k, v := range c.headers {
-		req.Header[k] = []string{v}
-	}
-
-	// 再设置请求特定的 headers（会覆盖默认 headers）
-	for k, v := range requestHeaders {
-		if len(v) > 0 {
-			req.Header[k] = []string{v}
-		}
-	}
-
-	if body != nil && contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	if len(params) > 0 {
-		q := req.URL.Query()
-		for k, values := range params {
-			for _, v := range values {
-				if v != "" {
-					q.Add(k, v)
-				}
-			}
-		}
-		req.URL.RawQuery = q.Encode()
-	}
-
-	return req, nil
-}
-
-// sanitizeErrorResponse 清理错误响应中的敏感信息
-// maxLen: 最大返回长度（超过则截断）
-func sanitizeErrorResponse(body []byte, maxLen int) string {
+func sanitizeErrorResponse(body []byte, maxLength int) string {
 	if len(body) == 0 {
 		return ""
 	}
-
-	bodyStr := string(body)
-
-	// 移除可能的敏感字段
-	sensitiveFields := []string{
-		`"secret"`,
-		`"apiKey"`,
-		`"api_key"`,
-		`"passphrase"`,
-		`"privateKey"`,
-		`"private_key"`,
-		`"token"`,
-		`"access_token"`,
-		`"refresh_token"`,
-	}
-
-	for _, field := range sensitiveFields {
-		// 替换敏感字段的值
-		// 匹配: "field": "value"
-		re := strings.NewReplacer(field+`": "`, field+`": "***"`)
-		bodyStr = re.Replace(bodyStr)
-		// 也处理不带引号的值: "field": value
-		re2 := strings.NewReplacer(field+`": `, field+`": ***`)
-		bodyStr = re2.Replace(bodyStr)
-	}
-
-	// 限制长度
-	if len(bodyStr) > maxLen {
-		return bodyStr[:maxLen] + "..."
-	}
-
-	return bodyStr
-}
-
-// GetSlice performs a GET request and returns a slice, handling nil response
-func GetSlice[T any](baseURL, path string, params map[string]string, options ...HTTPOption) ([]T, error) {
-	resp, err := Get[[]T](baseURL, path, params, options...)
-	if err != nil {
-		return nil, err
-	}
-	if resp != nil {
-		return *resp, nil
-	}
-	return []T{}, nil
-}
-
-// Delete performs a DELETE request
-func Delete[T any](baseURL, path string, body interface{}, options ...HTTPOption) (*T, error) {
-	// 解析选项
-	opts := &httpRequestOptions{}
-	for _, opt := range options {
-		if opt != nil {
-			opt(opts)
+	var value any
+	if json.Unmarshal(body, &value) == nil {
+		redactJSON(value)
+		if encoded, err := json.Marshal(value); err == nil {
+			body = encoded
 		}
 	}
-
-	// 获取或创建客户端
-	c := getOrCreateClient(baseURL)
-
-	req, err := buildRequestWithSliceParams(c, "DELETE", path, nil, body, "application/json", opts.headers)
-	if err != nil {
-		return nil, err
+	sanitized := credentialPattern.ReplaceAllString(string(body), `$1$2***`)
+	if len(sanitized) > maxLength {
+		return sanitized[:maxLength] + "..."
 	}
+	return sanitized
+}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+func redactJSON(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			lower := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", ""))
+			if strings.Contains(lower, "secret") || strings.Contains(lower, "passphrase") || strings.Contains(lower, "privatekey") || strings.Contains(lower, "signature") || strings.Contains(lower, "authorization") || lower == "apikey" {
+				typed[key] = "***"
+				continue
+			}
+			redactJSON(item)
+		}
+	case []any:
+		for _, item := range typed {
+			redactJSON(item)
+		}
 	}
-	defer resp.Body.Close()
-
-	rawBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(rawBytes))
-	}
-
-	var result T
-	if len(rawBytes) == 0 {
-		return &result, nil
-	}
-
-	if err := json.Unmarshal(rawBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &result, nil
 }

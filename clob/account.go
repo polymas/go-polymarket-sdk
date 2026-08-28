@@ -1,6 +1,7 @@
 package clob
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -29,6 +30,10 @@ func (c *accountClientImpl) GetUSDCBalance() (float64, error) {
 //   - asset_type：COLLATERAL 查 pUSD，CONDITIONAL 查 CTF 份额
 //   - signature_type：默认 0（按 EOA 查），Safe/Proxy 用户必须传 2/1 才查 proxy 的余额和授权
 func (c *accountClientImpl) GetBalanceAllowance() (*types.BalanceAllowance, error) {
+	return c.GetBalanceAllowanceContext(context.Background())
+}
+
+func (c *accountClientImpl) GetBalanceAllowanceContext(ctx context.Context) (*types.BalanceAllowance, error) {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -54,13 +59,17 @@ func (c *accountClientImpl) GetBalanceAllowance() (*types.BalanceAllowance, erro
 		"asset_type":     "COLLATERAL",
 		"signature_type": strconv.Itoa(int(c.baseClient.signatureType)),
 	}
-	return http.Get[types.BalanceAllowance](c.baseClient.baseURL, internal.GetBalanceAllowance, params, http.WithHeaders(headers))
+	return http.GetContext[types.BalanceAllowance](ctx, c.baseClient.baseURL, internal.GetBalanceAllowance, params, http.WithHeaders(headers), http.WithService("clob"))
 }
 
 // UpdateBalanceAllowance 触发服务端重查链上 balance/allowance（强制索引刷新）。
 // V2 改版：原 POST /balance-allowance/update 改成 GET，且用 ?asset_type= 区分 COLLATERAL / CONDITIONAL。
 // amount 参数在 V2 里已无意义（body 不再发），保留签名兼容 V1。
 func (c *accountClientImpl) UpdateBalanceAllowance(amount float64) (*types.BalanceAllowance, error) {
+	return c.UpdateBalanceAllowanceContext(context.Background(), amount)
+}
+
+func (c *accountClientImpl) UpdateBalanceAllowanceContext(ctx context.Context, amount float64) (*types.BalanceAllowance, error) {
 	_ = amount
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -84,11 +93,15 @@ func (c *accountClientImpl) UpdateBalanceAllowance(amount float64) (*types.Balan
 		"asset_type":     "COLLATERAL",
 		"signature_type": strconv.Itoa(int(c.baseClient.signatureType)),
 	}
-	return http.Get[types.BalanceAllowance](c.baseClient.baseURL, internal.UpdateBalanceAllowance, params, http.WithHeaders(headers))
+	return http.GetContext[types.BalanceAllowance](ctx, c.baseClient.baseURL, internal.UpdateBalanceAllowance, params, http.WithHeaders(headers), http.WithService("clob"))
 }
 
 // GetNotifications 获取通知列表
 func (c *accountClientImpl) GetNotifications(limit int, offset int) ([]types.Notification, error) {
+	return c.GetNotificationsContext(context.Background(), limit, offset)
+}
+
+func (c *accountClientImpl) GetNotificationsContext(ctx context.Context, limit int, offset int) ([]types.Notification, error) {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return nil, fmt.Errorf("API credentials not set")
@@ -115,7 +128,7 @@ func (c *accountClientImpl) GetNotifications(limit int, offset int) ([]types.Not
 		return nil, fmt.Errorf("failed to create headers: %w", err)
 	}
 
-	result, err := http.Get[[]types.Notification](c.baseClient.baseURL, internal.GetNotifications, params, http.WithHeaders(headers))
+	result, err := http.GetContext[[]types.Notification](ctx, c.baseClient.baseURL, internal.GetNotifications, params, http.WithHeaders(headers), http.WithService("clob"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get notifications: %w", err)
 	}
@@ -129,6 +142,10 @@ func (c *accountClientImpl) GetNotifications(limit int, offset int) ([]types.Not
 
 // DropNotifications 删除通知
 func (c *accountClientImpl) DropNotifications(notificationIDs []string) error {
+	return c.DropNotificationsContext(context.Background(), notificationIDs)
+}
+
+func (c *accountClientImpl) DropNotificationsContext(ctx context.Context, notificationIDs []string) error {
 	// Validate API credentials
 	if c.baseClient.deriveCreds == nil {
 		return fmt.Errorf("API credentials not set")
@@ -175,6 +192,6 @@ func (c *accountClientImpl) DropNotifications(notificationIDs []string) error {
 	}
 
 	// Execute DELETE request
-	_, err = http.DeleteRaw[map[string]interface{}](c.baseClient.baseURL, internal.DropNotifications, bodyJSON, http.WithHeaders(headers))
+	_, err = http.DeleteRawContext[map[string]interface{}](ctx, c.baseClient.baseURL, internal.DropNotifications, bodyJSON, http.WithHeaders(headers), http.WithService("clob"))
 	return err
 }
