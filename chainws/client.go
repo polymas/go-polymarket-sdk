@@ -1,4 +1,4 @@
-// Package chainws 提供链上 WebSocket 订阅与钱包仓位跟踪（Tracker）：监控地址相关日志与新区块，维护 USDC/token 仓位并对外暴露 GetPositions() 一致 map。
+// Package chainws provides Polygon WebSocket subscriptions and V2 wallet-state tracking.
 package chainws
 
 import (
@@ -24,6 +24,8 @@ var (
 	approvalEventSig = common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925")
 	// TransferSingle(address,address,address,uint256,uint256) ERC1155
 	transferSingleEventSig = common.BytesToHash(crypto.Keccak256([]byte("TransferSingle(address,address,address,uint256,uint256)")))
+	// TransferBatch(address,address,address,uint256[],uint256[]) ERC1155
+	transferBatchEventSig = common.BytesToHash(crypto.Keccak256([]byte("TransferBatch(address,address,address,uint256[],uint256[])")))
 )
 
 // ErrNoWSSURL 未配置 WSS URL 且内置列表为空
@@ -61,21 +63,34 @@ type chainWSClient struct {
 	onLog   func(*ethtypes.Log)
 	onBlock func(blockNumber uint64)
 
-	client       *ethclient.Client
-	subLogsList  []ethereum.Subscription // 可能为多个（按 topic 过滤时），或单个（全量订阅）
-	subHead      ethereum.Subscription
-	logCh        chan ethtypes.Log
-	errCh        chan error // 合并多个 sub.Err()，供 runLogLoop 使用
-	stopChan  chan struct{}
-	stopOnce  sync.Once
-	running   bool
-	runningMu sync.RWMutex
+	client      *ethclient.Client
+	subLogsList []ethereum.Subscription // 可能为多个（按 topic 过滤时），或单个（全量订阅）
+	subHead     ethereum.Subscription
+	logCh       chan ethtypes.Log
+	errCh       chan error // 合并多个 sub.Err()，供 runLogLoop 使用
+	stopChan    chan struct{}
+	stopOnce    sync.Once
+	running     bool
+	runningMu   sync.RWMutex
 
 	reconnectDelay time.Duration
 }
 
+type clientOptions struct {
+	includeLegacy bool
+}
+
+// ClientOption configures chainws subscriptions.
+type ClientOption func(*clientOptions)
+
+// WithLegacyContracts explicitly adds V1 exchanges and the retired V1
+// NegRisk adapter. Current V2 monitoring excludes them by default.
+func WithLegacyContracts() ClientOption {
+	return func(options *clientOptions) { options.includeLegacy = true }
+}
+
 // NewClient 创建链上 WSS 客户端。wssURL 为空时根据 chainID 使用内置 WSS 列表中的第一个。
-func NewClient(chainID types.ChainID, wssURL string) (Client, error) {
+func NewClient(chainID types.ChainID, wssURL string, options ...ClientOption) (Client, error) {
 	if wssURL == "" {
 		if chainID == internal.Amoy {
 			if len(internal.PolygonWSSAmoyList) == 0 {
@@ -89,7 +104,13 @@ func NewClient(chainID types.ChainID, wssURL string) (Client, error) {
 			wssURL = internal.PolygonWSSMainnetList[0]
 		}
 	}
-	contracts := polymarketContractAddresses()
+	opts := &clientOptions{}
+	for _, option := range options {
+		if option != nil {
+			option(opts)
+		}
+	}
+	contracts := contractAddresses(PolygonContractRegistry(opts.includeLegacy))
 	return &chainWSClient{
 		wssURL:         wssURL,
 		contractAddrs:  contracts,
@@ -99,8 +120,8 @@ func NewClient(chainID types.ChainID, wssURL string) (Client, error) {
 }
 
 // NewClientWithAddresses 创建并设置要监控的地址
-func NewClientWithAddresses(chainID types.ChainID, wssURL string, watchAddrs []types.EthAddress) (Client, error) {
-	c, err := NewClient(chainID, wssURL)
+func NewClientWithAddresses(chainID types.ChainID, wssURL string, watchAddrs []types.EthAddress, options ...ClientOption) (Client, error) {
+	c, err := NewClient(chainID, wssURL, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -108,20 +129,8 @@ func NewClientWithAddresses(chainID types.ChainID, wssURL string, watchAddrs []t
 	return c, nil
 }
 
-func polymarketContractAddresses() []common.Address {
-	return []common.Address{
-		common.HexToAddress(internal.PolygonCollateral),
-		common.HexToAddress(internal.PolygonExchange),
-		common.HexToAddress(internal.PolygonNegRiskExchange),
-		common.HexToAddress(internal.PolygonConditionalTokens),
-		common.HexToAddress(internal.PolygonNegRiskAdapter),
-		common.HexToAddress(internal.PolygonProxyFactory),
-	}
-}
-
 // buildTopicFilterQueries 根据监控地址生成「仅推送与这些地址相关」的 FilterQuery 列表，供服务端过滤以降低流量。
-// Transfer/Approval: topic1=from, topic2=to；TransferSingle: topic2=from, topic3=to。需分别订阅 from 侧与 to 侧。
-// 若仅做仓位追踪，可进一步只订阅 Collateral + ConditionalTokens + NegRiskAdapter（见 polymarketContractAddresses）以再减流量。
+// Transfer/Approval: topic1=from, topic2=to；TransferSingle/TransferBatch: topic2=from, topic3=to。
 func (c *chainWSClient) buildTopicFilterQueries(addrs []common.Address) []ethereum.FilterQuery {
 	if len(addrs) == 0 || len(addrs) > maxWatchAddrsForTopicFilter {
 		return nil
@@ -132,12 +141,14 @@ func (c *chainWSClient) buildTopicFilterQueries(addrs []common.Address) []ethere
 	}
 	contracts := c.contractAddrs
 	return []ethereum.FilterQuery{
-		{Addresses: contracts, Topics: [][]common.Hash{{transferEventSig}, addrHashes, nil}},           // Transfer, topic1=from
-		{Addresses: contracts, Topics: [][]common.Hash{{transferEventSig}, nil, addrHashes}},           // Transfer, topic2=to
+		{Addresses: contracts, Topics: [][]common.Hash{{transferEventSig}, addrHashes, nil}},            // Transfer, topic1=from
+		{Addresses: contracts, Topics: [][]common.Hash{{transferEventSig}, nil, addrHashes}},            // Transfer, topic2=to
 		{Addresses: contracts, Topics: [][]common.Hash{{approvalEventSig}, addrHashes, nil}},            // Approval, topic1=owner
-		{Addresses: contracts, Topics: [][]common.Hash{{approvalEventSig}, nil, addrHashes}},           // Approval, topic2=spender
+		{Addresses: contracts, Topics: [][]common.Hash{{approvalEventSig}, nil, addrHashes}},            // Approval, topic2=spender
 		{Addresses: contracts, Topics: [][]common.Hash{{transferSingleEventSig}, nil, addrHashes, nil}}, // TransferSingle, topic2=from
 		{Addresses: contracts, Topics: [][]common.Hash{{transferSingleEventSig}, nil, nil, addrHashes}}, // TransferSingle, topic3=to
+		{Addresses: contracts, Topics: [][]common.Hash{{transferBatchEventSig}, nil, addrHashes, nil}},  // TransferBatch, topic2=from
+		{Addresses: contracts, Topics: [][]common.Hash{{transferBatchEventSig}, nil, nil, addrHashes}},  // TransferBatch, topic3=to
 	}
 }
 
@@ -191,7 +202,7 @@ func (c *chainWSClient) isLogRelatedToWatchAddress(log *ethtypes.Log) bool {
 			}
 		}
 		return false
-	case transferSingleEventSig:
+	case transferSingleEventSig, transferBatchEventSig:
 		// TransferSingle: topic2 = from, topic3 = to (indexed)
 		for _, addr := range addrs {
 			addrHash := common.BytesToHash(common.LeftPadBytes(addr.Bytes(), 32))

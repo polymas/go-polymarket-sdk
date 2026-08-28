@@ -629,6 +629,14 @@ defer container.Close()
 
 所有客户端都是并发安全的，可以在多个 goroutine 中安全使用。
 
+### 5. V2 链上余额跟踪
+
+`chainws.Tracker` 分别维护 pUSD、USDC.e 和 ERC-1155 outcome token，分别以
+`chainws.PositionKeyPUSD`、`chainws.PositionKeyUSDCE` 和十进制 token ID 为 key。
+默认订阅当前 V2 合约；只有历史监控需要向 `chainws.NewClient` 传入
+`chainws.WithLegacyContracts()`。如果 `NeedsReconcile()` 返回 true，说明收到
+removed log/reorg，应调用 `Reconcile(ctx)` 从 RPC 快照恢复后再使用余额。
+
 ## 🧪 测试
 
 运行测试：

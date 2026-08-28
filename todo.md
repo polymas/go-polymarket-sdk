@@ -443,17 +443,17 @@
 - [ ] 每一步都可重复执行且幂等；失败后可从链上/Relayer 状态恢复。
 - [ ] 文档明确 EOA、legacy proxy、Safe、Deposit Wallet 的适用方法。
 
-### [ ] P1-10：更新 `chainws` 的当前合约监听集合和余额模型
+### [x] P1-10：更新 `chainws` 的当前合约监听集合和余额模型
 
 当前 `chainws.polymarketContractAddresses()` 仍监听 legacy Exchange、legacy Neg Risk Exchange、USDC.e 和已退役 Neg Risk Adapter，没有加入 V2 exchanges、pUSD、Collateral Onramp/Offramp。
 
 风险：Tracker 会漏掉当前 V2 交易/余额变化，或者继续把已退役合约当作主要数据源；`GetPositions` 结果可能长期不刷新。
 
-- [ ] 按官方 Contracts 文档建立带版本和用途的合约 registry，不再手写一组无版本地址。
-- [ ] 默认监听 V2 exchanges、CTF、pUSD 和当前 adapters；legacy 监听必须显式 opt-in。
-- [ ] 区分 USDC.e、pUSD 和 ERC-1155 position balances，不能合并成含义不明的“USDC/token”。
-- [ ] 处理 removed logs/reorg，并提供从 RPC 快照重新对账的恢复路径。
-- [ ] 用真实交易 receipt 的 logs 做 replay test，验证当前买入、卖出、split、merge、redeem、wrap/unwrap。
+- [x] 按 2026-08-28 官方 `ts-sdk`/`py-sdk` production config 建立带版本和用途的 Polygon contract registry；地址集中来自 `internal`，`chainws` 不再维护另一组散落常量。
+- [x] 默认监听 V2 exchanges、CTF、pUSD、USDC.e、Onramp/Offramp、当前 CTF adapters 和 AutoRedeem operator；V1 exchanges/retired adapter 仅通过 `WithLegacyContracts()` 显式 opt-in。
+- [x] `Tracker` 分开维护 pUSD、USDC.e 和 ERC-1155 position，新增 `PositionKeyPUSD`/`PositionKeyUSDCE`；旧 `PositionKeyUSDC` 仅作为 USDC.e 的 deprecated source-compatible alias。
+- [x] 补齐 `TransferBatch` 订阅和严格 ABI 解码；removed log 先反向撤销增量并设置 `NeedsReconcile`，调用方可用 `Reconcile(ctx)` 通过 RPC 精确读取 pUSD、USDC.e、已发现 token 的链上余额并原子替换快照。
+- [x] replay tests 使用 Polygon 主网真实 receipt logs：BUY `0xb193…e2ef`、SELL `0xda79…86d3`、split `0x4c6d…3c1d`、merge `0x08c1…4401`、redeem `0x80b7…047d`、wrap `0xde01…906d`、unwrap `0x4b68…4f5c`；另以公开 RPC 重新读取完整 receipts，确认当前 V2 地址、方向和 6 位金额。
 
 ---
 

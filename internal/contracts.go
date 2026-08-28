@@ -73,10 +73,10 @@ const (
 	// PolymarketAutoClaimer：Polymarket V2 后端自动 redeem 服务的合约地址。
 	// 用户通过 CTF.setApprovalForAll(PolymarketAutoClaimer, true/false) 开/关自动 claim。
 	// 开启后 Polymarket 服务在市场结算后自动把赢家仓位换成 pUSD 返给用户 Safe。
-	// 来源：从前端 SAFE setApprovalForAll(operator, true) 的 calldata 反推。
-	PolymarketAutoClaimer = "0xf3cFb6A6EbfEB51876289Eb235719eb1c65252b0"
+	// 来源：官方 V2 SDK production config，并以 Polygon 主网 redeem receipt 复核。
+	PolymarketAutoClaimer = "0xa1200000d0002264C9a1698e001292D00E1b00af"
 
-	// PolymarketAutoClaimerDeprecated：早期 V1 试验地址，前端已弃用。
+	// PolymarketAutoClaimerDeprecated：上一版前端使用的 operator，当前 SDK 已弃用。
 	// 留作历史标记，便于排查老 Safe 上的残留 approval。
-	PolymarketAutoClaimerDeprecated = "0x05Cd9922a5D37faE921fc5DEe280A9dbc4C3B393"
+	PolymarketAutoClaimerDeprecated = "0xf3cFb6A6EbfEB51876289Eb235719eb1c65252b0"
 )

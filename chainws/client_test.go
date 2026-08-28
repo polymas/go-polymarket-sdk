@@ -216,7 +216,7 @@ func TestMonitorAddress_USDCAndTokenChanges(t *testing.T) {
 		switch kind {
 		case EventTransfer:
 			info := ParseTransfer(log)
-			if info == nil || info.ContractName != "USDC" {
+			if info == nil || (info.ContractName != "USDC.e" && info.ContractName != "pUSD") {
 				return
 			}
 			amount := usdcValue(info.Value)
@@ -287,10 +287,14 @@ func TestTransferSingleEventSig(t *testing.T) {
 
 // mockBalanceReader 测试用：返回固定 USDC 与 token 余额
 type mockBalanceReader struct {
+	PUSD   float64
 	USDC   float64
 	Tokens map[string]float64
 }
 
+func (m mockBalanceReader) GetCollateralBalance(_ types.EthAddress) (float64, error) {
+	return m.PUSD, nil
+}
 func (m mockBalanceReader) GetUSDCBalance(_ types.EthAddress) (float64, error) {
 	return m.USDC, nil
 }
@@ -317,11 +321,18 @@ func newRPCBalanceReader(t *testing.T, rpcURL string) BalanceReader {
 }
 
 func (r *rpcBalanceReader) GetUSDCBalance(addr types.EthAddress) (float64, error) {
-	usdcAddr := common.HexToAddress(internal.PolygonCollateral)
+	return r.getERC20Balance(addr, common.HexToAddress(internal.PolygonCollateral))
+}
+
+func (r *rpcBalanceReader) GetCollateralBalance(addr types.EthAddress) (float64, error) {
+	return r.getERC20Balance(addr, common.HexToAddress(internal.PolygonPUSD))
+}
+
+func (r *rpcBalanceReader) getERC20Balance(addr types.EthAddress, tokenAddr common.Address) (float64, error) {
 	balanceOfABI := `[{"constant":true,"inputs":[{"name":"account","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]`
 	parsed, _ := abi.JSON(strings.NewReader(balanceOfABI))
 	packed, _ := parsed.Pack("balanceOf", common.HexToAddress(string(addr)))
-	result, err := r.client.CallContract(context.Background(), ethereum.CallMsg{To: &usdcAddr, Data: packed}, nil)
+	result, err := r.client.CallContract(context.Background(), ethereum.CallMsg{To: &tokenAddr, Data: packed}, nil)
 	if err != nil {
 		return 0, err
 	}

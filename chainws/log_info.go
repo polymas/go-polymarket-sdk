@@ -1,6 +1,7 @@
 package chainws
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -17,6 +18,7 @@ const (
 	EventTransfer
 	EventApproval
 	EventTransferSingle // ERC1155
+	EventTransferBatch  // ERC1155
 )
 
 // EventInfo 从 log 解析出的事件摘要（Transfer/Approval 通用字段）
@@ -34,22 +36,15 @@ type EventInfo struct {
 
 // ContractNameByAddress 返回 Polymarket 合约地址对应的含义（主网）
 func ContractNameByAddress(addr common.Address) string {
-	switch addr.Hex() {
-	case internal.PolygonCollateral:
-		return "USDC"
-	case internal.PolygonExchange:
-		return "Exchange"
-	case internal.PolygonNegRiskExchange:
-		return "NegRiskExchange"
-	case internal.PolygonConditionalTokens:
-		return "ConditionalTokens"
-	case internal.PolygonNegRiskAdapter:
-		return "NegRiskAdapter"
-	case internal.PolygonProxyFactory:
-		return "ProxyFactory"
-	default:
-		return ""
+	for _, contract := range PolygonContractRegistry(true) {
+		if contract.Address == addr {
+			return contract.Name
+		}
 	}
+	if addr == common.HexToAddress(internal.PolygonProxyFactory) {
+		return "ProxyFactory"
+	}
+	return ""
 }
 
 // EventKindOf 根据 log.Topics[0] 判断事件类型
@@ -64,9 +59,85 @@ func EventKindOf(log *ethtypes.Log) EventKind {
 		return EventApproval
 	case transferSingleEventSig:
 		return EventTransferSingle
+	case transferBatchEventSig:
+		return EventTransferBatch
 	default:
 		return EventUnknown
 	}
+}
+
+// TransferBatchInfo is an ERC-1155 TransferBatch event.
+type TransferBatchInfo struct {
+	Operator     common.Address
+	From         common.Address
+	To           common.Address
+	TokenIDs     []*big.Int
+	Values       []*big.Int
+	BlockNumber  uint64
+	TxHash       common.Hash
+	LogIndex     uint
+	ContractName string
+}
+
+// ParseTransferBatch parses TransferBatch(operator,from,to,ids,values).
+func ParseTransferBatch(log *ethtypes.Log) *TransferBatchInfo {
+	if EventKindOf(log) != EventTransferBatch || len(log.Topics) < 4 {
+		return nil
+	}
+	ids, values, err := decodeUint256Arrays(log.Data)
+	if err != nil || len(ids) != len(values) {
+		return nil
+	}
+	return &TransferBatchInfo{
+		Operator:     common.BytesToAddress(log.Topics[1].Bytes()),
+		From:         common.BytesToAddress(log.Topics[2].Bytes()),
+		To:           common.BytesToAddress(log.Topics[3].Bytes()),
+		TokenIDs:     ids,
+		Values:       values,
+		BlockNumber:  log.BlockNumber,
+		TxHash:       log.TxHash,
+		LogIndex:     log.Index,
+		ContractName: ContractNameByAddress(log.Address),
+	}
+}
+
+func decodeUint256Arrays(data []byte) ([]*big.Int, []*big.Int, error) {
+	if len(data) < 64 {
+		return nil, nil, fmt.Errorf("transfer batch data is too short")
+	}
+	decode := func(offsetWord []byte) ([]*big.Int, error) {
+		offset := new(big.Int).SetBytes(offsetWord)
+		if !offset.IsUint64() {
+			return nil, fmt.Errorf("array offset overflows uint64")
+		}
+		start := offset.Uint64()
+		if start > uint64(len(data)-32) {
+			return nil, fmt.Errorf("array offset outside data")
+		}
+		countInt := new(big.Int).SetBytes(data[start : start+32])
+		if !countInt.IsUint64() {
+			return nil, fmt.Errorf("array length overflows uint64")
+		}
+		count := countInt.Uint64()
+		if count > (uint64(len(data))-start-32)/32 {
+			return nil, fmt.Errorf("array exceeds data")
+		}
+		values := make([]*big.Int, count)
+		for i := uint64(0); i < count; i++ {
+			from := start + 32 + i*32
+			values[i] = new(big.Int).SetBytes(data[from : from+32])
+		}
+		return values, nil
+	}
+	ids, err := decode(data[:32])
+	if err != nil {
+		return nil, nil, err
+	}
+	values, err := decode(data[32:64])
+	if err != nil {
+		return nil, nil, err
+	}
+	return ids, values, nil
 }
 
 // ParseTransfer 从 log 解析 Transfer(address,address,uint256)。若非 Transfer 事件返回 nil。

@@ -1,4 +1,4 @@
-// 钱包仓位跟踪：初始化传入钱包地址，拉取 token/初始仓位后通过 WSS 持续同步；对外仅暴露 GetPositions() 返回一致性 map。
+// 钱包仓位跟踪：用 RPC/Data API 快照初始化，再通过 WSS 增量同步当前 V2 资产。
 
 package chainws
 
@@ -14,28 +14,37 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
-// PositionKeyUSDC 表示 USDC 仓位的 map key（与 CT 一致，使用 tokenID：此处为 Collateral 合约地址）
-var PositionKeyUSDC = internal.PolygonCollateral
+var (
+	// PositionKeyPUSD is the current V2 trading collateral balance key.
+	PositionKeyPUSD = internal.PolygonPUSD
+	// PositionKeyUSDCE is the bridged USDC.e balance key.
+	PositionKeyUSDCE = internal.PolygonCollateral
+	// PositionKeyUSDC is retained for source compatibility and means USDC.e.
+	// Deprecated: use PositionKeyUSDCE.
+	PositionKeyUSDC = PositionKeyUSDCE
+)
 
-// BalanceReader 读取链上旧 USDC.e 与 CT 余额。若用 web3.Client 可实现：GetUSDCBalance(addr)=client.GetUSDCBalance(addr)，GetTokenBalance(addr, tokenID)=client.GetTokenBalance(tokenID, addr)。
-// V2 交易抵押物监控应使用 web3.Client.GetCollateralBalance（pUSD），不应将本 legacy reader 当作下单余额。
+// BalanceReader reads exact on-chain balances used to reconcile the tracker.
 type BalanceReader interface {
+	GetCollateralBalance(addr types.EthAddress) (float64, error)
 	GetUSDCBalance(addr types.EthAddress) (float64, error)
 	GetTokenBalance(addr types.EthAddress, tokenID string) (float64, error)
 }
 
-// Tracker 维护指定钱包的 USDC + token 仓位：启动时拉取初值，WSS 增量更新；仅通过 GetPositions 暴露一致快照。
+// Tracker maintains separate pUSD, USDC.e and ERC-1155 position balances.
 type Tracker struct {
-	watchAddr types.EthAddress
-	reader    BalanceReader
+	watchAddr  types.EthAddress
+	reader     BalanceReader
 	dataClient data.Client
-	ws        Client
+	ws         Client
 
-	mu            sync.RWMutex
-	usdcBalance   float64
-	tokenBalances map[string]float64
-	snapshot      map[string]float64 // 最近一次拷贝的 map，无变更时直接返回同一引用
-	dirty         bool               // 有写后为 true，下次 GetPositions 时拷贝并置 false
+	mu             sync.RWMutex
+	pusdBalance    float64
+	usdceBalance   float64
+	tokenBalances  map[string]float64
+	snapshot       map[string]float64 // 最近一次拷贝的 map，无变更时直接返回同一引用
+	dirty          bool               // 有写后为 true，下次 GetPositions 时拷贝并置 false
+	needsReconcile bool
 }
 
 // NewTracker 创建跟踪器，传入钱包地址及用于拉取初值的 reader、dataClient；chainID/wssURL 用于 WSS。
@@ -53,79 +62,158 @@ func NewTracker(
 	return &Tracker{
 		watchAddr:     watchAddr,
 		reader:        reader,
-		dataClient:   dataClient,
+		dataClient:    dataClient,
 		ws:            ws,
 		tokenBalances: make(map[string]float64),
 	}, nil
 }
 
-// Start 拉取初始仓位后启动 WSS，持续根据链上事件更新仓位。
+// Start reconciles a full snapshot, then starts applying WSS deltas.
 func (t *Tracker) Start(ctx context.Context) error {
-	usdc, err := t.reader.GetUSDCBalance(t.watchAddr)
+	if err := t.Reconcile(ctx); err != nil {
+		return err
+	}
+	t.ws.SetOnLog(t.applyLog)
+	return t.ws.Start(ctx)
+}
+
+// Reconcile replaces incremental state with an authoritative RPC/Data API snapshot.
+// Call it after NeedsReconcile reports true, for example after a removed log/reorg.
+func (t *Tracker) Reconcile(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	pusd, err := t.reader.GetCollateralBalance(t.watchAddr)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	usdce, err := t.reader.GetUSDCBalance(t.watchAddr)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	positions, err := t.dataClient.GetPositions(t.watchAddr)
 	if err != nil {
 		return err
 	}
-	t.mu.Lock()
-	t.usdcBalance = usdc
-	for _, p := range positions {
-		if p.TokenID != "" && p.Size > 0 {
-			t.tokenBalances[p.TokenID] = p.Size
+	tokenIDs := make(map[string]struct{}, len(positions))
+	for _, position := range positions {
+		if position.TokenID != "" {
+			tokenIDs[position.TokenID] = struct{}{}
 		}
 	}
+	t.mu.RLock()
+	for tokenID := range t.tokenBalances {
+		tokenIDs[tokenID] = struct{}{}
+	}
+	t.mu.RUnlock()
+	tokens := make(map[string]float64, len(tokenIDs))
+	for tokenID := range tokenIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		balance, err := t.reader.GetTokenBalance(t.watchAddr, tokenID)
+		if err != nil {
+			return err
+		}
+		if balance > 0 {
+			tokens[tokenID] = balance
+		}
+	}
+	t.mu.Lock()
+	t.pusdBalance = pusd
+	t.usdceBalance = usdce
+	t.tokenBalances = tokens
+	t.needsReconcile = false
 	t.dirty = true
 	t.mu.Unlock()
+	return nil
+}
 
-	watchCommon := common.HexToAddress(string(t.watchAddr))
-	t.ws.SetOnLog(func(log *ethtypes.Log) {
-		amount := float64(0)
-		tokenID := ""
-		switch EventKindOf(log) {
-		case EventTransfer:
-			info := ParseTransfer(log)
-			if info == nil || info.ContractName != "USDC" {
-				return
-			}
-			amount = rawToAmount(info.Value)
-			if info.To != watchCommon && info.From != watchCommon {
-				return
-			}
-			t.mu.Lock()
-			if info.To == watchCommon {
-				t.usdcBalance += amount
-			} else {
-				t.usdcBalance -= amount
-			}
-			t.dirty = true
-			t.mu.Unlock()
-			return
-		case EventTransferSingle:
-			info := ParseTransferSingle(log)
-			if info == nil {
-				return
-			}
-			amount = rawToAmount(info.Value)
-			tokenID = info.TokenID.String()
-			if info.To != watchCommon && info.From != watchCommon {
-				return
-			}
-			t.mu.Lock()
-			if info.To == watchCommon {
-				t.tokenBalances[tokenID] += amount
-			} else {
-				t.tokenBalances[tokenID] -= amount
-			}
-			if t.tokenBalances[tokenID] <= 0 {
-				delete(t.tokenBalances, tokenID)
-			}
-			t.dirty = true
-			t.mu.Unlock()
+// NeedsReconcile reports whether a removed log/reorg was observed.
+func (t *Tracker) NeedsReconcile() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.needsReconcile
+}
+
+func (t *Tracker) applyLog(log *ethtypes.Log) {
+	watch := common.HexToAddress(string(t.watchAddr))
+	direction := func(from, to common.Address) float64 {
+		delta := float64(0)
+		if to == watch {
+			delta++
 		}
-	})
-	return t.ws.Start(ctx)
+		if from == watch {
+			delta--
+		}
+		if log.Removed {
+			delta = -delta
+		}
+		return delta
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	changed := false
+	switch EventKindOf(log) {
+	case EventTransfer:
+		info := ParseTransfer(log)
+		if info == nil {
+			return
+		}
+		delta := direction(info.From, info.To) * rawToAmount(info.Value)
+		if delta == 0 {
+			return
+		}
+		switch info.Contract {
+		case common.HexToAddress(internal.PolygonPUSD):
+			t.pusdBalance += delta
+			changed = true
+		case common.HexToAddress(internal.PolygonCollateral):
+			t.usdceBalance += delta
+			changed = true
+		}
+	case EventTransferSingle:
+		info := ParseTransferSingle(log)
+		if info == nil || log.Address != common.HexToAddress(internal.PolygonConditionalTokens) {
+			return
+		}
+		delta := direction(info.From, info.To) * rawToAmount(info.Value)
+		changed = t.applyTokenDelta(info.TokenID.String(), delta)
+	case EventTransferBatch:
+		info := ParseTransferBatch(log)
+		if info == nil || log.Address != common.HexToAddress(internal.PolygonConditionalTokens) {
+			return
+		}
+		factor := direction(info.From, info.To)
+		for i, tokenID := range info.TokenIDs {
+			if t.applyTokenDelta(tokenID.String(), factor*rawToAmount(info.Values[i])) {
+				changed = true
+			}
+		}
+	}
+	if changed {
+		t.dirty = true
+	}
+	if log.Removed {
+		t.needsReconcile = true
+	}
+}
+
+func (t *Tracker) applyTokenDelta(tokenID string, delta float64) bool {
+	if delta == 0 {
+		return false
+	}
+	t.tokenBalances[tokenID] += delta
+	if t.tokenBalances[tokenID] <= 0 {
+		delete(t.tokenBalances, tokenID)
+	}
+	return true
 }
 
 // Stop 停止 WSS，不再更新仓位。
@@ -133,7 +221,8 @@ func (t *Tracker) Stop() {
 	t.ws.Stop()
 }
 
-// GetPositions 返回仓位 map 的拷贝；仅当内部数据更新时才做新拷贝，未更新时返回与上次相同的 map 引用。key 均为 tokenID（USDC 为 Collateral 合约地址，CT 为 outcome token ID）。请勿修改返回的 map。
+// GetPositions returns pUSD, USDC.e and outcome balances keyed by their contract/token IDs.
+// Do not modify the returned map.
 func (t *Tracker) GetPositions() map[string]float64 {
 	t.mu.RLock()
 	if !t.dirty && t.snapshot != nil {
@@ -149,8 +238,9 @@ func (t *Tracker) GetPositions() map[string]float64 {
 		t.mu.Unlock()
 		return m
 	}
-	out := make(map[string]float64, 1+len(t.tokenBalances))
-	out[PositionKeyUSDC] = t.usdcBalance
+	out := make(map[string]float64, 2+len(t.tokenBalances))
+	out[PositionKeyPUSD] = t.pusdBalance
+	out[PositionKeyUSDCE] = t.usdceBalance
 	for k, v := range t.tokenBalances {
 		out[k] = v
 	}
