@@ -70,19 +70,40 @@ type V2SignedOrder struct {
 //   - 3     (POLY_1271 / CWIA)         : solady ERC-1271 嵌套签名，~326 字节
 //     包含 inner_sig || appDomainSep || contents_hash
 //     || ORDER_TYPE_STRING || uint16(len)
+//
+// Deprecated: 新代码请使用 BuildSignedV2OrderWithSigner，避免把裸私钥传过订单构建边界。
 func BuildSignedV2Order(
 	privateKey *ecdsa.PrivateKey,
 	data *V2OrderData,
 	chainID *big.Int,
 	exchangeAddress common.Address,
 ) (*V2SignedOrder, error) {
+	return BuildSignedV2OrderWithSigner(
+		privateKeyRecoverySigner{privateKey: privateKey},
+		data,
+		chainID,
+		exchangeAddress,
+	)
+}
+
+// BuildSignedV2OrderWithSigner 使用受限签名器构建并签署 V2 订单。
+// 调用方只需提供摘要签名能力，订单构建过程不会取得或保存底层私钥。
+func BuildSignedV2OrderWithSigner(
+	signer RecoverySigner,
+	data *V2OrderData,
+	chainID *big.Int,
+	exchangeAddress common.Address,
+) (*V2SignedOrder, error) {
+	if signer == nil {
+		return nil, fmt.Errorf("order signer is nil")
+	}
 	order, err := buildV2Order(data)
 	if err != nil {
 		return nil, err
 	}
 
 	if order.SignatureType == types.Poly1271SignatureType {
-		signature, err := signV2OrderPoly1271(order, chainID, exchangeAddress, privateKey)
+		signature, err := signV2OrderPoly1271(order, chainID, exchangeAddress, signer)
 		if err != nil {
 			return nil, err
 		}
@@ -94,13 +115,12 @@ func BuildSignedV2Order(
 		return nil, err
 	}
 
-	signature, err := crypto.Sign(digest.Bytes(), privateKey)
+	signature, err := signer.SignWithRecovery(digest)
 	if err != nil {
 		return nil, fmt.Errorf("sign v2 order: %w", err)
 	}
-	// Normalize v to {27, 28} — matches on-chain ecrecover and V1 behavior.
-	if len(signature) == 65 && signature[64] < 27 {
-		signature[64] += 27
+	if err := validateRecoverySignature(signature); err != nil {
+		return nil, fmt.Errorf("sign v2 order: %w", err)
 	}
 
 	return &V2SignedOrder{V2Order: *order, Signature: signature}, nil
@@ -114,7 +134,7 @@ func signV2OrderPoly1271(
 	o *V2Order,
 	chainID *big.Int,
 	exchangeAddress common.Address,
-	privateKey *ecdsa.PrivateKey,
+	signer RecoverySigner,
 ) ([]byte, error) {
 	// 1) 外层 app domain separator = CTF Exchange V2 domain
 	appDomain, err := buildV2DomainSeparator(chainID, exchangeAddress)
@@ -163,12 +183,12 @@ func signV2OrderPoly1271(
 	digest := crypto.Keccak256Hash(buf)
 
 	// 5) inner signature = ECDSA(digest)
-	innerSig, err := crypto.Sign(digest.Bytes(), privateKey)
+	innerSig, err := signer.SignWithRecovery(digest)
 	if err != nil {
 		return nil, fmt.Errorf("sign POLY_1271 digest: %w", err)
 	}
-	if len(innerSig) == 65 && innerSig[64] < 27 {
-		innerSig[64] += 27
+	if err := validateRecoverySignature(innerSig); err != nil {
+		return nil, fmt.Errorf("sign POLY_1271 digest: %w", err)
 	}
 
 	// 6) 拼最终签名：inner_sig || appDomain || contents_hash || typeStr || uint16(len)
@@ -183,6 +203,34 @@ func signV2OrderPoly1271(
 		byte(len(typeStr)),
 	)
 	return out, nil
+}
+
+type privateKeyRecoverySigner struct {
+	privateKey *ecdsa.PrivateKey
+}
+
+func (s privateKeyRecoverySigner) SignWithRecovery(messageHash common.Hash) ([]byte, error) {
+	if s.privateKey == nil {
+		return nil, fmt.Errorf("signing key is nil")
+	}
+	signature, err := crypto.Sign(messageHash.Bytes(), s.privateKey)
+	if err != nil {
+		return nil, err
+	}
+	if signature[64] < 27 {
+		signature[64] += 27
+	}
+	return signature, nil
+}
+
+func validateRecoverySignature(signature []byte) error {
+	if len(signature) != 65 {
+		return fmt.Errorf("invalid recovery signature length %d", len(signature))
+	}
+	if signature[64] != 27 && signature[64] != 28 {
+		return fmt.Errorf("invalid recovery id %d", signature[64])
+	}
+	return nil
 }
 
 // V2OrderDigest returns the EIP-712 digest that gets signed (0x1901 || domain || structHash).

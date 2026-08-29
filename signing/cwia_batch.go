@@ -43,9 +43,9 @@ type CWIABatch struct {
 //	BATCH_TYPESTR = "Batch(address wallet,uint256 nonce,uint256 deadline,Call[] calls)Call(...)"
 //	BATCH_TYPEHASH = keccak256(BATCH_TYPESTR)
 var (
-	cwiaCallTypeHash  = crypto.Keccak256Hash([]byte("Call(address target,uint256 value,bytes data)"))
-	cwiaBatchTypeStr  = []byte("Batch(address wallet,uint256 nonce,uint256 deadline,Call[] calls)Call(address target,uint256 value,bytes data)")
-	cwiaBatchTypeHash = crypto.Keccak256Hash(cwiaBatchTypeStr)
+	cwiaCallTypeHash   = crypto.Keccak256Hash([]byte("Call(address target,uint256 value,bytes data)"))
+	cwiaBatchTypeStr   = []byte("Batch(address wallet,uint256 nonce,uint256 deadline,Call[] calls)Call(address target,uint256 value,bytes data)")
+	cwiaBatchTypeHash  = crypto.Keccak256Hash(cwiaBatchTypeStr)
 	cwiaDomainTypeHash = crypto.Keccak256Hash([]byte(
 		"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))
 	cwiaDomainName    = crypto.Keccak256Hash([]byte("DepositWallet"))
@@ -128,21 +128,27 @@ func CWIABatchDigest(chainID *big.Int, b CWIABatch) common.Hash {
 //
 // solady 的 ERC1271 在 isValidSignature 内部 ecrecover 拿出 EOA 后会检查
 // `== owner()`，所以签名者必须是 wallet.owner()。
+//
+// Deprecated: 新代码请使用 SignCWIABatchWithSigner，避免传递裸私钥。
 func SignCWIABatch(privKey *ecdsa.PrivateKey, chainID *big.Int, b CWIABatch) ([]byte, error) {
-	if privKey == nil {
-		return nil, fmt.Errorf("signing key is nil")
+	return SignCWIABatchWithSigner(privateKeyRecoverySigner{privateKey: privKey}, chainID, b)
+}
+
+// SignCWIABatchWithSigner 使用受限签名器签署 Deposit Wallet Batch。
+func SignCWIABatchWithSigner(signer RecoverySigner, chainID *big.Int, b CWIABatch) ([]byte, error) {
+	if signer == nil {
+		return nil, fmt.Errorf("batch signer is nil")
 	}
 	if len(b.Calls) == 0 {
 		return nil, fmt.Errorf("batch must contain at least one call")
 	}
 	digest := CWIABatchDigest(chainID, b)
-	sig, err := crypto.Sign(digest.Bytes(), privKey)
+	sig, err := signer.SignWithRecovery(digest)
 	if err != nil {
 		return nil, fmt.Errorf("ecdsa sign failed: %w", err)
 	}
-	// go-ethereum 返回 v ∈ {0,1}，链上 ecrecover 期望 {27,28}
-	if sig[64] < 27 {
-		sig[64] += 27
+	if err := validateRecoverySignature(sig); err != nil {
+		return nil, fmt.Errorf("ecdsa sign failed: %w", err)
 	}
 	return sig, nil
 }

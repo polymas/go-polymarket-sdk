@@ -22,7 +22,6 @@ package internal
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -38,7 +37,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
-	ethcrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/polymas/go-polymarket-sdk/signing"
 )
 
 const (
@@ -77,15 +77,18 @@ func (k V2RelayerKey) Headers() map[string]string {
 
 // EnsureV2RelayerKey 按 cache → SIWE/list → SIWE/mint 顺序拿一把可用的 V2 key。
 //
-// priv 必须能 personal_sign（用于 SIWE login），即调用者的 EOA 私钥。
+// signer 必须能 personal_sign（用于 SIWE login），但无需向本包暴露私钥。
 // 同一 EOA 在进程内会被互斥串行化，避免并发首次 SIWE 时重复 mint。
 //
 // 入参 cachePath 为 "" 时禁用缓存（每次都跑 SIWE）。
-func EnsureV2RelayerKey(ctx context.Context, priv *ecdsa.PrivateKey, cachePath string) (*V2RelayerKey, error) {
-	if priv == nil {
-		return nil, fmt.Errorf("priv key required")
+func EnsureV2RelayerKey(ctx context.Context, signer signing.AddressedSigner, cachePath string) (*V2RelayerKey, error) {
+	if signer == nil {
+		return nil, fmt.Errorf("signer required")
 	}
-	eoa := ethcrypto.PubkeyToAddress(priv.PublicKey).Hex()
+	eoa := signer.Address().String()
+	if !common.IsHexAddress(eoa) {
+		return nil, fmt.Errorf("invalid signer address %q", eoa)
+	}
 
 	if cachePath == "" {
 		cachePath = DefaultV2KeyCachePath(eoa)
@@ -105,7 +108,7 @@ func EnsureV2RelayerKey(ctx context.Context, priv *ecdsa.PrivateKey, cachePath s
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Timeout: 30 * time.Second}
 
-	if err := siweLogin(ctx, c, priv, eoa); err != nil {
+	if err := siweLogin(ctx, c, signer, eoa); err != nil {
 		return nil, fmt.Errorf("siwe login: %w", err)
 	}
 
@@ -247,7 +250,7 @@ type siweMsg struct {
 	ExpirationTime string `json:"expirationTime"`
 }
 
-func siweLogin(ctx context.Context, c *http.Client, priv *ecdsa.PrivateKey, eoaHex string) error {
+func siweLogin(ctx context.Context, c *http.Client, signer signing.RecoverySigner, eoaHex string) error {
 	// 1) nonce
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, GammaAPIURL+"/nonce", nil)
 	req.Header.Set("Accept", "application/json")
@@ -282,12 +285,12 @@ func siweLogin(ctx context.Context, c *http.Client, priv *ecdsa.PrivateKey, eoaH
 	}
 	plain := siweString(msg)
 	hash := accounts.TextHash([]byte(plain))
-	sig, err := ethcrypto.Sign(hash, priv)
+	sig, err := signer.SignWithRecovery(common.BytesToHash(hash))
 	if err != nil {
 		return fmt.Errorf("personal_sign: %w", err)
 	}
-	if sig[64] < 27 {
-		sig[64] += 27
+	if len(sig) != 65 || (sig[64] != 27 && sig[64] != 28) {
+		return fmt.Errorf("personal_sign: invalid recovery signature")
 	}
 	jsonFields, _ := json.Marshal(msg)
 	bearer := base64.StdEncoding.EncodeToString([]byte(string(jsonFields) + ":::0x" + hex.EncodeToString(sig)))

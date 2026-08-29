@@ -3,6 +3,7 @@ package web3
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/signing"
@@ -17,9 +18,11 @@ import (
 //   - L2 POLY_BUILDER_* HMAC（已弃用）：传 builderCreds 走旧协议，仅作 fallback。
 //   - L1 EIP-712 (POLY_*)：无 creds 时走 CLOB ClobAuth 派生头，给非-relayer 用途。
 type LocalSigner struct {
+	mu           sync.RWMutex
 	signer       *signing.Signer
 	builderCreds *types.ApiCreds
 	v2Key        *internal.V2RelayerKey
+	closed       bool
 }
 
 // NewLocalSigner creates a new LocalSigner instance
@@ -52,6 +55,20 @@ func NewLocalSigner(signer *signing.Signer, builderCreds *types.ApiCreds) *Local
 // Errors:
 //   - Returns error if payload format is incorrect
 func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]string, error) {
+	ls.mu.RLock()
+	if ls.closed {
+		ls.mu.RUnlock()
+		return nil, signing.ErrSignerClosed
+	}
+	signer := ls.signer
+	builderCreds := ls.builderCreds
+	var v2Key *internal.V2RelayerKey
+	if ls.v2Key != nil {
+		copyKey := *ls.v2Key
+		v2Key = &copyKey
+	}
+	ls.mu.RUnlock()
+
 	// Validate payload format
 	if payload == nil {
 		return nil, fmt.Errorf("payload must not be nil")
@@ -91,18 +108,18 @@ func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]s
 	}
 
 	// V2 优先：注入后直接返回明文双头，无 HMAC 无私钥。
-	if ls.v2Key != nil && ls.v2Key.Key != "" {
-		return ls.v2Key.Headers(), nil
+	if v2Key != nil && v2Key.Key != "" {
+		return v2Key.Headers(), nil
 	}
 
 	// Relayer uses POLY_BUILDER_* HMAC headers when creds are present,
 	// otherwise falls back to Level 1 EIP-712 signing with the private key.
-	if ls.builderCreds != nil {
+	if builderCreds != nil {
 		var body interface{}
 		if requestArgs.Body != nil {
 			body = string(*requestArgs.Body)
 		}
-		headers, err := internal.CreateRelayerHeaders(ls.builderCreds, requestArgs, body)
+		headers, err := internal.CreateRelayerHeaders(builderCreds, requestArgs, body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create relayer headers: %w", err)
 		}
@@ -110,7 +127,7 @@ func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]s
 	}
 
 	var nonce *int
-	headers, err := internal.CreateLevel1Headers(ls.signer, nonce)
+	headers, err := internal.CreateLevel1Headers(signer, nonce)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create level 1 headers: %w", err)
 	}
@@ -120,12 +137,39 @@ func (ls *LocalSigner) SignPayload(payload map[string]interface{}) (map[string]s
 // SetV2Key 注入 V2 relayer key。注入后所有 SignPayload 调用返回 V2 明文双头。
 // 传 nil 解除注入，回到旧 builderCreds / L1 路径。
 func (ls *LocalSigner) SetV2Key(k *internal.V2RelayerKey) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	if ls.closed {
+		return
+	}
 	ls.v2Key = k
 }
 
 // HasV2Key 报告当前是否已注入可用的 V2 relayer key。
 func (ls *LocalSigner) HasV2Key() bool {
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
 	return ls.v2Key != nil && ls.v2Key.Key != ""
+}
+
+// Clear 释放 LocalSigner 持有的签名器与 Relayer 凭证引用。
+// 字符串历史副本无法由 Go 可靠擦除，因此这里只提供尽力清理。
+func (ls *LocalSigner) Clear() {
+	if ls == nil {
+		return
+	}
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	if ls.v2Key != nil {
+		ls.v2Key.Key = ""
+		ls.v2Key.Address = ""
+		ls.v2Key.CreatedAt = ""
+		ls.v2Key.UpdatedAt = ""
+	}
+	ls.v2Key = nil
+	ls.builderCreds = nil
+	ls.signer = nil
+	ls.closed = true
 }
 
 // SignRequest is a convenience method that directly uses method, path, body parameters for signing

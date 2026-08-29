@@ -704,8 +704,8 @@ func (c *orderClientImpl) createSignedOrderV2WithAmounts(
 	}
 
 	chainID := big.NewInt(int64(c.baseClient.web3Client.GetChainID()))
-	return signing.BuildSignedV2Order(
-		c.baseClient.web3Client.GetPrivateKey(),
+	return signing.BuildSignedV2OrderWithSigner(
+		c.baseClient.web3Client.GetSigner(),
 		&signing.V2OrderData{
 			Maker:         makerAddr,
 			Signer:        signerAddr,

@@ -2,7 +2,6 @@ package web3
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"strings"
@@ -22,7 +21,6 @@ import (
 // Client 定义Web3客户端的接口，供外部包使用
 type Client interface {
 	GetSigner() *signing.Signer
-	GetPrivateKey() *ecdsa.PrivateKey
 	GetBaseAddress() types.EthAddress
 	GetPolyProxyAddress() (types.EthAddress, error)
 	GetChainID() types.ChainID
@@ -47,7 +45,6 @@ type baseClient struct {
 	clients          []*ethclient.Client // 多个 RPC 客户端，支持轮询和故障转移
 	currentIndex     int64               // 当前使用的客户端索引（使用 atomic 操作）
 	clientMu         sync.RWMutex        // 保护 clients 切片的并发访问
-	privateKey       *ecdsa.PrivateKey
 	signer           *signing.Signer
 	signatureType    types.SignatureType
 	chainID          types.ChainID
@@ -123,6 +120,7 @@ func NewClient(
 	// Parse exchange ABI (simplified - we only need getPolyProxyWalletAddress)
 	exchangeABI, err := getExchangeABI()
 	if err != nil {
+		signer.Clear()
 		// 清理已连接的客户端
 		for _, client := range clients {
 			client.Close()
@@ -133,7 +131,6 @@ func NewClient(
 	web3Client := &baseClient{
 		clients:         clients,
 		currentIndex:    0,
-		privateKey:      signer.PrivateKey(),
 		signer:          signer,
 		signatureType:   signatureType,
 		chainID:         chainID,
@@ -396,10 +393,6 @@ func (c *baseClient) transactionByHashWithRetry(
 	return nil, false, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
-func (c *baseClient) GetPrivateKey() *ecdsa.PrivateKey {
-	return c.privateKey
-}
-
 func (c *baseClient) GetSigner() *signing.Signer {
 	return c.signer
 }
@@ -655,7 +648,7 @@ func (c *baseClient) GetTokenBalance(tokenID string, address types.EthAddress) (
 	return resultFloat, nil
 }
 
-// Close 关闭所有客户端连接
+// Close 关闭所有客户端连接，并使本地签名器不可继续使用。
 func (c *baseClient) Close() {
 	c.clientMu.Lock()
 	defer c.clientMu.Unlock()
@@ -665,6 +658,9 @@ func (c *baseClient) Close() {
 		}
 	}
 	c.clients = nil
+	if c.signer != nil {
+		c.signer.Clear()
+	}
 }
 
 // getExchangeABI 返回交易所合约的最小ABI

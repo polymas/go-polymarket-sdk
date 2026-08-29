@@ -57,6 +57,11 @@ func TestBuildSignedV2OrderRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
+	signer, err := NewSigner(common.Bytes2Hex(crypto.FromECDSA(priv)), types.Polygon)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	defer signer.Clear()
 	maker := crypto.PubkeyToAddress(priv.PublicKey).Hex()
 
 	data := &V2OrderData{
@@ -72,9 +77,9 @@ func TestBuildSignedV2OrderRecoverable(t *testing.T) {
 	chainID := big.NewInt(137)
 	exchange := common.HexToAddress("0xE111180000d2663C0091e4f400237545B87B996B")
 
-	signed, err := BuildSignedV2Order(priv, data, chainID, exchange)
+	signed, err := BuildSignedV2OrderWithSigner(signer, data, chainID, exchange)
 	if err != nil {
-		t.Fatalf("BuildSignedV2Order: %v", err)
+		t.Fatalf("BuildSignedV2OrderWithSigner: %v", err)
 	}
 	if len(signed.Signature) != 65 {
 		t.Fatalf("signature length: got %d, want 65", len(signed.Signature))
@@ -159,7 +164,12 @@ func TestBuildSignedV2OrderRejectsUnknownSignatureType(t *testing.T) {
 	}
 	data := sampleV2OrderData(priv)
 	data.SignatureType = types.SignatureType(4)
-	_, err = BuildSignedV2Order(priv, data, big.NewInt(137), common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	signer, err := NewSigner(common.Bytes2Hex(crypto.FromECDSA(priv)), types.Polygon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer signer.Clear()
+	_, err = BuildSignedV2OrderWithSigner(signer, data, big.NewInt(137), common.HexToAddress("0x2222222222222222222222222222222222222222"))
 	if err == nil || !strings.Contains(err.Error(), "unsupported CLOB V2 signature type 4") {
 		t.Fatalf("err=%v", err)
 	}

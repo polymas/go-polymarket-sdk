@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -44,6 +45,21 @@ type GaslessClient struct {
 	relayerCallCount int64 // 使用 atomic 操作，记录总调用次数
 }
 
+// Close 清理 Gasless 专用 Relayer 状态，并关闭底层 Web3 客户端与签名器。
+func (c *GaslessClient) Close() {
+	if c == nil {
+		return
+	}
+	c.v2KeyMu.Lock()
+	defer c.v2KeyMu.Unlock()
+	if c.localSigner != nil {
+		c.localSigner.Clear()
+	}
+	if c.baseClient != nil {
+		c.baseClient.Close()
+	}
+}
+
 // NewGaslessClient creates a new gasless Web3 client.
 // rpcURLs 为可选：若传入至少一个 URL 则使用自定义 RPC 列表，否则使用 SDK 内置列表（与 NewClient 一致）
 func NewGaslessClient(
@@ -70,16 +86,19 @@ func NewGaslessClient(
 	// Parse ABIs
 	conditionalABI, err := getConditionalTokensABI()
 	if err != nil {
+		baseClientInterface.Close()
 		return nil, fmt.Errorf("failed to parse conditional tokens ABI: %w", err)
 	}
 
 	negRiskABI, err := getNegRiskAdapterABI()
 	if err != nil {
+		baseClientInterface.Close()
 		return nil, fmt.Errorf("failed to parse neg risk adapter ABI: %w", err)
 	}
 
 	proxyFactoryABI, err := getProxyFactoryABI()
 	if err != nil {
+		baseClientInterface.Close()
 		return nil, fmt.Errorf("failed to parse proxy factory ABI: %w", err)
 	}
 
@@ -87,6 +106,7 @@ func NewGaslessClient(
 	// 需要类型断言访问私有字段
 	baseClientImpl, ok := baseClientInterface.(*baseClient)
 	if !ok {
+		baseClientInterface.Close()
 		return nil, fmt.Errorf("failed to cast base client to implementation type")
 	}
 	localSigner := NewLocalSigner(baseClientImpl.GetSigner(), builderCreds)
@@ -204,13 +224,12 @@ func (c *GaslessClient) ensureV2RelayerKey(ctx context.Context) error {
 	}
 	c.v2KeyLastAttempt = time.Now()
 
-	priv := c.signer.PrivateKey()
-	if priv == nil {
-		c.v2KeyLastErr = fmt.Errorf("signer has no private key")
+	if c.signer == nil || c.signer.Closed() {
+		c.v2KeyLastErr = signing.ErrSignerClosed
 		log.Printf("[WARN] V2 relayer key 获取失败：%v；本次降级到旧鉴权", c.v2KeyLastErr)
 		return c.v2KeyLastErr
 	}
-	k, err := internal.EnsureV2RelayerKey(ctx, priv, "")
+	k, err := internal.EnsureV2RelayerKey(ctx, c.signer, "")
 	if err != nil {
 		c.v2KeyLastErr = err
 		log.Printf("[WARN] V2 relayer key 获取失败：%v；本次降级到旧鉴权（relayer 会 401），%v 后允许重试", err, v2KeyRetryBackoff)

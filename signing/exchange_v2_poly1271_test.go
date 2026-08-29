@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -27,10 +26,11 @@ func TestSignV2OrderPoly1271AgainstPython(t *testing.T) {
 		expected = "0x922e220dea8c59dd0b7580556b0af765cbdc27366a0ec42bcd678c6012802b462d17267484cad8dda548ff2102cbba64a25d9a098941f88b46f15d091dce13c91c3264e159346253e26a64e00b69032db0e7d32f94628de3e6eecb50304d7af3d23d5ecafc34d0897d74e3e08da0671603183d1952db58ff429e22ea2eea91086e4f726465722875696e743235362073616c742c61646472657373206d616b65722c61646472657373207369676e65722c75696e7432353620746f6b656e49642c75696e74323536206d616b6572416d6f756e742c75696e743235362074616b6572416d6f756e742c75696e743820736964652c75696e7438207369676e6174757265547970652c75696e743235362074696d657374616d702c62797465733332206d657461646174612c62797465733332206275696c6465722900ba"
 	)
 
-	pk, err := crypto.HexToECDSA(pkHex)
+	signer, err := NewSigner(pkHex, types.Polygon)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer signer.Clear()
 
 	order := &V2Order{
 		Salt:          big.NewInt(12345),
@@ -45,7 +45,12 @@ func TestSignV2OrderPoly1271AgainstPython(t *testing.T) {
 		// Metadata, Builder 默认零
 	}
 
-	sig, err := signV2OrderPoly1271(order, big.NewInt(137), common.HexToAddress(exchange), pk)
+	sig, err := signV2OrderPoly1271(
+		order,
+		big.NewInt(137),
+		common.HexToAddress(exchange),
+		signer,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

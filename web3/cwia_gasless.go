@@ -176,7 +176,7 @@ func (c *baseClient) BuildAndSignCWIABatch(
 	}
 
 	chainID := big.NewInt(int64(c.chainID))
-	sig, err := signing.SignCWIABatch(c.privateKey, chainID, batch)
+	sig, err := signing.SignCWIABatchWithSigner(c.signer, chainID, batch)
 	if err != nil {
 		return signing.CWIABatch{}, nil, nil, err
 	}

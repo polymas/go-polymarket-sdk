@@ -3,7 +3,7 @@ package signing
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"math/big"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -11,8 +11,27 @@ import (
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
+// RecoverySigner 只暴露摘要签名能力，不允许调用方取得底层私钥。
+// 外部签名器、HSM 或策略签名服务可以实现此接口。
+type RecoverySigner interface {
+	SignWithRecovery(messageHash common.Hash) ([]byte, error)
+}
+
+// AddressedSigner 是同时提供签名地址的受限签名器。
+type AddressedSigner interface {
+	RecoverySigner
+	Address() types.EthAddress
+}
+
+// ClobSigner 提供 CLOB L1 鉴权所需的最小能力。
+type ClobSigner interface {
+	AddressedSigner
+	ChainID() types.ChainID
+}
+
 // Signer 处理签名操作
 type Signer struct {
+	mu         sync.RWMutex
 	privateKey *ecdsa.PrivateKey
 	address    types.EthAddress
 	chainID    types.ChainID
@@ -34,6 +53,7 @@ func NewSigner(privateKeyHex string, chainID types.ChainID) (*Signer, error) {
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
+		zeroPrivateKey(privateKey)
 		return nil, ErrInvalidPublicKey
 	}
 
@@ -48,17 +68,23 @@ func NewSigner(privateKeyHex string, chainID types.ChainID) (*Signer, error) {
 
 // Address 返回以太坊地址
 func (s *Signer) Address() types.EthAddress {
+	if s == nil {
+		return ""
+	}
 	return s.address
 }
 
 // ChainID 返回链ID
 func (s *Signer) ChainID() types.ChainID {
+	if s == nil {
+		return 0
+	}
 	return s.chainID
 }
 
 // Sign 对消息哈希进行签名（返回64字节，不包含恢复ID）
 func (s *Signer) Sign(messageHash common.Hash) ([]byte, error) {
-	signature, err := crypto.Sign(messageHash.Bytes(), s.privateKey)
+	signature, err := s.sign(messageHash)
 	if err != nil {
 		return nil, err
 	}
@@ -67,26 +93,35 @@ func (s *Signer) Sign(messageHash common.Hash) ([]byte, error) {
 }
 
 // SignWithRecovery 对消息哈希进行签名并返回包含v值的完整签名（65字节）
-// 返回Python兼容格式的签名：v值（27-30）而不是恢复ID（0-3）
+// 返回Python兼容格式的签名：v值（27/28）而不是恢复ID（0/1）
 func (s *Signer) SignWithRecovery(messageHash common.Hash) ([]byte, error) {
-	signature, err := crypto.Sign(messageHash.Bytes(), s.privateKey)
+	signature, err := s.sign(messageHash)
 	if err != nil {
 		return nil, err
 	}
 
-	// Python's sign_message returns signature with v value (27-30), not recovery ID (0-3)
-	// Go's crypto.Sign returns recovery ID (0-3) in the last byte
+	// Python's sign_message returns signature with v value (27/28), not recovery ID (0/1)
+	// Go's crypto.Sign returns recovery ID (0/1) in the last byte
 	// Convert recovery ID to v value: v = recovery_id + 27 (to match Python format)
-	if len(signature) == 65 {
-		recoveryID := signature[64]
-		if recoveryID < 4 {
-			// Convert recovery ID (0-3) to v value (27-30) to match Python format
-			signature[64] = recoveryID + 27
-		}
-		// If already in v value format (27-30), keep as is
+	if len(signature) != 65 || signature[64] > 1 {
+		return nil, fmt.Errorf("%w: invalid recovery signature", ErrSigningFailed)
 	}
+	// Convert recovery ID (0/1) to v value (27/28) to match Python format.
+	signature[64] += 27
 
 	return signature, nil
+}
+
+func (s *Signer) sign(messageHash common.Hash) ([]byte, error) {
+	if s == nil {
+		return nil, ErrSignerClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.privateKey == nil {
+		return nil, ErrSignerClosed
+	}
+	return crypto.Sign(messageHash.Bytes(), s.privateKey)
 }
 
 // SignBytes 对原始字节进行签名（先转换为哈希）
@@ -110,35 +145,40 @@ func (s *Signer) SignMessage(message []byte) ([]byte, error) {
 	return s.Sign(hash)
 }
 
-// PrivateKey 返回私钥（用于订单构建器）
-func (s *Signer) PrivateKey() *ecdsa.PrivateKey {
-	return s.privateKey
-}
-
 // Clear 清理敏感信息（私钥）
 // 安全建议：在不再需要 Signer 时调用此方法清理内存中的私钥
 // 注意：清理后 Signer 将无法再使用，请确保在清理前不再需要签名功能
 func (s *Signer) Clear() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.privateKey != nil {
-		// 清零私钥的 D 值（私钥的核心部分）
-		if s.privateKey.D != nil {
-			zeroBigInt(s.privateKey.D)
-		}
-		// 将私钥指针设为 nil
+		zeroPrivateKey(s.privateKey)
 		s.privateKey = nil
 	}
 }
 
-// zeroBigInt 清零 big.Int 的值
-func zeroBigInt(bi *big.Int) {
-	if bi == nil {
+// Closed 报告签名器是否已被清理。
+func (s *Signer) Closed() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.privateKey == nil
+}
+
+// zeroPrivateKey 尽力覆盖当前 ecdsa.PrivateKey 持有的私钥大整数。
+// Go 运行时、调用方字符串和历史复制仍可能保留副本，因此这不是绝对安全擦除。
+func zeroPrivateKey(privateKey *ecdsa.PrivateKey) {
+	if privateKey == nil || privateKey.D == nil {
 		return
 	}
-	// 获取字节表示并清零
-	bytes := bi.Bytes()
-	for i := range bytes {
-		bytes[i] = 0
+	words := privateKey.D.Bits()
+	for i := range words {
+		words[i] = 0
 	}
-	// 设置 big.Int 为零值
-	bi.SetInt64(0)
+	privateKey.D.SetInt64(0)
 }

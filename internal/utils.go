@@ -25,7 +25,7 @@ const (
 )
 
 // CreateLevel1Headers creates Level 1 Poly headers for a request
-func CreateLevel1Headers(signer *signing.Signer, nonce *int) (map[string]string, error) {
+func CreateLevel1Headers(signer signing.ClobSigner, nonce *int) (map[string]string, error) {
 	timestamp := time.Now().UTC().Unix()
 
 	n := 0
@@ -50,7 +50,7 @@ func CreateLevel1Headers(signer *signing.Signer, nonce *int) (map[string]string,
 
 // CreateLevel2Headers creates Level 2 Poly headers for a CLOB API request (POLY_* headers).
 func CreateLevel2Headers(
-	signer *signing.Signer,
+	signer signing.ClobSigner,
 	creds *types.ApiCreds,
 	requestArgs *types.RequestArgs,
 ) (map[string]string, error) {
@@ -88,7 +88,7 @@ func CreateLevel2Headers(
 // CreateLevel2HeadersWithBody creates Level 2 Poly headers for a CLOB API request with body
 // passed directly as struct/slice (preserves field order for HMAC). Used by POST /orders.
 func CreateLevel2HeadersWithBody(
-	signer *signing.Signer,
+	signer signing.ClobSigner,
 	creds *types.ApiCreds,
 	requestArgs *types.RequestArgs,
 	body interface{},

@@ -241,7 +241,6 @@ V1 回退选项。
 | 方法                  | 描述           | 参数                 | 返回值                |
 | --------------------- | -------------- | -------------------- | --------------------- |
 | `GetSigner`           | 获取签名器     | -                    | `*Signer`             |
-| `GetPrivateKey`       | 获取私钥       | -                    | `*ecdsa.PrivateKey`   |
 | `GetBaseAddress`      | 获取基础地址   | -                    | `EthAddress`          |
 | `GetPolyProxyAddress` | 获取代理地址   | -                    | `EthAddress`, `error` |
 | `GetChainID`          | 获取链ID       | -                    | `ChainID`             |
@@ -252,7 +251,11 @@ V1 回退选项。
 | `GetUSDCEBalance`     | 获取旧 USDC.e 余额 | `address`          | `float64`, `error`    |
 | `GetUSDCBalance`      | `GetUSDCEBalance` 的已弃用别名 | `address`       | `float64`, `error`    |
 | `GetTokenBalance`     | 获取代币余额   | `tokenID`, `address` | `float64`, `error`    |
-| `Close`               | 关闭客户端     | -                    | -                     |
+| `Close`               | 关闭客户端并清理本地签名器 | -             | -                     |
+
+Web3 客户端不再导出底层 `*ecdsa.PrivateKey`。订单、CLOB 鉴权和 Relayer SIWE
+统一通过受限签名接口完成；需要自定义 HSM 或远程签名器时可实现
+`signing.RecoverySigner`，无需把裸私钥交给订单构建器。
 
 ### WebSocket 客户端接口
 

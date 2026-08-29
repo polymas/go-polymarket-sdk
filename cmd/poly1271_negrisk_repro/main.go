@@ -88,7 +88,7 @@ func main() {
 		fatal("GetPolyProxyAddress: %v", err)
 	}
 	maker := common.HexToAddress(string(makerAddrStr))
-	privKey := w3.GetPrivateKey()
+	signer := w3.GetSigner()
 
 	// 自建一个 eth_call 用的 ethclient（独立于 web3 内部连接，逻辑更透明）。
 	rpc := dialFirst(rpcURLs)
@@ -130,7 +130,7 @@ func main() {
 	// 4) 服务端视角：NegRisk 市场 → digest_server 用 NegRiskExchangeV2 域。
 	//    先用 fixed 行为签一次以拿到确定的 V2Order，再据此算 digest_server
 	//    （digest 只依赖订单字段 + 域，不依赖签名，所以两种签法的 V2Order 一致）。
-	signedFixed, err := signing.BuildSignedV2Order(privKey, negRiskData, big.NewInt(137), negRiskExchangeV2)
+	signedFixed, err := signing.BuildSignedV2OrderWithSigner(signer, negRiskData, big.NewInt(137), negRiskExchangeV2)
 	if err != nil {
 		fatal("签名(fixed/NegRiskExchangeV2): %v", err)
 	}
@@ -140,7 +140,7 @@ func main() {
 	}
 
 	// 改动前（buggy）：写死 negRisk=false → 用 ExchangeV2 域签。
-	signedBuggy, err := signing.BuildSignedV2Order(privKey, negRiskData, big.NewInt(137), exchangeV2)
+	signedBuggy, err := signing.BuildSignedV2OrderWithSigner(signer, negRiskData, big.NewInt(137), exchangeV2)
 	if err != nil {
 		fatal("签名(buggy/ExchangeV2): %v", err)
 	}
@@ -162,7 +162,7 @@ func main() {
 		} else {
 			normalData := *negRiskData
 			normalData.TokenID = normalTokenID
-			signedNormal, err := signing.BuildSignedV2Order(privKey, &normalData, big.NewInt(137), exchangeV2)
+			signedNormal, err := signing.BuildSignedV2OrderWithSigner(signer, &normalData, big.NewInt(137), exchangeV2)
 			if err != nil {
 				fatal("签名(对照/ExchangeV2): %v", err)
 			}

@@ -92,6 +92,7 @@ var (
     ErrInvalidPrivateKey = errors.New("invalid private key")
     ErrInvalidPublicKey  = errors.New("invalid public key")
     ErrSigningFailed     = errors.New("signing failed")
+    ErrSignerClosed      = errors.New("signer is closed")
 )
 ```
 

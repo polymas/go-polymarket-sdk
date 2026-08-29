@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/polymas/go-polymarket-sdk/types"
 )
 
 // TestCWIABatchHashAgainstOnChainSample 用真实链上样例验证 EIP-712 实现。
@@ -81,6 +82,11 @@ func TestSignCWIABatchRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedSigner := crypto.PubkeyToAddress(pk.PublicKey).Hex()
+	signer, err := NewSigner(common.Bytes2Hex(crypto.FromECDSA(pk)), types.Polygon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer signer.Clear()
 
 	batch := CWIABatch{
 		Wallet:   common.HexToAddress("0x1111111111111111111111111111111111111111"),
@@ -92,7 +98,7 @@ func TestSignCWIABatchRoundtrip(t *testing.T) {
 			Data:   []byte{0xde, 0xad, 0xbe, 0xef},
 		}},
 	}
-	sig, err := SignCWIABatch(pk, big.NewInt(137), batch)
+	sig, err := SignCWIABatchWithSigner(signer, big.NewInt(137), batch)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,10 @@ const (
 )
 
 // SignClobAuthMessage 对CLOB认证消息进行签名
-func SignClobAuthMessage(signer *Signer, timestamp int64, nonce int) (string, error) {
+func SignClobAuthMessage(signer ClobSigner, timestamp int64, nonce int) (string, error) {
+	if signer == nil {
+		return "", fmt.Errorf("CLOB signer is nil")
+	}
 	chainID := signer.ChainID()
 
 	// Create domain separator
