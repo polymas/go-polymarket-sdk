@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	polhttp "github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	polhttp "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 

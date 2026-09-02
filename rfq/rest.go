@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	sdkhttp "github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	sdkhttp "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 

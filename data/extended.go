@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/polymas/go-polymarket-sdk/http"
+	http "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 

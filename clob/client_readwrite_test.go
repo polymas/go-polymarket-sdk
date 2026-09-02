@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/polymas/go-polymarket-sdk/test"
+	test "github.com/polymas/go-polymarket-sdk/internal/testutil"
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
 )

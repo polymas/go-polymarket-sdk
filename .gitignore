@@ -48,6 +48,8 @@ temp/
 bin/
 
 # Stray binaries left at repo root by `go build ./examples/<name>`
+/basic_usage
+/basic-usage
 /eoa_btc5m_double_quote
 /eoa_query
 /v2_eoa_approve

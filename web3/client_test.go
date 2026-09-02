@@ -9,8 +9,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	test "github.com/polymas/go-polymarket-sdk/internal/testutil"
 	"github.com/polymas/go-polymarket-sdk/signing"
-	"github.com/polymas/go-polymarket-sdk/test"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 

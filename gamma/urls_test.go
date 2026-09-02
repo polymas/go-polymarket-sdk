@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/polymas/go-polymarket-sdk/test"
+	test "github.com/polymas/go-polymarket-sdk/internal/testutil"
 )
 
 // eventURLPattern 匹配 https://polymarket.com/event/{slug}(/{slug})?

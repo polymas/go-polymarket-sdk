@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	http "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )

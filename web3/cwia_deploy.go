@@ -12,8 +12,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
-	sdkhttp "github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	sdkhttp "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 

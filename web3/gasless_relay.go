@@ -23,8 +23,8 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
-	sdkhttp "github.com/polymas/go-polymarket-sdk/http"
 	"github.com/polymas/go-polymarket-sdk/internal"
+	sdkhttp "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
