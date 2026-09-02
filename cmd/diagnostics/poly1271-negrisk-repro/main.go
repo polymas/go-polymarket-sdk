@@ -18,7 +18,7 @@
 // 运行：
 //
 //	set -a; source .env; set +a      # .env 里 POLY_PRIVATE_KEY = type-3 钱包私钥
-//	go run ./cmd/poly1271-negrisk-repro
+//	go run ./cmd/diagnostics/poly1271-negrisk-repro
 //
 // 可选环境变量覆盖默认 token：
 //

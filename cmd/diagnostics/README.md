@@ -11,6 +11,7 @@
 | `v2-list-orders` | 对比 SDK 与原始订单响应 |
 | `relayer-tx-status` | 查询 relayer transaction |
 | `negrisk-calldata-check` | 检查 negRisk calldata |
+| `poly1271-negrisk-repro` | 复刻并验证 POLY_1271 NegRisk 签名域根因/修复（纯 eth_call，零资金风险） |
 
 其余命令可能创建凭证、修复钱包、提交授权或链上交易。运行前必须阅读对应 `main.go` 文件头，并使用隔离的小额钱包。
 

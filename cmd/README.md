@@ -5,7 +5,6 @@
 ```text
 cmd/
 ├── check-addrs/
-├── poly1271-negrisk-repro/
 └── diagnostics/
 ```
 
