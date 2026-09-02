@@ -1,3 +1,9 @@
+// Package web3 provides read-only on-chain access for Polymarket: RPC pooling
+// with failover, balance and allowance queries, and deterministic derivation of
+// the Poly Proxy / Gnosis Safe / Deposit Wallet (CWIA) smart-account addresses.
+//
+// Gasless (relayer-backed) transaction building, signing and submission lives in
+// the sub-package web3/relayer, whose GaslessClient embeds *web3.BaseClient.
 package web3
 
 import (
@@ -39,9 +45,12 @@ type Client interface {
 	Close()
 }
 
-// baseClient 是Polymarket的基础Web3客户端
-// 不允许直接导出，只能通过 NewClient 创建
-type baseClient struct {
+// BaseClient 是Polymarket的基础只读Web3客户端，也是 Client 接口的唯一实现。
+//
+// 通过 NewClient 创建（返回 Client 接口）。类型本身导出仅为让 web3/relayer 的
+// GaslessClient 能嵌入 *BaseClient —— Go 不允许跨包嵌入非导出类型。
+// 其字段仍然私有，外部只能通过 Get* 访问器读取。
+type BaseClient struct {
 	clients          []*ethclient.Client // 多个 RPC 客户端，支持轮询和故障转移
 	currentIndex     int64               // 当前使用的客户端索引（使用 atomic 操作）
 	clientMu         sync.RWMutex        // 保护 clients 切片的并发访问
@@ -128,7 +137,7 @@ func NewClient(
 		return nil, fmt.Errorf("failed to parse exchange ABI: %w", err)
 	}
 
-	web3Client := &baseClient{
+	web3Client := &BaseClient{
 		clients:         clients,
 		currentIndex:    0,
 		signer:          signer,
@@ -175,8 +184,8 @@ func isRetryableError(err error) bool {
 		strings.Contains(errStr, "dial")
 }
 
-// getNextClientIndex 获取下一个客户端索引（轮询）
-func (c *baseClient) getNextClientIndex() int {
+// GetNextClientIndex 获取下一个客户端索引（轮询）
+func (c *BaseClient) GetNextClientIndex() int {
 	c.clientMu.RLock()
 	defer c.clientMu.RUnlock()
 	if len(c.clients) == 0 {
@@ -186,8 +195,8 @@ func (c *baseClient) getNextClientIndex() int {
 	return current % len(c.clients)
 }
 
-// callContractWithRetry 带重试的合约调用，支持多节点轮询和故障转移
-func (c *baseClient) callContractWithRetry(
+// CallContractWithRetry 带重试的合约调用，支持多节点轮询和故障转移
+func (c *BaseClient) CallContractWithRetry(
 	ctx context.Context,
 	msg ethereum.CallMsg,
 	blockNumber *big.Int,
@@ -201,7 +210,7 @@ func (c *baseClient) callContractWithRetry(
 	}
 
 	// 从当前索引开始，尝试所有节点
-	startIndex := c.getNextClientIndex()
+	startIndex := c.GetNextClientIndex()
 	var lastErr error
 
 	for i := 0; i < len(clients); i++ {
@@ -228,8 +237,8 @@ func (c *baseClient) callContractWithRetry(
 	return nil, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
-// balanceAtWithRetry 带重试的余额查询，支持多节点轮询和故障转移
-func (c *baseClient) balanceAtWithRetry(
+// BalanceAtWithRetry 带重试的余额查询，支持多节点轮询和故障转移
+func (c *BaseClient) BalanceAtWithRetry(
 	ctx context.Context,
 	account common.Address,
 	blockNumber *big.Int,
@@ -243,7 +252,7 @@ func (c *baseClient) balanceAtWithRetry(
 	}
 
 	// 从当前索引开始，尝试所有节点
-	startIndex := c.getNextClientIndex()
+	startIndex := c.GetNextClientIndex()
 	var lastErr error
 
 	for i := 0; i < len(clients); i++ {
@@ -270,8 +279,8 @@ func (c *baseClient) balanceAtWithRetry(
 	return nil, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
-// estimateGasWithRetry 带重试的 Gas 估算，支持多节点轮询和故障转移
-func (c *baseClient) estimateGasWithRetry(
+// EstimateGasWithRetry 带重试的 Gas 估算，支持多节点轮询和故障转移
+func (c *BaseClient) EstimateGasWithRetry(
 	ctx context.Context,
 	msg ethereum.CallMsg,
 ) (uint64, error) {
@@ -284,7 +293,7 @@ func (c *baseClient) estimateGasWithRetry(
 	}
 
 	// 从当前索引开始，尝试所有节点
-	startIndex := c.getNextClientIndex()
+	startIndex := c.GetNextClientIndex()
 	var lastErr error
 
 	for i := 0; i < len(clients); i++ {
@@ -311,8 +320,8 @@ func (c *baseClient) estimateGasWithRetry(
 	return 0, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
-// transactionReceiptWithRetry 带重试的交易回执查询，支持多节点轮询和故障转移
-func (c *baseClient) transactionReceiptWithRetry(
+// TransactionReceiptWithRetry 带重试的交易回执查询，支持多节点轮询和故障转移
+func (c *BaseClient) TransactionReceiptWithRetry(
 	ctx context.Context,
 	txHash common.Hash,
 ) (*ethtypes.Receipt, error) {
@@ -325,7 +334,7 @@ func (c *baseClient) transactionReceiptWithRetry(
 	}
 
 	// 从当前索引开始，尝试所有节点
-	startIndex := c.getNextClientIndex()
+	startIndex := c.GetNextClientIndex()
 	var lastErr error
 
 	for i := 0; i < len(clients); i++ {
@@ -352,8 +361,8 @@ func (c *baseClient) transactionReceiptWithRetry(
 	return nil, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
-// transactionByHashWithRetry 带重试的交易查询，支持多节点轮询和故障转移
-func (c *baseClient) transactionByHashWithRetry(
+// TransactionByHashWithRetry 带重试的交易查询，支持多节点轮询和故障转移
+func (c *BaseClient) TransactionByHashWithRetry(
 	ctx context.Context,
 	txHash common.Hash,
 ) (*ethtypes.Transaction, bool, error) {
@@ -366,7 +375,7 @@ func (c *baseClient) transactionByHashWithRetry(
 	}
 
 	// 从当前索引开始，尝试所有节点
-	startIndex := c.getNextClientIndex()
+	startIndex := c.GetNextClientIndex()
 	var lastErr error
 
 	for i := 0; i < len(clients); i++ {
@@ -393,28 +402,28 @@ func (c *baseClient) transactionByHashWithRetry(
 	return nil, false, fmt.Errorf("all RPC nodes failed, last error: %w", lastErr)
 }
 
-func (c *baseClient) GetSigner() *signing.Signer {
+func (c *BaseClient) GetSigner() *signing.Signer {
 	return c.signer
 }
 
 // GetBaseAddress 返回基础EOA地址
-func (c *baseClient) GetBaseAddress() types.EthAddress {
+func (c *BaseClient) GetBaseAddress() types.EthAddress {
 	return c.baseAddress
 }
 
 // GetChainID 返回链ID
-func (c *baseClient) GetChainID() types.ChainID {
+func (c *BaseClient) GetChainID() types.ChainID {
 	return c.chainID
 }
 
 // GetSignatureType 返回签名类型
-func (c *baseClient) GetSignatureType() types.SignatureType {
+func (c *BaseClient) GetSignatureType() types.SignatureType {
 	return c.signatureType
 }
 
 // GetPolyProxyAddress 根据签名类型获取代理地址（使用内部缓存的 baseAddress）
 // 如果已经缓存了 proxyAddress，直接返回；否则调用合约获取并缓存
-func (c *baseClient) GetPolyProxyAddress() (types.EthAddress, error) {
+func (c *BaseClient) GetPolyProxyAddress() (types.EthAddress, error) {
 	// 如果已经缓存了，直接返回
 	if c.proxyAddress != "" {
 		return c.proxyAddress, nil
@@ -446,7 +455,7 @@ func (c *baseClient) GetPolyProxyAddress() (types.EthAddress, error) {
 }
 
 // getPolyProxyWalletAddress 获取给定地址的Polymarket代理钱包地址
-func (c *baseClient) getPolyProxyWalletAddress(address types.EthAddress) (types.EthAddress, error) {
+func (c *BaseClient) getPolyProxyWalletAddress(address types.EthAddress) (types.EthAddress, error) {
 	// Call getPolyProxyWalletAddress on the exchange contract
 	addr := common.HexToAddress(string(address))
 
@@ -462,7 +471,7 @@ func (c *baseClient) getPolyProxyWalletAddress(address types.EthAddress) (types.
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
+	result, err := c.CallContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call contract: %w", err)
 	}
@@ -478,12 +487,12 @@ func (c *baseClient) getPolyProxyWalletAddress(address types.EthAddress) (types.
 }
 
 // getSafeProxyAddress 获取给定地址的Safe代理地址
-func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAddress, error) {
+func (c *BaseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAddress, error) {
 	// Safe proxy factory address
 	safeProxyFactoryAddr := common.HexToAddress(internal.SafeProxyFactory)
 
 	// Parse SafeProxyFactory ABI
-	safeProxyFactoryABI, err := getSafeProxyFactoryABI()
+	safeProxyFactoryABI, err := GetSafeProxyFactoryABI()
 	if err != nil {
 		return "", fmt.Errorf("failed to parse safe proxy factory ABI: %w", err)
 	}
@@ -501,7 +510,7 @@ func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAdd
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
+	result, err := c.CallContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call computeProxyAddress: %w", err)
 	}
@@ -518,8 +527,8 @@ func (c *baseClient) getSafeProxyAddress(address types.EthAddress) (types.EthAdd
 
 // getCWIAProxyAddress 按官方双架构算法解析 Deposit Wallet。地址在本地派生；
 // RPC 只用于查询 BEACON() 和确认旧 UUPS 地址是否已经部署。
-func (c *baseClient) getCWIAProxyAddress(owner types.EthAddress) (types.EthAddress, error) {
-	rpc := depositWalletRPC{beacon: c.depositWalletFactoryBeacon, code: c.codeAtWithRetry}
+func (c *BaseClient) getCWIAProxyAddress(owner types.EthAddress) (types.EthAddress, error) {
+	rpc := depositWalletRPC{beacon: c.DepositWalletFactoryBeacon, code: c.CodeAtWithRetry}
 	if c.depositWalletRPC != nil {
 		rpc = *c.depositWalletRPC
 	}
@@ -531,8 +540,8 @@ func (c *baseClient) getCWIAProxyAddress(owner types.EthAddress) (types.EthAddre
 }
 
 // GetPOLBalance 获取基础地址的POL余额
-func (c *baseClient) GetPOLBalance() (float64, error) {
-	balance, err := c.balanceAtWithRetry(context.Background(), common.HexToAddress(string(c.baseAddress)), nil)
+func (c *BaseClient) GetPOLBalance() (float64, error) {
+	balance, err := c.BalanceAtWithRetry(context.Background(), common.HexToAddress(string(c.baseAddress)), nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get balance: %w", err)
 	}
@@ -543,12 +552,12 @@ func (c *baseClient) GetPOLBalance() (float64, error) {
 
 // GetCollateralBalance returns address's current V2 trading collateral balance.
 // Polymarket V2 uses pUSD; USDC.e is only an on-ramp asset.
-func (c *baseClient) GetCollateralBalance(address types.EthAddress) (float64, error) {
+func (c *BaseClient) GetCollateralBalance(address types.EthAddress) (float64, error) {
 	return c.getERC20Balance(address, common.HexToAddress(internal.PolygonPUSD), "pUSD")
 }
 
 // GetUSDCEBalance returns address's legacy bridged USDC.e balance.
-func (c *baseClient) GetUSDCEBalance(address types.EthAddress) (float64, error) {
+func (c *BaseClient) GetUSDCEBalance(address types.EthAddress) (float64, error) {
 	return c.getERC20Balance(address, common.HexToAddress(internal.PolygonCollateral), "USDC.e")
 }
 
@@ -556,11 +565,11 @@ func (c *baseClient) GetUSDCEBalance(address types.EthAddress) (float64, error) 
 //
 // Deprecated: use GetCollateralBalance for V2 trading funds, or
 // GetUSDCEBalance when USDC.e is explicitly required.
-func (c *baseClient) GetUSDCBalance(address types.EthAddress) (float64, error) {
+func (c *BaseClient) GetUSDCBalance(address types.EthAddress) (float64, error) {
 	return c.GetUSDCEBalance(address)
 }
 
-func (c *baseClient) getERC20Balance(address types.EthAddress, token common.Address, symbol string) (float64, error) {
+func (c *BaseClient) getERC20Balance(address types.EthAddress, token common.Address, symbol string) (float64, error) {
 	if err := address.Validate(); err != nil {
 		return 0, fmt.Errorf("invalid balance address: %w", err)
 	}
@@ -582,7 +591,7 @@ func (c *baseClient) getERC20Balance(address types.EthAddress, token common.Addr
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
+	result, err := c.CallContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to call %s.balanceOf: %w", symbol, err)
 	}
@@ -600,7 +609,7 @@ func (c *baseClient) getERC20Balance(address types.EthAddress, token common.Addr
 }
 
 // GetTokenBalance 获取地址的代币余额
-func (c *baseClient) GetTokenBalance(tokenID string, address types.EthAddress) (float64, error) {
+func (c *BaseClient) GetTokenBalance(tokenID string, address types.EthAddress) (float64, error) {
 	// Parse token ID as big.Int
 	tokenIDBig, ok := new(big.Int).SetString(tokenID, 10)
 	if !ok {
@@ -630,7 +639,7 @@ func (c *baseClient) GetTokenBalance(tokenID string, address types.EthAddress) (
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(context.Background(), callMsg, nil)
+	result, err := c.CallContractWithRetry(context.Background(), callMsg, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to call contract: %w", err)
 	}
@@ -649,7 +658,7 @@ func (c *baseClient) GetTokenBalance(tokenID string, address types.EthAddress) (
 }
 
 // Close 关闭所有客户端连接，并使本地签名器不可继续使用。
-func (c *baseClient) Close() {
+func (c *BaseClient) Close() {
 	c.clientMu.Lock()
 	defer c.clientMu.Unlock()
 	for _, client := range c.clients {
@@ -727,9 +736,9 @@ func getDepositWalletFactoryABI() (*abi.ABI, error) {
 	return &parsedABI, nil
 }
 
-// getSafeProxyFactoryABI returns a minimal ABI for the SafeProxyFactory contract
+// GetSafeProxyFactoryABI returns a minimal ABI for the SafeProxyFactory contract
 // Only includes computeProxyAddress function
-func getSafeProxyFactoryABI() (*abi.ABI, error) {
+func GetSafeProxyFactoryABI() (*abi.ABI, error) {
 	abiJSON := `[
 		{
 			"inputs": [

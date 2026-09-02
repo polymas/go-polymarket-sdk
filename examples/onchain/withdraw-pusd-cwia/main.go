@@ -39,6 +39,7 @@ import (
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 func main() {
@@ -62,7 +63,7 @@ func main() {
 	}
 
 	// 强制走 CWIA 路径（朋友 demo 的 DepositWallet 模式）
-	c, err := web3.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, creds)
+	c, err := relayer.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, creds)
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)
 	}

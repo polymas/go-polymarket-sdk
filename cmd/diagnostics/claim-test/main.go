@@ -30,7 +30,7 @@ import (
 
 	ethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/polymas/go-polymarket-sdk/types"
-	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 const dataAPI = "https://data-api.polymarket.com"
@@ -73,14 +73,14 @@ func main() {
 	}
 
 	var picked struct {
-		client     *web3.GaslessClient
+		client     *relayer.GaslessClient
 		proxyAddr  string
 		signatureT types.SignatureType
 	}
 
 	for _, st := range sigTypes {
 		fmt.Printf("\n--- %s ---\n", st.name)
-		c, err := web3.NewGaslessClient(pk, st.t, types.Polygon, nil)
+		c, err := relayer.NewGaslessClient(pk, st.t, types.Polygon, nil)
 		if err != nil {
 			fmt.Printf("  NewGaslessClient failed: %v\n", err)
 			continue
@@ -115,7 +115,7 @@ func main() {
 	if sigTypeStr != "" {
 		n, _ := strconv.Atoi(sigTypeStr)
 		st := types.SignatureType(n)
-		c, err := web3.NewGaslessClient(pk, st, types.Polygon, nil, rpcs...)
+		c, err := relayer.NewGaslessClient(pk, st, types.Polygon, nil, rpcs...)
 		if err != nil {
 			log.Fatalf("NewGaslessClient with SIGTYPE=%d: %v", n, err)
 		}
@@ -147,7 +147,7 @@ func main() {
 		log.Fatalf("not redeemable yet")
 	}
 
-	info := web3.RedeemPositionInfo{
+	info := relayer.RedeemPositionInfo{
 		ConditionID:  types.Keccak256(cond),
 		OutcomeIndex: pos.OutcomeIndex,
 		Size:         pos.Size,
@@ -156,7 +156,7 @@ func main() {
 	fmt.Printf("calling RedeemPositions(%+v)\n", info)
 
 	start := time.Now()
-	receipt, err := picked.client.RedeemPositions([]web3.RedeemPositionInfo{info})
+	receipt, err := picked.client.RedeemPositions([]relayer.RedeemPositionInfo{info})
 	elapsed := time.Since(start)
 	if err != nil {
 		fmt.Printf("❌ redeem FAILED after %v: %v\n", elapsed, err)

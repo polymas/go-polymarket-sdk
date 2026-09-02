@@ -18,7 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
-	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 func main() {
@@ -43,7 +43,7 @@ func main() {
 		log.Fatalf("需要 POLY_API_KEY / SECRET / PASSPHRASE")
 	}
 
-	c, err := web3.NewGaslessClient(pk, sigType, types.Polygon, creds)
+	c, err := relayer.NewGaslessClient(pk, sigType, types.Polygon, creds)
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)
 	}

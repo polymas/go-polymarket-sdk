@@ -1,4 +1,4 @@
-package web3
+package relayer
 
 import (
 	"bytes"
@@ -26,6 +26,7 @@ import (
 	"github.com/polymas/go-polymarket-sdk/internal"
 	sdkhttp "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/web3"
 )
 
 // relayRevertRetryDelay 是 relayer 预模拟报 "batch would revert" 后，重建批次
@@ -98,7 +99,7 @@ func (c *GaslessClient) executeGaslessBatchOnceContext(ctx context.Context, prox
 	var body interface{}
 	var err error
 
-	switch c.signatureType {
+	switch c.GetSignatureType() {
 	case types.ProxySignatureType:
 		body, err = c.buildProxyRelayTransactionBatchContext(ctx, proxyTxns, metadata)
 	case types.DepositWalletSignatureType:
@@ -116,13 +117,13 @@ func (c *GaslessClient) executeGaslessBatchOnceContext(ctx context.Context, prox
 		}
 		body, err = c.buildSafeRelayTransactionBatchContext(ctx, safeTxns, metadata)
 	default:
-		return nil, fmt.Errorf("unsupported signature type: %d", c.signatureType)
+		return nil, fmt.Errorf("unsupported signature type: %d", c.GetSignatureType())
 	}
 
 	if err != nil {
 		// 把 CWIA "钱包未部署" 错误向上透传成同名 sentinel，让业务层
-		// 可以 errors.Is(err, ErrDepositWalletNotDeployed) 触发先 deploy 流程。
-		if errors.Is(err, ErrDepositWalletNotDeployed) {
+		// 可以 errors.Is(err, web3.ErrDepositWalletNotDeployed) 触发先 deploy 流程。
+		if errors.Is(err, web3.ErrDepositWalletNotDeployed) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to build relay transaction: %w", err)
@@ -170,7 +171,7 @@ func (c *GaslessClient) executeGaslessBatchOnceContext(ctx context.Context, prox
 		req.Header.Set(k, v)
 	}
 
-	log.Printf("[Relayer调用 #%d] 批量提交交易到 relayer (类型: %d, 交易数: %d)", callCount, int(c.signatureType), len(proxyTxns))
+	log.Printf("[Relayer调用 #%d] 批量提交交易到 relayer (类型: %d, 交易数: %d)", callCount, int(c.GetSignatureType()), len(proxyTxns))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -383,12 +384,12 @@ func (c *GaslessClient) buildProxyRelayTransactionBatchContext(ctx context.Conte
 	// Estimate gas
 	proxyFactoryAddr := common.HexToAddress(internal.PolygonProxyFactory)
 	callMsg := ethereum.CallMsg{
-		From: common.HexToAddress(string(c.baseAddress)),
+		From: common.HexToAddress(string(c.GetBaseAddress())),
 		To:   &proxyFactoryAddr,
 		Data: encodedTxn,
 	}
 
-	estimatedGas, err := c.estimateGasWithRetry(ctx, callMsg)
+	estimatedGas, err := c.EstimateGasWithRetry(ctx, callMsg)
 	if err != nil {
 		// Use default if estimation fails (increase for batch)
 		estimatedGas = internal.DefaultGasEstimate * uint64(len(proxyTxns))
@@ -401,7 +402,7 @@ func (c *GaslessClient) buildProxyRelayTransactionBatchContext(ctx context.Conte
 
 	// Step 1: Create raw struct bytes (not hashed yet)
 	structBytes, err := c.createProxyStructBytes(
-		string(c.baseAddress),
+		string(c.GetBaseAddress()),
 		proxyFactoryAddr.Hex(),
 		encodedTxnHex,
 		relayerFee,
@@ -435,7 +436,7 @@ func (c *GaslessClient) buildProxyRelayTransactionBatchContext(ctx context.Conte
 
 	// Hash the message (sign_message does keccak256)
 	hash := crypto.Keccak256Hash(messageBytes)
-	signature, err := c.signer.SignWithRecovery(hash)
+	signature, err := c.GetSigner().SignWithRecovery(hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
@@ -449,7 +450,7 @@ func (c *GaslessClient) buildProxyRelayTransactionBatchContext(ctx context.Conte
 	// Use struct to maintain field order matching Python version for consistent HMAC signature
 	return &ProxyRelayBody{
 		Data:        encodedTxnHex,
-		From:        string(c.baseAddress),
+		From:        string(c.GetBaseAddress()),
 		Metadata:    metadata,
 		Nonce:       strconv.Itoa(nonce),
 		ProxyWallet: string(proxyAddr),
@@ -617,7 +618,7 @@ func (c *GaslessClient) buildSafeRelayTransactionBatchContext(ctx context.Contex
 	// Use struct to maintain field order matching Python version for consistent HMAC signature
 	return &SafeRelayBody{
 		Data:        safeTxn["data"].(string),
-		From:        string(c.baseAddress),
+		From:        string(c.GetBaseAddress()),
 		Metadata:    metadata,
 		Nonce:       strconv.Itoa(nonce),
 		ProxyWallet: string(safeProxyAddr),
@@ -803,7 +804,7 @@ func (c *GaslessClient) getRelayNonceContext(parent context.Context, walletType 
 		}
 
 		q := req.URL.Query()
-		q.Set("address", string(c.baseAddress))
+		q.Set("address", string(c.GetBaseAddress()))
 		q.Set("type", walletType)
 		req.URL.RawQuery = q.Encode()
 
@@ -884,7 +885,7 @@ func (c *GaslessClient) waitForTransactionReceiptContext(parent context.Context,
 
 	for {
 		attemptCount++
-		receipt, err := c.transactionReceiptWithRetry(ctx, txHash)
+		receipt, err := c.TransactionReceiptWithRetry(ctx, txHash)
 		if err == nil {
 			// Check if transaction failed
 			if receipt.Status == 0 {
@@ -897,7 +898,7 @@ func (c *GaslessClient) waitForTransactionReceiptContext(parent context.Context,
 			}
 
 			// Get transaction to extract To address
-			tx, _, err := c.transactionByHashWithRetry(ctx, txHash)
+			tx, _, err := c.TransactionByHashWithRetry(ctx, txHash)
 			var toAddr *common.Address
 			if err == nil && tx != nil {
 				toAddr = tx.To()
@@ -929,7 +930,7 @@ func (c *GaslessClient) waitForTransactionReceiptContext(parent context.Context,
 // extractTransactionError 尝试从失败的交易中提取错误信息
 func (c *GaslessClient) extractTransactionError(ctx context.Context, txHash common.Hash, receipt *ethtypes.Receipt) string {
 	// 获取交易详情
-	tx, _, err := c.transactionByHashWithRetry(ctx, txHash)
+	tx, _, err := c.TransactionByHashWithRetry(ctx, txHash)
 	if err != nil {
 		// 如果无法获取交易，至少提供基本信息
 		return fmt.Sprintf("无法获取交易详情 (txHash: %s)", txHash.Hex())
@@ -947,7 +948,7 @@ func (c *GaslessClient) extractTransactionError(ctx context.Context, txHash comm
 
 	// 在交易所在的区块之前执行 call（使用 receipt.BlockNumber - 1）
 	blockNum := new(big.Int).Sub(receipt.BlockNumber, big.NewInt(1))
-	_, err = c.callContractWithRetry(ctx, msg, blockNum)
+	_, err = c.CallContractWithRetry(ctx, msg, blockNum)
 	if err != nil {
 		// 从错误信息中提取 revert reason
 		errStr := err.Error()

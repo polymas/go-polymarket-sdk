@@ -41,6 +41,7 @@ import (
 	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 func main() {
@@ -178,7 +179,7 @@ func main() {
 			log.Fatalf("设了 POLY_BUILDER_API_KEY 就必须一起设 SECRET 和 PASSPHRASE")
 		}
 	}
-	gc, err := web3.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, creds)
+	gc, err := relayer.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, creds)
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)
 	}
@@ -205,7 +206,7 @@ func main() {
 //
 // 因为 executeGaslessBatch 是私有的，本工具用 SetV2Allowances 这条公开 API
 // 替代：pUSD/CTF 四笔授权，链上幂等无副作用。
-func callExecuteGaslessBatch(gc *web3.GaslessClient, _ signing.CWIACall, _ string) (*types.TransactionReceipt, error) {
+func callExecuteGaslessBatch(gc *relayer.GaslessClient, _ signing.CWIACall, _ string) (*types.TransactionReceipt, error) {
 	// SetV2Allowances 自身就是一个标准的 batch（pUSD approve + CTF approval 共四笔），
 	// 走的是 executeGaslessBatch -> CWIA 分支，所以是验证 relayer 提交流程的
 	// 最直接公开入口。

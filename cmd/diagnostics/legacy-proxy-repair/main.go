@@ -23,6 +23,7 @@ import (
 
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 func main() {
@@ -71,7 +72,7 @@ func main() {
 	fmt.Println("✅ funder 校验通过")
 	fmt.Println()
 
-	gasless, err := web3.NewGaslessClient(pk, types.ProxySignatureType, types.Polygon, creds)
+	gasless, err := relayer.NewGaslessClient(pk, types.ProxySignatureType, types.Polygon, creds)
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)
 	}

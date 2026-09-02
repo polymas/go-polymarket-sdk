@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/polymas/go-polymarket-sdk/types"
-	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 func main() {
@@ -23,7 +23,7 @@ func main() {
 	if pk == "" {
 		log.Fatal("env PK required")
 	}
-	c, err := web3.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, nil,
+	c, err := relayer.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, nil,
 		"https://rpc-mainnet.matic.quiknode.pro")
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)

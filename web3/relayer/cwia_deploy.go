@@ -1,4 +1,4 @@
-package web3
+package relayer
 
 import (
 	"bytes"
@@ -49,8 +49,8 @@ func (c *GaslessClient) DeployDepositWallet(force bool) (*types.TransactionRecei
 }
 
 func (c *GaslessClient) DeployDepositWalletContext(ctx context.Context, force bool) (*types.TransactionReceipt, error) {
-	if c.signatureType != types.DepositWalletSignatureType {
-		return nil, fmt.Errorf("DeployDepositWallet 只支持 DepositWalletSignatureType/POLY_1271 (=3)，当前=%d", c.signatureType)
+	if c.GetSignatureType() != types.DepositWalletSignatureType {
+		return nil, fmt.Errorf("DeployDepositWallet 只支持 DepositWalletSignatureType/POLY_1271 (=3)，当前=%d", c.GetSignatureType())
 	}
 
 	walletHex, err := c.GetPolyProxyAddress()
@@ -60,7 +60,7 @@ func (c *GaslessClient) DeployDepositWalletContext(ctx context.Context, force bo
 	wallet := common.HexToAddress(string(walletHex))
 
 	if !force {
-		deployed, err := c.baseClient.IsDepositWalletDeployed(ctx, wallet)
+		deployed, err := c.BaseClient.IsDepositWalletDeployed(ctx, wallet)
 		if err != nil {
 			return nil, fmt.Errorf("check deploy status: %w", err)
 		}
@@ -72,7 +72,7 @@ func (c *GaslessClient) DeployDepositWalletContext(ctx context.Context, force bo
 
 	body := &CWIADeployBody{
 		Type: "WALLET-CREATE",
-		From: string(c.baseAddress),
+		From: string(c.GetBaseAddress()),
 		To:   internal.PolygonDepositWalletFactory,
 	}
 	return c.submitGaslessSimpleContext(ctx, body, "WALLET-CREATE")

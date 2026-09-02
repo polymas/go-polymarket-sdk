@@ -116,9 +116,9 @@ func isContractRevertError(err error) bool {
 	return strings.Contains(s, "execution reverted") || strings.Contains(s, "vm execution error") || strings.Contains(s, "revert")
 }
 
-func (c *baseClient) depositWalletFactoryBeacon(ctx context.Context) (common.Address, error) {
+func (c *BaseClient) DepositWalletFactoryBeacon(ctx context.Context) (common.Address, error) {
 	factory := common.HexToAddress(internal.PolygonDepositWalletFactory)
-	out, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &factory, Data: factoryBeaconSelector}, nil)
+	out, err := c.CallContractWithRetry(ctx, ethereum.CallMsg{To: &factory, Data: factoryBeaconSelector}, nil)
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -128,14 +128,14 @@ func (c *baseClient) depositWalletFactoryBeacon(ctx context.Context) (common.Add
 	return common.BytesToAddress(out[len(out)-20:]), nil
 }
 
-func (c *baseClient) codeAtWithRetry(ctx context.Context, account common.Address) ([]byte, error) {
+func (c *BaseClient) CodeAtWithRetry(ctx context.Context, account common.Address) ([]byte, error) {
 	c.clientMu.RLock()
 	clients := append([]*ethclient.Client(nil), c.clients...)
 	c.clientMu.RUnlock()
 	if len(clients) == 0 {
 		return nil, fmt.Errorf("no RPC clients available")
 	}
-	start := c.getNextClientIndex()
+	start := c.GetNextClientIndex()
 	var lastErr error
 	for i := range clients {
 		code, err := clients[(start+i)%len(clients)].CodeAt(ctx, account, nil)

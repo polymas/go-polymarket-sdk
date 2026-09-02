@@ -1,4 +1,4 @@
-package web3
+package relayer
 
 import (
 	"context"
@@ -457,7 +457,7 @@ func readCTFApprovalForTest(client *GaslessClient, wallet, adapter common.Addres
 	if err != nil {
 		return false, err
 	}
-	out, err := client.callContractWithRetry(context.Background(), ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
+	out, err := client.CallContractWithRetry(context.Background(), ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
 	if err != nil {
 		return false, err
 	}

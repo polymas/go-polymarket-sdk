@@ -2,7 +2,7 @@
 //
 // ⚠️ 2026-05-29 起这条已**非必需**：当初以为 relayer 封 NegRisk redeem，后来查清是 SDK adapter
 // 地址过时，迁到新地址后 gasless RedeemPositions 已能正常走（实测 n=3 通过）。本例留作
-// **无 relayer / relayer 异常时的兜底**（EOA 自付、不经中继）。优先用 web3.GaslessClient.RedeemPositions。
+// **无 relayer / relayer 异常时的兜底**（EOA 自付、不经中继）。优先用 relayer.GaslessClient.RedeemPositions。
 //
 // 用法：
 //
@@ -28,7 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/polymas/go-polymarket-sdk/types"
-	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 const (
@@ -64,7 +64,7 @@ func main() {
 	eoa := crypto.PubkeyToAddress(priv.PublicKey)
 
 	// SDK 派生 Safe 地址
-	c, err := web3.NewGaslessClient(pk, types.SafeSignatureType, types.Polygon, nil, rpcURL)
+	c, err := relayer.NewGaslessClient(pk, types.SafeSignatureType, types.Polygon, nil, rpcURL)
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)
 	}

@@ -17,7 +17,7 @@ import (
 // 派生路径：DepositWalletFactory.predictWalletAddress(impl, bytes32(owner))
 // 其中 impl 通过 factory.implementation() 实时读取。
 //
-// 仅用作签名地址计算的纯只读 RPC 调用，不需要私钥；为复用 baseClient 的
+// 仅用作签名地址计算的纯只读 RPC 调用，不需要私钥；为复用 BaseClient 的
 // 节点池/重试逻辑，这里随机生成一个一次性私钥。
 func TestGetCWIAProxyAddress(t *testing.T) {
 	// 一次性测试私钥（与真实账户无关；只是 NewClient 必须传一个）。
@@ -31,9 +31,9 @@ func TestGetCWIAProxyAddress(t *testing.T) {
 	}
 	defer cli.Close()
 
-	bc, ok := cli.(*baseClient)
+	bc, ok := cli.(*BaseClient)
 	if !ok {
-		t.Fatalf("expected *baseClient, got %T", cli)
+		t.Fatalf("expected *BaseClient, got %T", cli)
 	}
 
 	got, err := bc.getCWIAProxyAddress(types.EthAddress(knownEOA))

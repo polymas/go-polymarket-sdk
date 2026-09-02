@@ -1,4 +1,4 @@
-package web3
+package relayer
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/web3"
 )
 
 // SignatureParams 表示中继交易的签名参数
@@ -138,7 +139,7 @@ func (c *GaslessClient) signSafeTransactionContext(ctx context.Context, safeTxn 
 		Data: packed,
 	}
 
-	txHashBytes, err := c.callContractWithRetry(ctx, callMsg, nil)
+	txHashBytes, err := c.CallContractWithRetry(ctx, callMsg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call getTransactionHash: %w", err)
 	}
@@ -159,7 +160,7 @@ func (c *GaslessClient) signSafeTransactionContext(ctx context.Context, safeTxn 
 
 	// Hash the message (sign_message does keccak256)
 	hash := crypto.Keccak256Hash(messageBytes)
-	signature, err := c.signer.SignWithRecovery(hash)
+	signature, err := c.GetSigner().SignWithRecovery(hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
@@ -177,13 +178,13 @@ func (c *GaslessClient) getSafeProxyAddressContext(ctx context.Context) (types.E
 	safeProxyFactoryAddr := common.HexToAddress(internal.SafeProxyFactory)
 
 	// Parse SafeProxyFactory ABI
-	safeProxyFactoryABI, err := getSafeProxyFactoryABI()
+	safeProxyFactoryABI, err := web3.GetSafeProxyFactoryABI()
 	if err != nil {
 		return "", fmt.Errorf("failed to parse safe proxy factory ABI: %w", err)
 	}
 
 	// Call computeProxyAddress(address owner) on SafeProxyFactory
-	addr := common.HexToAddress(string(c.baseAddress))
+	addr := common.HexToAddress(string(c.GetBaseAddress()))
 	packed, err := safeProxyFactoryABI.Pack("computeProxyAddress", addr)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack computeProxyAddress: %w", err)
@@ -195,7 +196,7 @@ func (c *GaslessClient) getSafeProxyAddressContext(ctx context.Context) (types.E
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(ctx, callMsg, nil)
+	result, err := c.CallContractWithRetry(ctx, callMsg, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to call computeProxyAddress: %w", err)
 	}
@@ -235,7 +236,7 @@ func (c *GaslessClient) getSafeNonceOnChain(ctx context.Context) (uint64, error)
 		Data: packed,
 	}
 
-	result, err := c.callContractWithRetry(ctx, callMsg, nil)
+	result, err := c.CallContractWithRetry(ctx, callMsg, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to call safe.nonce(): %w", err)
 	}

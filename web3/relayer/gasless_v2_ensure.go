@@ -1,4 +1,4 @@
-package web3
+package relayer
 
 import (
 	"context"
@@ -225,7 +225,7 @@ func (c *GaslessClient) readV2State(ctx context.Context, safe common.Address) (*
 				setErr(fmt.Errorf("pack isApprovedForAll: %w", err))
 				return
 			}
-			out, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
+			out, err := c.CallContractWithRetry(ctx, ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
 			if err != nil {
 				setErr(fmt.Errorf("CTF.isApprovedForAll(%s): %w", op.Hex(), err))
 				return
@@ -275,7 +275,7 @@ func (c *GaslessClient) callERC20Uint(ctx context.Context, token common.Address,
 	if err != nil {
 		return nil, fmt.Errorf("pack %s: %w", method, err)
 	}
-	out, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &token, Data: calldata}, nil)
+	out, err := c.CallContractWithRetry(ctx, ethereum.CallMsg{To: &token, Data: calldata}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("call %s: %w", method, err)
 	}

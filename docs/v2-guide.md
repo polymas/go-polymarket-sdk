@@ -170,11 +170,11 @@ import (
     "log"
 
     "github.com/polymas/go-polymarket-sdk/types"
-    "github.com/polymas/go-polymarket-sdk/web3"
+    "github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 // bootstrapV2Session 业务层 session 进入时调一次。返回 nil 即代表已就绪。
-func bootstrapV2Session(g *web3.GaslessClient, autoClaimPreferred bool) error {
+func bootstrapV2Session(g *relayer.GaslessClient, autoClaimPreferred bool) error {
     // Stage 1: 资金 + 授权
     ready, missing, err := g.IsV2Ready()
     if err != nil {
@@ -201,7 +201,7 @@ func bootstrapV2Session(g *web3.GaslessClient, autoClaimPreferred bool) error {
 }
 
 // preflightTrade 每次下单前的业务自检。
-func preflightTrade(g *web3.GaslessClient, notional float64) error {
+func preflightTrade(g *relayer.GaslessClient, notional float64) error {
     bal, err := g.GetPUSDBalance()
     if err != nil {
         return fmt.Errorf("read pUSD balance: %w", err)
@@ -217,7 +217,7 @@ func main() {
     sigType := types.SafeSignatureType
     creds := /* POLY_BUILDER_* */ &types.ApiCreds{}
 
-    gasless, err := web3.NewGaslessClient(privateKey, sigType, types.Polygon, creds)
+    gasless, err := relayer.NewGaslessClient(privateKey, sigType, types.Polygon, creds)
     if err != nil {
         log.Fatal(err)
     }

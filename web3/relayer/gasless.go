@@ -1,4 +1,12 @@
-package web3
+// Package relayer provides Polymarket's gasless transaction path: building,
+// signing and submitting PROXY / SAFE / CWIA (Deposit Wallet) batches through
+// the Polymarket relayer, plus the V2 allowance, split/merge/redeem, auto-claim
+// and Deposit Wallet onboarding flows built on top of it.
+//
+// It layers on the read-only chain access of the parent web3 package:
+// GaslessClient embeds *web3.BaseClient, so every web3.Client query method is
+// available directly on a GaslessClient.
+package relayer
 
 import (
 	"context"
@@ -14,6 +22,7 @@ import (
 	"github.com/polymas/go-polymarket-sdk/internal"
 	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
+	"github.com/polymas/go-polymarket-sdk/web3"
 )
 
 // v2KeyRetryBackoff 是 V2 relayer key 获取失败后的最小重试间隔。
@@ -22,17 +31,17 @@ const v2KeyRetryBackoff = 30 * time.Second
 
 // GaslessClient 是通过中继进行免gas交易的Web3客户端
 type GaslessClient struct {
-	*baseClient            // 嵌入实现类型以访问私有字段
-	web3Client      Client // 保存接口引用供外部使用
-	httpClient      *http.Client
-	relayURL        string
-	relayHub        string
-	relayAddress    string
-	builderCreds    *types.ApiCreds
-	localSigner     *LocalSigner
-	conditionalABI  *abi.ABI
-	negRiskABI      *abi.ABI
-	proxyFactoryABI *abi.ABI
+	*web3.BaseClient             // 嵌入基础只读客户端，复用其 RPC 池与访问器
+	web3Client       web3.Client // 保存接口引用供外部使用
+	httpClient       *http.Client
+	relayURL         string
+	relayHub         string
+	relayAddress     string
+	builderCreds     *types.ApiCreds
+	localSigner      *LocalSigner
+	conditionalABI   *abi.ABI
+	negRiskABI       *abi.ABI
+	proxyFactoryABI  *abi.ABI
 	// V2 relayer key 懒加载。首次发请求前 ensureV2RelayerKey 触发 SIWE 派生或读
 	// 本地缓存，成功后注入 localSigner.v2Key 让后续请求走 V2 双头。
 	// 获取失败不会永久降级：每次请求都可触发重试（带 v2KeyRetryBackoff 退避），
@@ -55,13 +64,13 @@ func (c *GaslessClient) Close() {
 	if c.localSigner != nil {
 		c.localSigner.Clear()
 	}
-	if c.baseClient != nil {
-		c.baseClient.Close()
+	if c.BaseClient != nil {
+		c.BaseClient.Close()
 	}
 }
 
 // NewGaslessClient creates a new gasless Web3 client.
-// rpcURLs 为可选：若传入至少一个 URL 则使用自定义 RPC 列表，否则使用 SDK 内置列表（与 NewClient 一致）
+// rpcURLs 为可选：若传入至少一个 URL 则使用自定义 RPC 列表，否则使用 SDK 内置列表（与 web3.NewClient 一致）
 func NewGaslessClient(
 	privateKey string,
 	signatureType types.SignatureType,
@@ -78,7 +87,7 @@ func NewGaslessClient(
 		return nil, fmt.Errorf("gaslessClient only supports signature_type=1 (proxy), 2 (safe), 3 (CWIA/DepositWallet)")
 	}
 
-	baseClientInterface, err := NewClient(privateKey, signatureType, chainID, rpcURLs...)
+	baseClientInterface, err := web3.NewClient(privateKey, signatureType, chainID, rpcURLs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base client: %w", err)
 	}
@@ -103,8 +112,8 @@ func NewGaslessClient(
 	}
 
 	// Create LocalSigner for signing requests (matching Python's LocalSigner)
-	// 需要类型断言访问私有字段
-	baseClientImpl, ok := baseClientInterface.(*baseClient)
+	// 需要断言回具体类型才能嵌入 *web3.BaseClient
+	baseClientImpl, ok := baseClientInterface.(*web3.BaseClient)
 	if !ok {
 		baseClientInterface.Close()
 		return nil, fmt.Errorf("failed to cast base client to implementation type")
@@ -112,7 +121,7 @@ func NewGaslessClient(
 	localSigner := NewLocalSigner(baseClientImpl.GetSigner(), builderCreds)
 
 	client := &GaslessClient{
-		baseClient: baseClientImpl,
+		BaseClient: baseClientImpl,
 		web3Client: baseClientInterface, // 保存接口引用
 		httpClient: &http.Client{
 			Timeout: internal.HTTPClientLongTimeout,
@@ -224,12 +233,12 @@ func (c *GaslessClient) ensureV2RelayerKey(ctx context.Context) error {
 	}
 	c.v2KeyLastAttempt = time.Now()
 
-	if c.signer == nil || c.signer.Closed() {
+	if c.GetSigner() == nil || c.GetSigner().Closed() {
 		c.v2KeyLastErr = signing.ErrSignerClosed
 		log.Printf("[WARN] V2 relayer key 获取失败：%v；本次降级到旧鉴权", c.v2KeyLastErr)
 		return c.v2KeyLastErr
 	}
-	k, err := internal.EnsureV2RelayerKey(ctx, c.signer, "")
+	k, err := internal.EnsureV2RelayerKey(ctx, c.GetSigner(), "")
 	if err != nil {
 		c.v2KeyLastErr = err
 		log.Printf("[WARN] V2 relayer key 获取失败：%v；本次降级到旧鉴权（relayer 会 401），%v 后允许重试", err, v2KeyRetryBackoff)
@@ -251,7 +260,7 @@ func (c *GaslessClient) invalidateV2RelayerKey() {
 	c.localSigner.SetV2Key(nil)
 	c.v2KeyLastErr = nil
 	c.v2KeyLastAttempt = time.Time{}
-	if path := internal.DefaultV2KeyCachePath(string(c.baseAddress)); path != "" {
+	if path := internal.DefaultV2KeyCachePath(string(c.GetBaseAddress())); path != "" {
 		_ = os.Remove(path)
 	}
 }

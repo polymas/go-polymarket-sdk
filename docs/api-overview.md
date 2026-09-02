@@ -12,7 +12,8 @@ SDK 按 Polymarket 服务边界拆包，不提供需要全量初始化的顶层 
 | `websocket` | `NewClient`, `NewUserClient`, `NewSportsClient` | market/user/sports 实时订阅 |
 | `rtds` | `NewClient` | RTDS 订阅 |
 | `rfq` | `NewClient`, `NewWebSocketClient` | Combos RFQ |
-| `web3` | `NewClient`, `NewGaslessClient` | Polygon 查询、钱包与链上操作 |
+| `web3` | `NewClient` | Polygon 只读查询、钱包地址解析 |
+| `web3/relayer` | `NewGaslessClient` | Gasless 中继交易、授权与 onboarding |
 | `chainws` | `NewClient`, `NewTracker` | 链上事件和本地余额状态 |
 
 ## 支撑包
@@ -40,7 +41,7 @@ go doc github.com/polymas/go-polymarket-sdk/clob.Client
 go doc github.com/polymas/go-polymarket-sdk/clob.ReadonlyClient
 
 # 具体类型
-go doc github.com/polymas/go-polymarket-sdk/web3.GaslessClient
+go doc github.com/polymas/go-polymarket-sdk/web3/relayer.GaslessClient
 go doc github.com/polymas/go-polymarket-sdk/types.OrderArgs
 ```
 

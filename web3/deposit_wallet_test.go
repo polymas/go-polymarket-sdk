@@ -141,7 +141,7 @@ func TestRPCFailureDoesNotCacheWrongAddress(t *testing.T) {
 			return []byte{0x60}, nil
 		},
 	}
-	c := &baseClient{signatureType: types.CWIASignatureType, baseAddress: types.EthAddress(legacyOwner), depositWalletRPC: rpc}
+	c := &BaseClient{signatureType: types.CWIASignatureType, baseAddress: types.EthAddress(legacyOwner), depositWalletRPC: rpc}
 	if _, err := c.GetPolyProxyAddress(); err == nil {
 		t.Fatal("expected transient eth_getCode error")
 	}
@@ -157,14 +157,5 @@ func TestRPCFailureDoesNotCacheWrongAddress(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected eth_getCode retry, calls=%d", calls)
-	}
-}
-
-func TestV2WritableTargetsExcludeLegacyNegRiskAdapter(t *testing.T) {
-	legacy := common.HexToAddress(internal.PolygonNegRiskAdapter)
-	for _, address := range append(pusdSpendersV2(), ctfOperatorsV2()...) {
-		if address == legacy {
-			t.Fatalf("retired NegRiskAdapter remains in a V2 writable target list: %s", address.Hex())
-		}
 	}
 }

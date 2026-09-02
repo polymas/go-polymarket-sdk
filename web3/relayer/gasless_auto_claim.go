@@ -1,4 +1,4 @@
-package web3
+package relayer
 
 import (
 	"context"
@@ -81,7 +81,7 @@ func (c *GaslessClient) IsAutoClaimEnabledContext(ctx context.Context) (bool, er
 	if err != nil {
 		return false, fmt.Errorf("pack isApprovedForAll: %w", err)
 	}
-	out, err := c.callContractWithRetry(ctx, ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
+	out, err := c.CallContractWithRetry(ctx, ethereum.CallMsg{To: &ctf, Data: calldata}, nil)
 	if err != nil {
 		return false, fmt.Errorf("eth_call isApprovedForAll: %w", err)
 	}

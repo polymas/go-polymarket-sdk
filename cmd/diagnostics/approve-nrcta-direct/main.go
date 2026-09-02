@@ -27,6 +27,7 @@ import (
 	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 	"github.com/polymas/go-polymarket-sdk/web3"
+	"github.com/polymas/go-polymarket-sdk/web3/relayer"
 )
 
 const (
@@ -57,7 +58,7 @@ func main() {
 	fmt.Printf("EOA: %s\n", eoa.Hex())
 
 	// 用 SDK 派生 CWIA wallet 地址 + 读 wallet.nonce()
-	c, err := web3.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, nil, rpcURL)
+	c, err := relayer.NewGaslessClient(pk, types.CWIASignatureType, types.Polygon, nil, rpcURL)
 	if err != nil {
 		log.Fatalf("NewGaslessClient: %v", err)
 	}

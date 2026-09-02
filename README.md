@@ -82,7 +82,8 @@ clobClient, err := clob.NewClient(web3Client)
 | `websocket` | CLOB market/user channel 和 sports feed | user channel 是 |
 | `rtds` | RTDS 实时数据 | 否 |
 | `rfq` | Combos RFQ maker REST 与 quoter WebSocket | 视接口而定 |
-| `web3` | 余额、钱包解析、授权、split/merge/redeem 与 gasless | 是 |
+| `web3` | 只读链上查询：余额、钱包地址解析、授权状态 | 是 |
+| `web3/relayer` | Gasless 中继：批量交易提交、V2 授权、split/merge/redeem、提现、onboarding | 是 |
 | `chainws` | Polygon 日志订阅与钱包余额跟踪 | RPC/WSS |
 | `signing` | HMAC、EIP-712 与 POLY_1271 签名 | 本地私钥/凭证 |
 | `types` | 跨模块共享类型和值对象 | 否 |
@@ -91,7 +92,7 @@ clobClient, err := clob.NewClient(web3Client)
 
 ```bash
 go doc github.com/polymas/go-polymarket-sdk/clob
-go doc github.com/polymas/go-polymarket-sdk/web3.GaslessClient
+go doc github.com/polymas/go-polymarket-sdk/web3/relayer.GaslessClient
 ```
 
 ## 关键约定
@@ -101,7 +102,7 @@ go doc github.com/polymas/go-polymarket-sdk/web3.GaslessClient
 - 限价订单必须显式传入每笔订单的 tick size，SDK 不在下单路径中隐式请求。
 - 优先调用带 `Context` 的方法，为网络请求设置 deadline。
 - 写请求超时可能是“结果未知”，应先查询订单或链上状态再决定是否重试。
-- `web3.Client`、`web3.GaslessClient`、WebSocket 和链上订阅客户端使用完后都要关闭。
+- `web3.Client`、`relayer.GaslessClient`、WebSocket 和链上订阅客户端使用完后都要关闭。
 
 ## 文档
 
