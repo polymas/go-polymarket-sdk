@@ -59,7 +59,10 @@ func (c *GaslessClient) WithdrawPUSD(to common.Address, amount float64) (*types.
 }
 
 // collateralOfframpABI: pUSD → USDC.e 的 unwrap 合约接口。
-const collateralOfframpABISource = `[{"name":"unwrap","type":"function","stateMutability":"nonpayable","inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[]}]`
+// 真实签名是 unwrap(address _asset, address _to, uint256 _amount)（见 CollateralOfframp.sol，
+// Sourcify 验证源码逐字核对过）——比这里原来缺了 _asset 参数的版本多一个入参，签名不对会导致
+// selector 对不上，relayer gas estimation 直接 revert。
+const collateralOfframpABISource = `[{"name":"unwrap","type":"function","stateMutability":"nonpayable","inputs":[{"name":"asset","type":"address"},{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[]}]`
 
 var collateralOfframpABI abi.ABI
 
@@ -74,17 +77,32 @@ func init() {
 // UnwrapPUSDToUSDC 用 proxy 调 CollateralOfframp.unwrap(to, amount)：烧掉 proxy 持有的
 // pUSD，把等额 USDC.e 直接发到 to。amount 是人类单位（1.0 = 1 pUSD = 1 USDC.e，6 decimals）。
 // 这是从 Polymarket 钱包提现 USDC.e 到任意地址的正路。
+//
+// unwrap 内部走 pUSD.transferFrom(proxy, offramp, amount)，所以批次里带上
+// pUSD.approve(offramp, MAX)（幂等，重复跑无副作用）——否则首次调用会因没有 allowance
+// 而 gas estimation revert。
 func (c *GaslessClient) UnwrapPUSDToUSDC(to common.Address, amount float64) (*types.TransactionReceipt, error) {
 	units, err := toUnits6(amount)
 	if err != nil {
 		return nil, fmt.Errorf("amount: %w", err)
 	}
-	data, err := collateralOfframpABI.Pack("unwrap", to, units)
+	pusd := common.HexToAddress(internal.PolygonPUSD)
+	offramp := common.HexToAddress(internal.PolygonCollateralOfframp)
+
+	approveData, err := packApproveMax(offramp)
+	if err != nil {
+		return nil, fmt.Errorf("pack approve pUSD→offramp: %w", err)
+	}
+	usdc := common.HexToAddress(internal.PolygonCollateral)
+	unwrapData, err := collateralOfframpABI.Pack("unwrap", usdc, to, units)
 	if err != nil {
 		return nil, fmt.Errorf("pack unwrap: %w", err)
 	}
-	txn := callTxn(common.HexToAddress(internal.PolygonCollateralOfframp), data)
-	return c.executeGaslessBatch([]map[string]any{txn},
+	txns := []map[string]any{
+		callTxn(pusd, approveData),
+		callTxn(offramp, unwrapData),
+	}
+	return c.executeGaslessBatch(txns,
 		fmt.Sprintf("Offramp.unwrap %.6f pUSD → %s", amount, to.Hex()),
 		"withdraw-unwrap")
 }

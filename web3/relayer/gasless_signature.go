@@ -144,11 +144,20 @@ func (c *GaslessClient) signSafeTransactionContext(ctx context.Context, safeTxn 
 		return nil, fmt.Errorf("failed to call getTransactionHash: %w", err)
 	}
 
-	// Unpack the result (returns bytes32)
 	var txHash common.Hash
-	err = safeABI.UnpackIntoInterface(&txHash, "getTransactionHash", txHashBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unpack getTransactionHash result: %w", err)
+	if len(txHashBytes) == 0 {
+		// Counter-factual Safe：合约还没部署（首次交易由 relayer 的 execTransaction
+		// 顺带部署），eth_call 对空地址返回空 bytes 而不是 revert，unpack 会失败。
+		// 退化到本地按 EIP-712 算 Safe v1.3.0 的 SafeTx 哈希，公式与已部署 Safe 的
+		// getTransactionHash 完全一致（已用一个已部署的 Polymarket Safe 交叉验证过，
+		// 任意 to/value/data/nonce 下 on-chain 结果与本地计算逐字节相同）。
+		txHash = computeSafeTxHashOffChain(safeAddrCommon, c.GetChainID(), to, value, data, operation,
+			safeTxGas, baseGas, gasPrice, gasToken, refundReceiver, nonceBig)
+	} else {
+		// Unpack the result (returns bytes32)
+		if err := safeABI.UnpackIntoInterface(&txHash, "getTransactionHash", txHashBytes); err != nil {
+			return nil, fmt.Errorf("failed to unpack getTransactionHash result: %w", err)
+		}
 	}
 
 	// Sign the transaction hash using encode_defunct (same as Python)
@@ -166,6 +175,54 @@ func (c *GaslessClient) signSafeTransactionContext(ctx context.Context, safeTxn 
 	}
 
 	return signature, nil
+}
+
+// computeSafeTxHashOffChain 复现 Gnosis Safe v1.3.0 的 getTransactionHash，供合约尚未
+// 部署（counter-factual）时本地签名用。EIP-712：
+//
+//	domainSeparator = keccak256(EIP712Domain(uint256 chainId,address verifyingContract) ‖ chainId ‖ safe)
+//	safeTxHash      = keccak256(SafeTx(...) typehash ‖ 各字段)
+//	txHash          = keccak256(0x19 0x01 ‖ domainSeparator ‖ safeTxHash)
+func computeSafeTxHashOffChain(
+	safe common.Address,
+	chainID types.ChainID,
+	to common.Address,
+	value *big.Int,
+	data []byte,
+	operation uint8,
+	safeTxGas, baseGas, gasPrice *big.Int,
+	gasToken, refundReceiver common.Address,
+	nonce *big.Int,
+) common.Hash {
+	domainTypeHash := crypto.Keccak256([]byte("EIP712Domain(uint256 chainId,address verifyingContract)"))
+	domainSeparator := crypto.Keccak256(
+		domainTypeHash,
+		common.LeftPadBytes(big.NewInt(int64(chainID)).Bytes(), 32),
+		common.LeftPadBytes(safe.Bytes(), 32),
+	)
+
+	safeTxTypeHash := crypto.Keccak256([]byte(
+		"SafeTx(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 nonce)",
+	))
+	dataHash := crypto.Keccak256(data)
+	opBytes := make([]byte, 32)
+	opBytes[31] = operation
+
+	safeTxHash := crypto.Keccak256(
+		safeTxTypeHash,
+		common.LeftPadBytes(to.Bytes(), 32),
+		common.LeftPadBytes(value.Bytes(), 32),
+		dataHash,
+		opBytes,
+		common.LeftPadBytes(safeTxGas.Bytes(), 32),
+		common.LeftPadBytes(baseGas.Bytes(), 32),
+		common.LeftPadBytes(gasPrice.Bytes(), 32),
+		common.LeftPadBytes(gasToken.Bytes(), 32),
+		common.LeftPadBytes(refundReceiver.Bytes(), 32),
+		common.LeftPadBytes(nonce.Bytes(), 32),
+	)
+
+	return common.BytesToHash(crypto.Keccak256([]byte{0x19, 0x01}, domainSeparator, safeTxHash))
 }
 
 // getSafeProxyAddress gets the Safe proxy address for the base address
