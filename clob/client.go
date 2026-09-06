@@ -27,6 +27,11 @@ type OrderClient interface {
 	WaitForOrderFillSettlement(ctx context.Context, response types.OrderPostResponse) (*types.OrderFillSettlement, error)
 	AwaitOrderResult(ctx context.Context, response types.OrderPostResponse) (*types.OrderPostResponse, error)
 	AwaitOrderResults(ctx context.Context, responses []types.OrderPostResponse) ([]types.OrderPostResponse, error)
+	// RecordTradeUpdate 把 user WebSocket 频道推送的 trade 事件喂给 SDK。喂入后
+	// 结算等待（AndWait / AwaitOrderResults / WaitForOrderFillSettlement）优先
+	// 消费推送，HTTP 轮询退化为 2 秒一次的兜底。用 websocket.UserTradeEvent 的
+	// ToClobTrade 转换后传入即可；从不调用则保持纯轮询行为。
+	RecordTradeUpdate(trade types.ClobTrade)
 	CreateAndPostOrders(orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
 	CreateAndPostOrdersContext(ctx context.Context, orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
 	CreateAndPostOrdersInstant(orderArgsList []types.OrderArgs, orderTypes []types.OrderType) ([]types.OrderPostResponse, error)
@@ -161,6 +166,19 @@ type baseClient struct {
 	deriveCreds   *types.ApiCreds
 	negRisk       *negRiskCache
 	web3Client    web3.Client // 保存 Web3Client 引用（可能为nil，用于只读客户端）
+
+	tradeFeedOnce sync.Once
+	tradeFeed     *tradeFeed // 业务层喂入的 user channel trade 事件，见 RecordTradeUpdate
+}
+
+// trades 返回懒初始化的 trade 事件缓存，便于测试里直接构造 baseClient。
+func (c *baseClient) trades() *tradeFeed {
+	c.tradeFeedOnce.Do(func() {
+		if c.tradeFeed == nil {
+			c.tradeFeed = newTradeFeed()
+		}
+	})
+	return c.tradeFeed
 }
 
 // ClientOption 客户端构造选项

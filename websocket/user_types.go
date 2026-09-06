@@ -65,3 +65,40 @@ type UserTradeEvent struct {
 	TraderSide      string                `json:"trader_side"`
 	Timestamp       string                `json:"timestamp"`
 }
+
+// ToClobTrade 把 user channel 的 trade 事件转换成 REST 同构的 types.ClobTrade，
+// 便于直接喂给 clob.OrderClient.RecordTradeUpdate 加速结算等待。
+func (e *UserTradeEvent) ToClobTrade() types.ClobTrade {
+	makers := make([]types.ClobMakerOrder, 0, len(e.MakerOrders))
+	for _, m := range e.MakerOrders {
+		makers = append(makers, types.ClobMakerOrder{
+			OrderID:       types.Keccak256(m.OrderID),
+			Owner:         m.Owner,
+			MakerAddress:  types.EthAddress(m.MakerAddress),
+			MatchedAmount: m.MatchedAmount,
+			Price:         m.Price,
+			TokenID:       m.TokenID,
+			Outcome:       m.Outcome,
+			Side:          m.Side,
+		})
+	}
+	return types.ClobTrade{
+		ID:              e.ID,
+		TakerOrderID:    types.Keccak256(e.TakerOrderID),
+		Market:          e.Market,
+		TokenID:         e.TokenID,
+		Side:            e.Side,
+		Size:            e.Size,
+		Price:           e.Price,
+		Status:          types.ClobTradeStatus(e.Status),
+		MatchTime:       e.MatchTime,
+		LastUpdate:      e.LastUpdate,
+		Outcome:         e.Outcome,
+		BucketIndex:     e.BucketIndex,
+		Owner:           e.Owner,
+		MakerAddress:    types.EthAddress(e.MakerAddress),
+		TransactionHash: types.Keccak256(e.TransactionHash),
+		TraderSide:      e.TraderSide,
+		MakerOrders:     makers,
+	}
+}

@@ -65,6 +65,31 @@ go doc github.com/polymas/go-polymarket-sdk/types.OrderArgs
 - 市价 BUY 的 amount 是 pUSD，SELL 的 amount 是 shares。
 - 写请求超时或断连后，不应盲目重发；先用订单 ID、成交或链上 receipt 对账。
 
+### 下单热路径（低延迟建议）
+
+SDK 内部已经是 HTTP/2 多路复用、请求体只序列化一次、超过 15 单的子批并发提交。
+剩下能省掉整段网络往返的都在调用方参数上：
+
+- **限价单传 `OrderArgs.NegRisk`。** 为 nil 时 SDK 先查 GET /neg-risk 再签名；猜错
+  exchange 域还会多一次重签重发。gamma 市场数据里就有 negRisk，直接透传；也可以
+  启动时用 `PrimeNegRisk` 灌缓存。
+- **市价单传保护价（BUY 传 `MaxPrice`，SELL 传 `MinPrice`）。** 不传时 SDK 会先 GET
+  /book 算价，传了则本地算金额，整笔只剩一次 POST。有 WebSocket 盘口的业务层应
+  始终传。
+- **用 `...Context` 变体并设短 deadline。** SDK 默认 HTTP 超时 8 秒，对狙击型策略
+  太长；传 1 到 2 秒的 deadline 即可。超时被视为结果未知，SDK 按本地确定性
+  order hash 对账，不会重复下单。
+- **结算确认喂 WebSocket 事件。** `AndWait` / `AwaitOrderResults` 默认每 250ms 逐个
+  trade ID 轮询 GET /data/trades。把 user channel 的 trade 事件通过
+  `OrderClient.RecordTradeUpdate(event.ToClobTrade())` 喂给 SDK 后，等待改为事件
+  唤醒，HTTP 退化为 2 秒一次的兜底：
+
+  ```go
+  userWS.SetOnTradeUpdate(func(ev *websocket.UserTradeEvent) {
+      clobClient.RecordTradeUpdate(ev.ToClobTrade())
+  })
+  ```
+
 ### 余额
 
 - `GetCollateralBalance`：当前 V2 抵押物 pUSD。

@@ -323,6 +323,11 @@ func (c *orderClientImpl) resolveOrderTransactionsContext(
 	return err
 }
 
+// RecordTradeUpdate 实现 OrderClient.RecordTradeUpdate。
+func (c *orderClientImpl) RecordTradeUpdate(trade types.ClobTrade) {
+	c.baseClient.trades().record(trade)
+}
+
 func (c *orderClientImpl) waitForTradeIDs(
 	ctx context.Context,
 	tradeIDs []string,
@@ -336,12 +341,82 @@ func (c *orderClientImpl) waitForTradeIDs(
 		return latest, timing, nil
 	}
 
+	feed := c.baseClient.trades()
+	// feed 激活后 HTTP 只做兜底：首次轮询也推迟到兜底间隔之后，给推送让路。
+	feedActive := feed.active()
+	httpInterval := pollInterval
+	if feedActive && httpInterval < tradeFeedFallbackPollInterval {
+		httpInterval = tradeFeedFallbackPollInterval
+	}
+	nextHTTPPoll := time.Now()
+	if feedActive {
+		nextHTTPPoll = nextHTTPPoll.Add(httpInterval)
+	}
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return latest, timing, err
 		}
-		timing.PollCount++
 
+		// 先消费推送缓存，命中的 trade 不再发 HTTP。
+		wake := feed.wait()
+		for _, id := range ids {
+			if _, ok := resolved[id]; ok {
+				continue
+			}
+			if trade, ok := feed.lookup(id); ok {
+				latest[id] = trade
+				if tradeExecutionResolved(trade) {
+					resolved[id] = struct{}{}
+				}
+			}
+		}
+		if len(resolved) == len(ids) {
+			return latest, timing, nil
+		}
+
+		if !feedActive || !time.Now().Before(nextHTTPPoll) {
+			timing.PollCount++
+			nextHTTPPoll = time.Now().Add(httpInterval)
+			c.pollTradesOnce(ctx, ids, resolved, latest, &timing)
+			if len(resolved) == len(ids) {
+				return latest, timing, nil
+			}
+		}
+
+		// 等待：推送唤醒、兜底轮询到点、或 ctx 结束。
+		sleep := httpInterval
+		if feedActive {
+			if until := time.Until(nextHTTPPoll); until < sleep {
+				sleep = until
+			}
+			if sleep < 0 {
+				sleep = 0
+			}
+		}
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return latest, timing, ctx.Err()
+		case <-wake:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}
+
+// pollTradesOnce 对尚未 resolved 的 trade ID 并发发起一轮 GET /data/trades。
+func (c *orderClientImpl) pollTradesOnce(
+	ctx context.Context,
+	ids []string,
+	resolved map[string]struct{},
+	latest map[string]types.ClobTrade,
+	timing *types.OrderResponseTiming,
+) {
+	{
 		pending := make([]string, 0, len(ids)-len(resolved))
 		for _, id := range ids {
 			if _, ok := resolved[id]; !ok {
@@ -381,19 +456,6 @@ func (c *orderClientImpl) waitForTradeIDs(
 			}()
 		}
 		wg.Wait()
-
-		if len(resolved) == len(ids) {
-			return latest, timing, nil
-		}
-		timer := time.NewTimer(pollInterval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return latest, timing, ctx.Err()
-		case <-timer.C:
-		}
 	}
 }
 

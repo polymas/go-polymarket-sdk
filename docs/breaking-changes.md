@@ -153,3 +153,24 @@ positions := []relayer.RedeemPositionInfo{...}
 与 `internal.CreateRelayerHeaders`，而 `internal` 已经依赖 `signing`）。
 由于 `LocalSigner` 只被 gasless 路径使用，最终落在 `web3/relayer`。
 它此前未被 SDK 外部引用，因此实际不影响任何调用方。
+
+## 2026-09-06 — 批量下单子批并发、OrderClient 新增方法
+
+### 超过 15 单的子批并发提交
+
+`CreateAndPostOrders*` 把超过 15 单的请求切成多个 HTTP 子批，此前顺序提交且
+"首个失败子批终止后续提交"。现在所有子批并发发出：
+
+- 一个子批失败不再阻止其它子批，其它子批返回真实结果；错误按子批编号
+  `errors.Join` 汇总。
+- 前一子批发现的 `market_closed` token 不再预先回填到后续子批，每个子批各自报告。
+- CLOB 接收各子批的先后顺序不保证与输入顺序一致。跨子批有严格先后依赖的业务
+  应拆成多次调用。
+
+结果切片仍与输入等长同序，逐单状态语义（`market_closed` / `not_submitted` /
+`unknown` / 逐单拒绝）不变。
+
+### `OrderClient` 新增 `RecordTradeUpdate(types.ClobTrade)`
+
+自行实现或 mock 了 `clob.OrderClient` 的代码需要补这一个方法。不调用它时 SDK
+行为与之前一致（纯 HTTP 轮询结算）。配套新增 `websocket.UserTradeEvent.ToClobTrade()`。
