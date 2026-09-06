@@ -128,9 +128,9 @@
 - [x] 保留简洁的 `OrderPostResponse` API，不引入过度设计的 `BatchOrderResult`/`PartialBatchError`；用 `market_closed` / `not_submitted` / `unknown` / `server_rejected` 四个明确状态表达边界。
 - [x] `orderbook does not exist` 不再剥离后重试。`market_closed` 仅表示“业务已正确处理、无需重试”，不代表交易所已接单或订单已创建。
 - [x] 同一 HTTP 子批全部是已关闭 token 时返回 `market_closed` + `nil` error；混有其他 token 时，其他位置为 `not_submitted` 并返回非空 error。
-- [x] 跨 15 单切批时，首个失败子批终止后续提交；之前结果保留，当前子批按错误语义对齐，后续位置为 `not_submitted`，同时返回非空 error。
+- [x] 跨 15 单切批时，各子批并发提交、互不阻塞；失败子批按错误语义对齐自己的位置，其它子批正常返回，错误按子批编号 `errors.Join` 汇总。子批之间的服务端接收顺序不保证。
 - [x] HTTP 200 的逐单业务拒绝保留在各自结果中，不升级为整批 error；传输超时等无法确认服务端结果的场景标记为 `unknown`，由业务层先对账而非盲目重试。
-- [x] 单元测试覆盖关闭订单簿终态、混合关闭 token、顶层 4xx、传输超时、本地签名错误、HTTP 200 逐单拒绝、响应数量错位和跨 15 单中止。
+- [x] 单元测试覆盖关闭订单簿终态、混合关闭 token、顶层 4xx、传输超时、本地签名错误、HTTP 200 逐单拒绝、响应数量错位和跨 15 单并发子批。
 - [x] 已用 `.env` Safe 钱包完成生产回归：PostOnly、最大 `0.05 USDC` 名义金额的正常订单成功挂出并撤销，确认本次错误语义修改未破坏成功路径。
 - [x] 提供可选的紧凑 `ConditionID` / `TokenID` map key 类型，避免把不同 ID 语义混用；单元测试覆盖 bytes32、uint256 上界、非法输入、规范字符串还原及 JSON map 往返。
 

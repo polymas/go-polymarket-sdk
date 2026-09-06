@@ -3,6 +3,7 @@ package clob
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,34 +170,38 @@ func TestNormalizeV2BatchResponsesKeepsPerOrderRejection(t *testing.T) {
 	}
 }
 
-func TestRunOrderBatchesStopsAfterFailureAndPreservesIndexes(t *testing.T) {
+func TestRunOrderBatchesRunsBatchesConcurrentlyAndPreservesIndexes(t *testing.T) {
 	args := make([]types.OrderArgs, 32)
 	typesList := make([]types.OrderType, 32)
 	for i := range args {
 		args[i].TokenID = fmt.Sprintf("%d", i+1)
 		typesList[i] = types.OrderTypeGTC
 	}
-	calls := 0
+	var calls atomic.Int32
 	results, err := runOrderBatches(args, typesList, 15, func(batch []types.OrderArgs, _ []types.OrderType, _ ...bool) ([]types.OrderPostResponse, error) {
-		calls++
-		if calls == 1 {
-			out := make([]types.OrderPostResponse, len(batch))
-			for i := range out {
-				out[i] = types.OrderPostResponse{OrderID: types.Keccak256("ok-" + batch[i].TokenID), Status: "live"}
-			}
-			return out, nil
+		calls.Add(1)
+		// 第二个子批（token 16-30）模拟超时；其它子批正常。子批并发，不能靠调用次序判断。
+		if batch[0].TokenID == "16" {
+			return makeBatchStatusResults(len(batch), OrderUnknownStatus, "timeout"), fmt.Errorf("request failed: timeout")
 		}
-		return makeBatchStatusResults(len(batch), OrderUnknownStatus, "timeout"), fmt.Errorf("request failed: timeout")
+		out := make([]types.OrderPostResponse, len(batch))
+		for i := range out {
+			out[i] = types.OrderPostResponse{OrderID: types.Keccak256("ok-" + batch[i].TokenID), Status: "live"}
+		}
+		return out, nil
 	})
-	if err == nil || calls != 2 {
-		t.Fatalf("err=%v calls=%d, want failure after two calls", err, calls)
+	if err == nil || calls.Load() != 3 {
+		t.Fatalf("err=%v calls=%d, want one failing batch out of three concurrent calls", err, calls.Load())
+	}
+	if !strings.Contains(err.Error(), "批次 2/3") {
+		t.Fatalf("err = %v, want it to name batch 2/3", err)
 	}
 	if len(results) != len(args) {
 		t.Fatalf("len(results) = %d, want %d", len(results), len(args))
 	}
 	for i := 0; i < 15; i++ {
-		if results[i].Status != "live" {
-			t.Fatalf("result[%d] = %+v, want live", i, results[i])
+		if results[i].Status != "live" || results[i].OrderID != types.Keccak256(fmt.Sprintf("ok-%d", i+1)) {
+			t.Fatalf("result[%d] = %+v, want live ok-%d", i, results[i], i+1)
 		}
 	}
 	for i := 15; i < 30; i++ {
@@ -204,14 +209,15 @@ func TestRunOrderBatchesStopsAfterFailureAndPreservesIndexes(t *testing.T) {
 			t.Fatalf("result[%d] = %+v, want unknown", i, results[i])
 		}
 	}
+	// 失败的子批不再阻止后面的子批：第三批照常提交成功。
 	for i := 30; i < 32; i++ {
-		if results[i].Status != OrderNotSubmittedStatus {
-			t.Fatalf("result[%d] = %+v, want not_submitted", i, results[i])
+		if results[i].Status != "live" || results[i].OrderID != types.Keccak256(fmt.Sprintf("ok-%d", i+1)) {
+			t.Fatalf("result[%d] = %+v, want live ok-%d", i, results[i], i+1)
 		}
 	}
 }
 
-func TestRunOrderBatchesDoesNotResubmitKnownClosedToken(t *testing.T) {
+func TestRunOrderBatchesMarksClosedTokenInEveryBatch(t *testing.T) {
 	const tokenID = "111"
 	args := make([]types.OrderArgs, 20)
 	typesList := make([]types.OrderType, 20)
@@ -219,9 +225,9 @@ func TestRunOrderBatchesDoesNotResubmitKnownClosedToken(t *testing.T) {
 		args[i].TokenID = tokenID
 		typesList[i] = types.OrderTypeGTC
 	}
-	calls := 0
+	var calls atomic.Int32
 	results, err := runOrderBatches(args, typesList, 15, func(batch []types.OrderArgs, _ []types.OrderType, _ ...bool) ([]types.OrderPostResponse, error) {
-		calls++
+		calls.Add(1)
 		return resolveV2BatchAttempt(batch, typesList[:len(batch)], func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
 			return nil, fakeBadOrderbookErr(tokenID)
 		})
@@ -229,8 +235,9 @@ func TestRunOrderBatchesDoesNotResubmitKnownClosedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runOrderBatches: %v", err)
 	}
-	if calls != 1 {
-		t.Fatalf("post called %d times, want one request for known closed token", calls)
+	// 子批并发提交，无法用前一批的结果拦截后一批；两批各自把已关闭市场标为 market_closed。
+	if calls.Load() != 2 {
+		t.Fatalf("post called %d times, want both concurrent batches submitted", calls.Load())
 	}
 	for i, result := range results {
 		if result.Status != OrderMarketClosedStatus {

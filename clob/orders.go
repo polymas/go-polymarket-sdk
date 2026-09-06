@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
@@ -189,10 +190,17 @@ func allOrderResponsesAccepted(responses []types.OrderPostResponse) bool {
 	return true
 }
 
-// runOrderBatches 把逻辑批次切成最多 maxBatchSize 的 HTTP 子批。一个子批
-// 失败后立即停止：之前子批的结果原样保留，之后订单明确为
-// not_submitted。已确认关闭的 token 在后续子批直接回填 market_closed，
-// 不会再次请求 CLOB。
+// runOrderBatches 把逻辑批次切成最多 maxBatchSize 的 HTTP 子批并**并发**提交。
+//
+// 语义：
+//   - results 恒与 orderArgsList 等长同序；每个子批只回填自己的位置。
+//   - 子批之间互不影响：一个子批失败不会阻止其它子批提交，失败子批的结果
+//     由 postFn 给出（unknown / not_submitted / market_closed），错误按子批
+//     编号用 errors.Join 汇总返回。
+//   - 因为是并发发出，CLOB 收到各子批的先后顺序不保证与 orderArgsList 一致；
+//     跨子批有严格先后依赖的调用方应自行拆成多次调用。
+//
+// 单子批时不起 goroutine，直接内联调用。
 func runOrderBatches(
 	orderArgsList []types.OrderArgs,
 	orderTypes []types.OrderType,
@@ -201,67 +209,67 @@ func runOrderBatches(
 ) ([]types.OrderPostResponse, error) {
 	allResults := makeBatchStatusResults(len(orderArgsList), OrderNotSubmittedStatus, "order was not attempted")
 	totalBatches := (len(orderArgsList) + maxBatchSize - 1) / maxBatchSize
-	closedTokens := make(map[string]struct{})
 
-	for i := 0; i < len(orderArgsList); i += maxBatchSize {
-		end := i + maxBatchSize
-		if end > len(orderArgsList) {
-			end = len(orderArgsList)
-		}
+	type batchOutcome struct {
+		start, end int
+		results    []types.OrderPostResponse
+		err        error
+		duration   time.Duration
+	}
+	outcomes := make([]batchOutcome, totalBatches)
 
-		batchNum := (i / maxBatchSize) + 1
-		batchOrderArgs := make([]types.OrderArgs, 0, end-i)
-		batchOrderTypes := make([]types.OrderType, 0, end-i)
-		batchIndexes := make([]int, 0, end-i)
-		for idx := i; idx < end; idx++ {
-			if _, closed := closedTokens[orderArgsList[idx].TokenID]; closed {
-				allResults[idx] = marketClosedOrderResult(orderArgsList[idx].TokenID)
-				continue
-			}
-			batchOrderArgs = append(batchOrderArgs, orderArgsList[idx])
-			batchOrderTypes = append(batchOrderTypes, orderTypes[idx])
-			batchIndexes = append(batchIndexes, idx)
-		}
-		if len(batchOrderArgs) == 0 {
-			continue
-		}
-
-		internal.LogDebug("提交订单批次 %d/%d (原始订单 %d-%d，实际提交 %d 笔)", batchNum, totalBatches, i+1, end, len(batchOrderArgs))
-		batchStart := time.Now()
-
-		batchResults, err := postFn(batchOrderArgs, batchOrderTypes)
-		batchDuration := time.Since(batchStart)
-		if len(batchResults) != len(batchOrderArgs) {
+	runOne := func(batchNum, start, end int) batchOutcome {
+		batchArgs := orderArgsList[start:end]
+		batchTypes := orderTypes[start:end]
+		internal.LogDebug("提交订单批次 %d/%d (订单 %d-%d，%d 笔)", batchNum, totalBatches, start+1, end, len(batchArgs))
+		began := time.Now()
+		results, err := postFn(batchArgs, batchTypes)
+		duration := time.Since(began)
+		if len(results) != len(batchArgs) {
 			var alignErr error
-			batchResults, alignErr = normalizeV2BatchResponses(batchResults, len(batchOrderArgs))
+			results, alignErr = normalizeV2BatchResponses(results, len(batchArgs))
 			if err == nil {
 				err = alignErr
 			}
 		}
-		for j, result := range batchResults {
-			if j >= len(batchIndexes) {
-				break
-			}
-			origIdx := batchIndexes[j]
-			allResults[origIdx] = result
-			if result.Status == OrderMarketClosedStatus {
-				closedTokens[orderArgsList[origIdx].TokenID] = struct{}{}
-			}
-		}
-
 		if err != nil {
-			internal.LogError("批次 %d/%d (订单 %d-%d) 提交失败 (耗时: %v): %v", batchNum, totalBatches, i+1, end, batchDuration, err)
-			return allResults, fmt.Errorf("批次 %d/%d（原始订单 %d-%d）提交失败: %w", batchNum, totalBatches, i+1, end, err)
-		}
-
-		if batchDuration > 5*time.Second {
-			internal.LogWarn("批次 %d/%d 耗时过长: %v，可能发生阻塞", batchNum, totalBatches, batchDuration)
+			internal.LogError("批次 %d/%d (订单 %d-%d) 提交失败 (耗时: %v): %v", batchNum, totalBatches, start+1, end, duration, err)
+			err = fmt.Errorf("批次 %d/%d（原始订单 %d-%d）提交失败: %w", batchNum, totalBatches, start+1, end, err)
+		} else if duration > 5*time.Second {
+			internal.LogWarn("批次 %d/%d 耗时过长: %v，可能发生阻塞", batchNum, totalBatches, duration)
 		} else {
-			internal.LogDebug("批次 %d/%d 完成 (耗时: %v)", batchNum, totalBatches, batchDuration)
+			internal.LogDebug("批次 %d/%d 完成 (耗时: %v)", batchNum, totalBatches, duration)
 		}
+		return batchOutcome{start: start, end: end, results: results, err: err, duration: duration}
 	}
 
-	return allResults, nil
+	if totalBatches == 1 {
+		outcomes[0] = runOne(1, 0, len(orderArgsList))
+	} else {
+		var wg sync.WaitGroup
+		for b := 0; b < totalBatches; b++ {
+			start := b * maxBatchSize
+			end := start + maxBatchSize
+			if end > len(orderArgsList) {
+				end = len(orderArgsList)
+			}
+			wg.Add(1)
+			go func(b, start, end int) {
+				defer wg.Done()
+				outcomes[b] = runOne(b+1, start, end)
+			}(b, start, end)
+		}
+		wg.Wait()
+	}
+
+	errs := make([]error, 0, totalBatches)
+	for _, outcome := range outcomes {
+		copy(allResults[outcome.start:outcome.end], outcome.results)
+		if outcome.err != nil {
+			errs = append(errs, outcome.err)
+		}
+	}
+	return allResults, errors.Join(errs...)
 }
 
 // PostOrder 提交单个订单
