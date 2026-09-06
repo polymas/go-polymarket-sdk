@@ -133,12 +133,31 @@ func getOrCreateClient(baseURL string) *httpClient {
 		return client
 	}
 	transport := &http.Transport{
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-		Proxy:                 http.ProxyFromEnvironment,
-		MaxConnsPerHost:       10,
-		MaxIdleConnsPerHost:   5,
-		MaxIdleConns:          50,
-		IdleConnTimeout:       30 * time.Second,
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		// Go silently disables automatic HTTP/2 whenever TLSClientConfig or
+		// DialContext is customised. Without this flag every Polymarket host
+		// (all behind Cloudflare, all h2-capable) is served over HTTP/1.1,
+		// where one connection carries one in-flight request and
+		// MaxConnsPerHost becomes the hard concurrency ceiling. With h2 a
+		// single connection multiplexes ~100+ concurrent streams.
+		ForceAttemptHTTP2: true,
+		HTTP2: &http.HTTP2Config{
+			// A long-lived h2 connection that dies silently (NAT reset,
+			// proxy drop) would stall every multiplexed request until
+			// ResponseHeaderTimeout. Ping the peer when the connection has
+			// been quiet so a dead one is torn down and redialled promptly.
+			SendPingTimeout: 30 * time.Second,
+			PingTimeout:     10 * time.Second,
+		},
+		Proxy: http.ProxyFromEnvironment,
+		// With h2 negotiated these limits count connections, not requests,
+		// so they rarely bind. They remain the burst ceiling if a hop falls
+		// back to HTTP/1.1; keep the idle pool the same size so a burst's
+		// connections are reused rather than redialled next time.
+		MaxConnsPerHost:       50,
+		MaxIdleConnsPerHost:   50,
+		MaxIdleConns:          200,
+		IdleConnTimeout:       90 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
