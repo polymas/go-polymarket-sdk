@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"regexp"
 )
 
 // BuildHMACSignature 使用密钥对载荷进行签名创建HMAC签名
@@ -58,6 +57,13 @@ func BuildHMACSignature(secret, timestamp, method, requestPath string, body inte
 		//   - If body is a map, this will cause issues - should use struct instead
 
 		switch v := body.(type) {
+		case FormattedJSON:
+			// 调用方已用 MarshalPythonJSON 产出最终字节：请求体与签名共用同一份，
+			// 这里既不重新 marshal 也不再跑正则。
+			message += string(v)
+			h := hmac.New(sha256.New, secretBytes)
+			h.Write([]byte(message))
+			return base64.URLEncoding.EncodeToString(h.Sum(nil)), nil
 		case string:
 			// Body is already a JSON string (from LocalSigner.SignRequest)
 			// This preserves the field order from the original struct
@@ -84,14 +90,7 @@ func BuildHMACSignature(secret, timestamp, method, requestPath string, body inte
 		// We need to add spaces to match Python's format exactly
 		// Add space after colon: "key":"value" -> "key": "value"
 		// Use regex to replace ": with ":  (one space) only if not already followed by space
-		bodyJSONStr = regexp.MustCompile(`":(\S)`).ReplaceAllString(bodyJSONStr, `": $1`)
-
-		// Add space after comma: "a","b" -> "a", "b"
-		// Match comma followed by quote (no space) and add space
-		bodyJSONStr = regexp.MustCompile(`,(")`).ReplaceAllString(bodyJSONStr, `, $1`)
-
-		// Also handle comma followed by { or [ (for nested structures)
-		bodyJSONStr = regexp.MustCompile(`,(\{|\[)`).ReplaceAllString(bodyJSONStr, `, $1`)
+		bodyJSONStr = FormatPythonJSON(bodyJSONStr)
 
 		message += bodyJSONStr
 	}

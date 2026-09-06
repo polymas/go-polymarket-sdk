@@ -378,22 +378,18 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmountsContext(ctx context.Co
 		return nil, newBatchNotSubmittedError("no valid orders to post")
 	}
 
-	bodyJSON, err := json.Marshal(requestBody)
+	// 请求体与 HMAC 共用同一份 Python 风格字节：只 marshal 一次，正则包级预编译。
+	formattedBody, err := signing.MarshalPythonJSON(requestBody)
 	if err != nil {
 		return nil, newBatchNotSubmittedError("failed to marshal request body: %w", err)
 	}
-	// 匹配 Python json.dumps 的空格格式（HMAC 签名要求同一字节序列）
-	bodyJSONStr := string(bodyJSON)
-	bodyJSONStr = regexp.MustCompile(`":(\S)`).ReplaceAllString(bodyJSONStr, `": $1`)
-	bodyJSONStr = regexp.MustCompile(`,(")`).ReplaceAllString(bodyJSONStr, `, $1`)
-	bodyJSONStr = regexp.MustCompile(`,(\{|\[)`).ReplaceAllString(bodyJSONStr, `, $1`)
-	bodyJSON = []byte(bodyJSONStr)
+	bodyJSON := []byte(formattedBody)
 
 	requestArgs := &types.RequestArgs{
 		Method:      "POST",
 		RequestPath: internal.PostOrders,
 	}
-	headers, err := internal.CreateLevel2HeadersWithBody(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, requestBody)
+	headers, err := internal.CreateLevel2HeadersWithBody(c.baseClient.web3Client.GetSigner(), c.baseClient.deriveCreds, requestArgs, formattedBody)
 	if err != nil {
 		return nil, newBatchNotSubmittedError("failed to create headers: %w", err)
 	}

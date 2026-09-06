@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strconv"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
 	http "github.com/polymas/go-polymarket-sdk/internal/transport"
+	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -172,9 +172,7 @@ func (c *accountClientImpl) DropNotificationsContext(ctx context.Context, notifi
 
 	// Convert compact JSON to Python's json.dumps format (with spaces)
 	bodyJSONStr := string(bodyJSON)
-	bodyJSONStr = regexp.MustCompile(`":(\S)`).ReplaceAllString(bodyJSONStr, `": $1`)
-	bodyJSONStr = regexp.MustCompile(`,(")`).ReplaceAllString(bodyJSONStr, `, $1`)
-	bodyJSONStr = regexp.MustCompile(`,(\{|\[)`).ReplaceAllString(bodyJSONStr, `, $1`)
+	bodyJSONStr = signing.FormatPythonJSON(bodyJSONStr)
 	bodyJSON = []byte(bodyJSONStr)
 
 	// Create request args for signing

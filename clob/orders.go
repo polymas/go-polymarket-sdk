@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/polymas/go-polymarket-sdk/internal"
 	http "github.com/polymas/go-polymarket-sdk/internal/transport"
+	"github.com/polymas/go-polymarket-sdk/signing"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -338,9 +338,7 @@ func (c *orderClientImpl) CancelOrdersContext(ctx context.Context, orderIDs []ty
 	// Convert compact JSON to Python's json.dumps format (with spaces)
 	// This matches the format used in HMAC signature calculation
 	bodyJSONStr := string(bodyJSON)
-	bodyJSONStr = regexp.MustCompile(`":(\S)`).ReplaceAllString(bodyJSONStr, `": $1`)
-	bodyJSONStr = regexp.MustCompile(`,(")`).ReplaceAllString(bodyJSONStr, `, $1`)
-	bodyJSONStr = regexp.MustCompile(`,(\{|\[)`).ReplaceAllString(bodyJSONStr, `, $1`)
+	bodyJSONStr = signing.FormatPythonJSON(bodyJSONStr)
 	bodyJSON = []byte(bodyJSONStr)
 
 	// Use RequestBody to pass formatted JSON string to CreateLevel2Headers
@@ -452,9 +450,7 @@ func (c *orderClientImpl) CancelMarketOrdersByFilterContext(ctx context.Context,
 
 	// Convert compact JSON to Python's json.dumps format (with spaces)
 	bodyJSONStr := string(bodyJSON)
-	bodyJSONStr = regexp.MustCompile(`":(\S)`).ReplaceAllString(bodyJSONStr, `": $1`)
-	bodyJSONStr = regexp.MustCompile(`,(")`).ReplaceAllString(bodyJSONStr, `, $1`)
-	bodyJSONStr = regexp.MustCompile(`,(\{|\[)`).ReplaceAllString(bodyJSONStr, `, $1`)
+	bodyJSONStr = signing.FormatPythonJSON(bodyJSONStr)
 	bodyJSON = []byte(bodyJSONStr)
 
 	// Use RequestBody for signing
