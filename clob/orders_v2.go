@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
 	"github.com/polymas/go-polymarket-sdk/internal"
 	http "github.com/polymas/go-polymarket-sdk/internal/transport"
 	"github.com/polymas/go-polymarket-sdk/signing"
@@ -53,7 +54,29 @@ type orderRequestV2 struct {
 // dropOrderbookNotFoundRegex 匹配 CLOB v2 批量端点的顶层 400。实测中
 // CLOB 只报原始 HTTP 子批的第一个坏 token，并拒绝整批。
 var dropOrderbookNotFoundRegex = regexp.MustCompile(`orderbook\s+(\d+)\s+does\s+not\s+exist`)
-var topLevelHTTP4xxRegex = regexp.MustCompile(`^HTTP 4\d\d:`)
+
+// topLevelHTTP4xxRegex 只作兜底，匹配没有包装成 *sdkerrors.APIError 的历史
+// 错误串。这里不能用 ^ 锚定：APIError.Error() 的真实格式是
+// "POST clob /orders: HTTP 400: ..."，状态码前面还有 method/service/path。
+var topLevelHTTP4xxRegex = regexp.MustCompile(`\bHTTP 4\d\d\b`)
+
+// isTopLevelHTTP4xx 报告 err 是否为交易所对整个 HTTP 请求的明确拒绝。
+// 4xx 意味着请求确实到达了服务端并被拒，不存在"可能已成交"的歧义，
+// 因此调用方可以安全地把这批订单标成 not_submitted 而不是 unknown。
+func isTopLevelHTTP4xx(err error) bool {
+	if err == nil {
+		return false
+	}
+	// 歧义错误（超时/取消）即使包着一个 4xx cause 也仍然是"结果未知"。
+	if sdkerrors.IsAmbiguousOutcome(err) {
+		return false
+	}
+	var apiErr *sdkerrors.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status >= 400 && apiErr.Status < 500
+	}
+	return topLevelHTTP4xxRegex.MatchString(err.Error())
+}
 
 const (
 	// OrderMarketClosedStatus 是已确认的关闭市场终态，不代表交易所已接单。
@@ -187,7 +210,7 @@ func resolveV2BatchAttempt(
 	status := OrderUnknownStatus
 	message := "batch submission outcome is unknown: " + err.Error()
 	var notSubmittedErr *batchNotSubmittedError
-	if errors.As(err, &notSubmittedErr) || topLevelHTTP4xxRegex.MatchString(err.Error()) {
+	if errors.As(err, &notSubmittedErr) || isTopLevelHTTP4xx(err) {
 		status = OrderNotSubmittedStatus
 		message = err.Error()
 	}
@@ -399,7 +422,7 @@ func (c *orderClientImpl) postOrdersBatchV2OnceWithAmountsContext(ctx context.Co
 		http.WithHeaders(headers), http.WithService("clob"), http.WithAmbiguousOnTimeout("post orders"))
 	postDuration := time.Since(postStart)
 	if err != nil {
-		if waitForResult && !topLevelHTTP4xxRegex.MatchString(err.Error()) {
+		if waitForResult && !isTopLevelHTTP4xx(err) {
 			if reconciled, complete := c.reconcileAmbiguousPostContext(
 				ctx, expectedOrderIDs, requestBody, batchStart, postDuration,
 			); len(reconciled) > 0 {

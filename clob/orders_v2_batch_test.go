@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	sdkerrors "github.com/polymas/go-polymarket-sdk/errors"
 	"github.com/polymas/go-polymarket-sdk/types"
 )
 
@@ -251,5 +252,58 @@ func TestExtractBadOrderbookTokensFromErr(t *testing.T) {
 	tokens := extractBadOrderbookTokensFromErr(err)
 	if len(tokens) != 2 || tokens[0] != "111" || tokens[1] != "222" {
 		t.Fatalf("tokens = %v", tokens)
+	}
+}
+
+func TestIsTopLevelHTTP4xx(t *testing.T) {
+	apiErr := &sdkerrors.APIError{
+		Service: "clob", Method: "POST", Path: "/orders",
+		Status: 400, Message: "invalid price 0.999 for tick size 0.01",
+	}
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		// 回归：APIError.Error() 的状态码前面还有 "POST clob /orders: "，
+		// 老的 ^HTTP 4\d\d: 锚定正则在这里必然失配，把明确拒绝错记成 unknown。
+		{"typed 4xx", apiErr, true},
+		{"typed 4xx wrapped", fmt.Errorf("post orders: %w", apiErr), true},
+		{"typed 5xx", &sdkerrors.APIError{Status: 503, Path: "/orders"}, false},
+		{"ambiguous wrapping 4xx", &sdkerrors.AmbiguousOutcomeError{
+			Operation: "post orders", Cause: apiErr,
+		}, false},
+		{"untyped string fallback", fmt.Errorf("POST clob /orders: HTTP 400: bad tick"), true},
+		{"plain transport error", fmt.Errorf("dial tcp: i/o timeout"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTopLevelHTTP4xx(tc.err); got != tc.want {
+				t.Fatalf("isTopLevelHTTP4xx(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveV2BatchAttemptTypedHTTP400 锁定端到端行为：CLOB 明确 400 拒绝时
+// 每单都是 not_submitted，而不是 unknown（后者会让上层发"可能已成交"告警）。
+func TestResolveV2BatchAttemptTypedHTTP400(t *testing.T) {
+	apiErr := &sdkerrors.APIError{
+		Service: "clob", Method: "POST", Path: "/orders",
+		Status: 400, Message: "invalid price",
+	}
+	args := []types.OrderArgs{{TokenID: "111"}, {TokenID: "222"}}
+	typesList := []types.OrderType{types.OrderTypeGTC, types.OrderTypeGTC}
+	results, err := resolveV2BatchAttempt(args, typesList, func([]types.OrderArgs, []types.OrderType) ([]types.OrderPostResponse, error) {
+		return nil, apiErr
+	})
+	if err == nil {
+		t.Fatal("want error surfaced to caller")
+	}
+	for i, result := range results {
+		if result.Status != OrderNotSubmittedStatus {
+			t.Fatalf("result[%d] = %+v, want not_submitted", i, result)
+		}
 	}
 }
